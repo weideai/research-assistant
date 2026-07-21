@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from app.ai_service import AIConfig, AIServiceError, list_models, organize_note, validate_api_url
+from app.ai_service import AIConfig, AIServiceError, chat_with_assistant, list_models, organize_note, validate_api_url
 
 
 class FakeResponse:
@@ -102,3 +102,35 @@ def test_private_and_unapproved_api_hosts_are_blocked(monkeypatch):
     assert validate_api_url("https://api.example.com/v1", allowed_hosts=("*.example.com",)) == "https://api.example.com/v1"
     with pytest.raises(AIServiceError, match="允许列表"):
         validate_api_url("https://other.example.net/v1", allowed_hosts=("api.example.com",))
+
+
+def test_official_web_chat_uses_responses_and_returns_real_citations(monkeypatch):
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        return FakeResponse({
+            "output": [{
+                "type": "message",
+                "content": [{
+                    "type": "output_text",
+                    "text": '{"reply":"Evidence summary","proposal":null}',
+                    "annotations": [{"type": "url_citation", "url": "https://example.org/paper", "title": "Paper"}],
+                }],
+            }],
+        })
+
+    monkeypatch.setattr("socket.getaddrinfo", lambda *args, **kwargs: [(2, 1, 6, "", ("104.18.7.192", 443))])
+    monkeypatch.setattr("app.ai_service._open_url", fake_urlopen)
+    result = chat_with_assistant(
+        [{"role": "user", "content": "Find evidence"}], "Return JSON",
+        AIConfig(api_url="https://api.openai.com/v1", api_key="test", model="test-model", enabled=True),
+        web_access=True,
+    )
+
+    assert captured["url"].endswith("/responses")
+    assert captured["payload"]["tools"] == [{"type": "web_search"}]
+    assert result["reply"] == "Evidence summary"
+    assert result["references"] == [{"title": "Paper", "url": "https://example.org/paper"}]
+    assert result["web_used"] is True

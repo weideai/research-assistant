@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}实验记录 · {{ record.experiment.title }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <a class="back-link" href="{{ url_for('main.experiment_detail', item_id=record.experiment_id) }}"><i data-lucide="arrow-left"></i> {{ record.experiment.title }}</a>
+    <h1>{{ record.record_date }} 实验记录</h1>
+    <p class="muted">创建于 {{ record.created_at.strftime('%Y-%m-%d %H:%M') }} · 更新于 {{ record.updated_at.strftime('%Y-%m-%d %H:%M') }}</p>
+  </div>
+  <span class="badge large result-{{ record.result }}">{{ record.result }}</span>
+</header>
+<div class="detail-layout record-detail-layout">
+  <div class="detail-main">
+    <section class="panel record-sheet">
+      <div class="panel-head"><div><p class="eyebrow">RECORD</p><h2>记录内容</h2></div></div>
+      <div class="record-view">
+        <div class="record-facts"><span><small>实验人员</small><b>{{ record.operator or '未填写' }}</b></span><span><small>记录日期</small><b>{{ record.record_date }}</b></span><span><small>实验结果</small><b>{{ record.result }}</b></span></div>
+        <div><small>实验条件</small><p>{{ record.conditions or '未填写' }}</p></div>
+        <div><small>实验过程</small><p>{{ record.content }}</p></div>
+        <div class="record-conclusion"><small>结论与备注</small><p>{{ record.remark or '未填写' }}</p></div>
+      </div>
+    </section>
+
+    <section class="panel attachment-panel">
+      <div class="panel-head">
+        <div><p class="eyebrow">RESULTS & DATA</p><h2>实验结果与数据</h2></div>
+        <div class="attachment-head-actions">
+          <span class="count-label">{{ record.attachments|length }} 个文件</span>
+          {% if config.ALLOW_OPEN_LOCAL_FOLDERS %}
+          <form method="post" action="{{ url_for('main.attachment_open_folder', record_id=record.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn ghost compact-btn" type="submit"><i data-lucide="folder-open"></i> 在资源管理器打开</button>
+          </form>
+          {% endif %}
+        </div>
+      </div>
+      <form method="post" action="{{ url_for('main.attachment_upload', record_id=record.id) }}" enctype="multipart/form-data" class="attachment-upload-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label class="attachment-category-select">文件分类
+          <select name="attachment_category">
+            <option>自动分类</option>
+            {% for category in attachment_categories %}<option>{{ category }}</option>{% endfor %}
+          </select>
+          <small>自动分类会按文件格式识别图片、数据、文档和压缩包</small>
+        </label>
+        <div class="attachment-pickers">
+          <label class="attachment-picker"><span><i data-lucide="files"></i><b>添加文件或图片</b></span><input type="file" name="files" multiple><small>可一次选择多个任意格式文件</small></label>
+          <label class="attachment-picker folder-picker"><span><i data-lucide="folder-up"></i><b>添加整个文件夹</b></span><input type="file" name="files" multiple webkitdirectory directory><small>保留文件夹层级和相对路径</small></label>
+        </div>
+        <div class="attachment-upload-actions"><button class="btn primary"><i data-lucide="upload"></i> 导入所选内容</button></div>
+      </form>
+      <div class="attachment-storage-note"><i data-lucide="hard-drive"></i><span><b>本地原始文件，不加密、不限大小</b><small title="{{ attachment_storage_path }}">{{ attachment_storage_path }}</small></span></div>
+      <div class="attachment-groups">
+        {% for category, attachments in attachment_groups.items() %}
+        <section class="attachment-group">
+          <div class="attachment-group-head"><b>{{ category }}</b><span>{{ attachments|length }}</span></div>
+          <div class="attachment-list">
+            {% for attachment in attachments %}
+            <article class="attachment-row">
+              {% if attachment.is_previewable_image %}
+              <a class="attachment-thumb" href="{{ url_for('main.attachment_download', item_id=attachment.id) }}" title="下载 {{ attachment.original_name }}"><img src="{{ url_for('main.attachment_preview', item_id=attachment.id) }}" alt="{{ attachment.original_name }}" loading="lazy"></a>
+              {% else %}
+              <span class="attachment-symbol"><i data-lucide="{{ 'table-2' if category == '数据' else ('file-archive' if category == '压缩包' else ('file-text' if category == '文档' else 'file')) }}"></i></span>
+              {% endif %}
+              <div class="attachment-meta">
+                <b>{{ attachment.original_name }}</b>
+                <small class="attachment-path">{{ attachment.relative_path }}</small>
+                <small>{{ attachment.size_label }} · {{ attachment.mime_type }}</small>
+              </div>
+              <div class="row-actions">
+                <a class="icon-btn" href="{{ url_for('main.attachment_download', item_id=attachment.id) }}" title="下载文件"><i data-lucide="download"></i></a>
+                <form method="post" action="{{ url_for('main.attachment_delete', item_id=attachment.id) }}" data-confirm="确定删除这个文件？">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button class="icon-btn danger" title="删除文件"><i data-lucide="trash-2"></i></button>
+                </form>
+              </div>
+            </article>
+            {% endfor %}
+          </div>
+        </section>
+        {% else %}
+        <div class="empty compact-empty"><i data-lucide="folder-open"></i><p>尚无实验结果或数据文件</p></div>
+        {% endfor %}
+      </div>
+    </section>
+  </div>
+
+  <aside>
+    <section class="panel sticky-panel record-edit-panel">
+      <div class="panel-head"><div><p class="eyebrow">EDIT</p><h2>编辑记录</h2></div></div>
+      <form method="post" class="stack-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-grid"><label>日期<input type="date" name="record_date" value="{{ record.record_date }}"></label><label>实验人员<input name="operator" value="{{ record.operator }}"></label></div>
+        <label>结果<select name="result">{% for value in ['待确认','成功','失败'] %}<option {{ 'selected' if record.result == value }}>{{ value }}</option>{% endfor %}</select></label>
+        <label>实验条件<textarea name="conditions" rows="4">{{ record.conditions }}</textarea></label>
+        <label>实验过程<textarea name="content" rows="8" required>{{ record.content }}</textarea></label>
+        <label>结论与备注<textarea name="remark" rows="4">{{ record.remark }}</textarea></label>
+        <button class="btn primary full"><i data-lucide="save"></i> 保存修改</button>
+      </form>
+    </section>
+  </aside>
+</div>
+{% endblock %}

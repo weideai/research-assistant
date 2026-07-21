@@ -94,6 +94,59 @@ class ApiSetting(TimestampMixin, db.Model):
         return decrypt_secret(self.encrypted_api_key)
 
 
+class AppearanceSetting(TimestampMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, unique=True, index=True)
+    theme = db.Column(db.String(20), nullable=False, default="research")
+    color_mode = db.Column(db.String(10), nullable=False, default="light")
+    background_filename = db.Column(db.String(120), default="")
+
+
+class AIConversation(TimestampMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    title = db.Column(db.String(160), nullable=False, default="新对话")
+    page_type = db.Column(db.String(30), default="")
+    page_id = db.Column(db.Integer)
+    messages = db.relationship(
+        "AIMessage", backref="conversation", cascade="all, delete-orphan",
+        order_by="AIMessage.created_at",
+    )
+
+
+class AIMessage(TimestampMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    conversation_id = db.Column(db.Integer, db.ForeignKey("ai_conversation.id"), nullable=False, index=True)
+    role = db.Column(db.String(20), nullable=False)
+    content = db.Column(db.Text, nullable=False, default="")
+    references_json = db.Column(db.Text, nullable=False, default="[]")
+    proposal_json = db.Column(db.Text, nullable=False, default="")
+    before_json = db.Column(db.Text, nullable=False, default="")
+    applied_at = db.Column(db.DateTime)
+    attachments = db.relationship(
+        "AIChatAttachment", backref="message", cascade="all, delete-orphan",
+        order_by="AIChatAttachment.created_at",
+    )
+
+
+class AIChatAttachment(TimestampMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    message_id = db.Column(db.Integer, db.ForeignKey("ai_message.id"), nullable=False, index=True)
+    original_name = db.Column(db.String(255), nullable=False)
+    stored_path = db.Column(db.String(1000), nullable=False, unique=True)
+    size_bytes = db.Column(db.BigInteger, nullable=False, default=0)
+    mime_type = db.Column(db.String(160), nullable=False, default="application/octet-stream")
+    text_excerpt = db.Column(db.Text, nullable=False, default="")
+
+    @property
+    def size_label(self):
+        if self.size_bytes >= 1024 * 1024:
+            return f"{self.size_bytes / (1024 * 1024):.1f} MB"
+        if self.size_bytes >= 1024:
+            return f"{self.size_bytes / 1024:.1f} KB"
+        return f"{self.size_bytes} B"
+
+
 class Task(TimestampMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
@@ -124,7 +177,10 @@ class ExperimentStep(TimestampMixin, db.Model):
     experiment_id = db.Column(db.Integer, db.ForeignKey("experiment.id"), nullable=False, index=True)
     position = db.Column(db.Integer, nullable=False, default=1)
     title = db.Column(db.String(160), nullable=False)
+    description = db.Column(db.Text, default="")
+    operator = db.Column(db.String(80), default="")
     planned_date = db.Column(db.Date)
+    completed_date = db.Column(db.Date)
     is_done = db.Column(db.Boolean, nullable=False, default=False)
 
 
@@ -137,6 +193,31 @@ class ExperimentRecord(TimestampMixin, db.Model):
     content = db.Column(db.Text, nullable=False)
     result = db.Column(db.String(20), nullable=False, default="待确认")
     remark = db.Column(db.Text, default="")
+    attachments = db.relationship(
+        "ExperimentAttachment", backref="record", cascade="all, delete-orphan",
+        order_by="ExperimentAttachment.created_at.desc()",
+    )
+
+
+class ExperimentAttachment(TimestampMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    experiment_id = db.Column(db.Integer, db.ForeignKey("experiment.id"), nullable=False, index=True)
+    record_id = db.Column(db.Integer, db.ForeignKey("experiment_record.id"), nullable=False, index=True)
+    original_name = db.Column(db.String(255), nullable=False)
+    relative_path = db.Column(db.String(1000), nullable=False)
+    stored_path = db.Column(db.String(1000), nullable=False, unique=True)
+    size_bytes = db.Column(db.BigInteger, nullable=False, default=0)
+    mime_type = db.Column(db.String(160), nullable=False, default="application/octet-stream")
+    category = db.Column(db.String(20), nullable=False, default="其他")
+    is_previewable_image = db.Column(db.Boolean, nullable=False, default=False)
+
+    @property
+    def size_label(self):
+        if self.size_bytes >= 1024 * 1024:
+            return f"{self.size_bytes / (1024 * 1024):.1f} MB"
+        if self.size_bytes >= 1024:
+            return f"{self.size_bytes / 1024:.1f} KB"
+        return f"{self.size_bytes} B"
 
 
 class Sample(TimestampMixin, db.Model):

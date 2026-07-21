@@ -4,7 +4,7 @@ from app import create_app, db
 
 
 @pytest.fixture()
-def app():
+def app(tmp_path):
     app = create_app({
         "TESTING": True,
         "WTF_CSRF_ENABLED": False,
@@ -17,6 +17,12 @@ def app():
         "EXPOSE_DEV_EMAIL_LINKS": True,
         "ALLOW_PRIVATE_API_URLS": True,
         "AI_SETTINGS_ADMIN_ONLY": False,
+        "MAX_CONTENT_LENGTH": None,
+        "MAX_ATTACHMENT_BYTES": None,
+        "ALLOW_OPEN_LOCAL_FOLDERS": False,
+        "APPEARANCE_UPLOAD_DIR": str(tmp_path / "backgrounds"),
+        "ATTACHMENT_UPLOAD_DIR": str(tmp_path / "experiment-files"),
+        "AI_UPLOAD_DIR": str(tmp_path / "assistant-files"),
     })
     with app.app_context():
         db.create_all()

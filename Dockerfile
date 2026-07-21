@@ -11,7 +11,7 @@ COPY requirements.txt requirements-prod.txt ./
 RUN python -m pip install --upgrade pip && python -m pip install -r requirements-prod.txt
 
 COPY . .
-RUN chmod +x /app/docker-entrypoint.sh /app/scripts/backup.sh && mkdir -p /app/instance && chown -R research:research /app
+RUN chmod +x /app/docker-entrypoint.sh /app/scripts/backup.sh && mkdir -p /app/instance/uploads/backgrounds && chown -R research:research /app
 USER research
 
 EXPOSE 8000

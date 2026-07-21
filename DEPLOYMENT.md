@@ -11,7 +11,7 @@
 - 管理员后台、角色、账户停用、会话撤销和审计日志
 - API Key 独立加密密钥和 API URL 内网访问防护
 - Docker、Gunicorn、Redis、Caddy 和自动 HTTPS 配置
-- 健康检查、数据库备份脚本和生产环境模板
+- 健康检查、数据库与用户背景备份脚本和生产环境模板
 
 你需要准备：
 
@@ -216,6 +216,16 @@ AI_ALLOWED_HOSTS=api.openai.com,api.example.com
 
 不要把 `ALLOW_PRIVATE_API_URLS` 改成 `true`，除非服务器位于受控内网且你明确理解 SSRF 风险。
 
+实验文件上传限制可在 `.env.production` 调整：
+
+```dotenv
+MAX_UPLOAD_REQUEST_MB=0
+MAX_ATTACHMENT_MB=0
+ALLOW_OPEN_LOCAL_FOLDERS=false
+```
+
+任意格式文件都保存在非静态上传目录并强制下载；只有经过文件头识别的栅格图片允许页面预览。
+
 ## 9. 构建并启动
 
 所有 Compose 命令都要带生产环境文件：
@@ -293,7 +303,7 @@ crontab -e
 0 3 * * * cd /opt/research-assistant && ./scripts/backup.sh >> /var/log/research-backup.log 2>&1
 ```
 
-脚本保留最近 30 天备份。还应定期将备份同步到另一台服务器或加密对象存储。
+脚本会同时生成 PostgreSQL 数据库备份和用户背景文件备份，并保留最近 30 天。还应定期将两类备份同步到另一台服务器或加密对象存储。
 
 恢复前先停止 Web 服务：
 
@@ -301,6 +311,8 @@ crontab -e
 docker compose --env-file .env.production stop web
 gunzip -c backups/research-YYYYMMDD-HHMMSS.sql.gz | docker compose --env-file .env.production exec -T db psql -U research -d research
 docker compose --env-file .env.production start web
+docker compose --env-file .env.production exec -T web tar -xzf - -C /app/instance < backups/research-uploads-YYYYMMDD-HHMMSS.tar.gz
+docker compose --env-file .env.production restart web
 ```
 
 正式恢复前应先在测试数据库演练。

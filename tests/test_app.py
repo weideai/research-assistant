@@ -1,5 +1,5 @@
 from app import _load_or_create_secret_key, db
-from app.models import ApiSetting, Experiment, ExperimentRecord, Sample, Task, User
+from app.models import ApiSetting, Experiment, ExperimentRecord, ExperimentStep, Sample, Task, User
 
 
 def test_register_login_logout(client, auth):
@@ -45,16 +45,92 @@ def test_experiment_steps_and_records(client, auth, app):
     with app.app_context():
         experiment_id = Experiment.query.one().id
 
-    client.post(f"/experiments/{experiment_id}/steps", data={"title": "细胞铺板", "planned_date": "2026-07-20"})
+    client.post(f"/experiments/{experiment_id}/steps", data={
+        "title": "细胞铺板", "planned_date": "2026-07-20", "operator": "张同学",
+        "description": "每孔接种 2×10^5 个细胞",
+    })
     client.post(f"/experiments/{experiment_id}/records", data={
         "record_date": "2026-07-20", "operator": "研究员", "conditions": "5 μM, 24h",
         "content": "完成处理并收样。", "result": "成功", "remark": "重复一次。"
     })
     response = client.get(f"/experiments/{experiment_id}")
     assert "细胞铺板".encode() in response.data
+    assert "张同学".encode() in response.data
+    assert "每孔接种".encode() in response.data
     assert "完成处理并收样".encode() in response.data
     with app.app_context():
         assert ExperimentRecord.query.count() == 1
+
+
+def test_step_and_record_can_be_viewed_edited_and_exported(client, auth, app):
+    auth.register()
+    client.post("/experiments", data={
+        "title": "药物处理实验", "code": "EXP-EDIT-001", "status": "进行中",
+        "owner": "李同学", "objective": "验证药物响应", "start_date": "2026-07-20",
+    })
+    with app.app_context():
+        experiment_id = Experiment.query.one().id
+
+    client.post(f"/experiments/{experiment_id}/steps", data={
+        "title": "加药", "operator": "李同学", "planned_date": "2026-07-21",
+        "description": "终浓度 5 μM",
+    })
+    client.post(f"/experiments/{experiment_id}/records", data={
+        "record_date": "2026-07-21", "operator": "李同学", "conditions": "37°C",
+        "content": "完成加药并观察细胞。", "result": "待确认", "remark": "24h 后复查。",
+    })
+    with app.app_context():
+        step_id = ExperimentStep.query.one().id
+        record_id = ExperimentRecord.query.one().id
+
+    response = client.post(f"/steps/{step_id}/edit", data={
+        "title": "加药处理", "operator": "王同学", "planned_date": "2026-07-22",
+        "description": "终浓度调整为 10 μM",
+    }, follow_redirects=True)
+    assert "加药处理".encode() in response.data
+    assert "10 μM".encode() in response.data
+
+    client.post(f"/steps/{step_id}/toggle")
+    with app.app_context():
+        step = db.session.get(ExperimentStep, step_id)
+        assert step.is_done is True
+        assert step.completed_date is not None
+
+    response = client.get(f"/records/{record_id}")
+    assert response.status_code == 200
+    assert "完成加药并观察细胞".encode() in response.data
+    response = client.post(f"/records/{record_id}", data={
+        "record_date": "2026-07-22", "operator": "王同学", "conditions": "5% CO2",
+        "content": "复查后细胞状态稳定。", "result": "成功", "remark": "进入下一步骤。",
+    }, follow_redirects=True)
+    assert "复查后细胞状态稳定".encode() in response.data
+    assert "进入下一步骤".encode() in response.data
+
+    export = client.get(f"/experiments/{experiment_id}/export.md")
+    assert export.status_code == 200
+    assert export.mimetype == "text/markdown"
+    assert "EXP-EDIT-001".encode() in export.data
+    assert "加药处理".encode() in export.data
+    assert "复查后细胞状态稳定".encode() in export.data
+    assert "filename*=UTF-8''" in export.headers["Content-Disposition"]
+
+
+def test_experiment_children_and_export_are_scoped_to_owner(client, auth, app):
+    auth.register(email="owner@example.com")
+    client.post("/experiments", data={"title": "私有实验", "status": "进行中"})
+    with app.app_context():
+        experiment = Experiment.query.one()
+        step = ExperimentStep(experiment_id=experiment.id, title="私有步骤")
+        record = ExperimentRecord(experiment_id=experiment.id, content="私有记录")
+        db.session.add_all([step, record])
+        db.session.commit()
+        experiment_id, step_id, record_id = experiment.id, step.id, record.id
+
+    auth.logout()
+    auth.register(email="other@example.com")
+    assert client.get(f"/steps/{step_id}/edit").status_code == 404
+    assert client.get(f"/records/{record_id}").status_code == 404
+    assert client.get(f"/experiments/{experiment_id}/export.md").status_code == 404
 
 
 def test_user_cannot_access_another_users_data(client, auth, app):

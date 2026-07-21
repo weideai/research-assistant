@@ -1,8 +1,17 @@
 import csv
 import io
+import json
+import mimetypes
+import os
+import re
+import shutil
+import zipfile
 from datetime import date, datetime, timedelta
+from pathlib import Path
+from urllib.parse import quote
+from uuid import uuid4
 
-from flask import Blueprint, Response, abort, current_app, flash, redirect, render_template, request, url_for
+from flask import Blueprint, Response, abort, current_app, flash, redirect, render_template, request, send_file, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import func, or_
 
@@ -10,22 +19,244 @@ from . import db
 from .ai_service import (
     AIConfig,
     AIServiceError,
+    chat_with_assistant,
     config_from_environment,
     list_models as fetch_models,
     organize_note,
     validate_api_url,
 )
-from .models import ApiSetting, Experiment, ExperimentRecord, ExperimentStep, Paper, ReviewerComment, Sample, Task
+from .models import (
+    AIChatAttachment, AIConversation, AIMessage, AppearanceSetting, ApiSetting, Experiment,
+    ExperimentAttachment, ExperimentRecord, ExperimentStep, Paper, ReviewerComment, Sample, Task, utcnow,
+)
 from .secrets import SecretDecryptionError
 
 
 bp = Blueprint("main", __name__)
+APPEARANCE_THEMES = {"research", "tech", "minimal", "cute"}
+MAX_BACKGROUND_BYTES = 5 * 1024 * 1024
+DATA_EXTENSIONS = {".csv", ".tsv", ".xls", ".xlsx", ".json", ".xml", ".txt", ".dat", ".sav", ".rds"}
+DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".ppt", ".pptx", ".md", ".rtf"}
+ARCHIVE_EXTENSIONS = {".zip", ".rar", ".7z", ".gz", ".tar", ".bz2", ".xz"}
+ATTACHMENT_MANUAL_CATEGORIES = ("原始数据", "结果图片", "分析结果", "实验文档", "其他")
+ASSISTANT_TEXT_EXTENSIONS = {
+    ".txt", ".md", ".csv", ".tsv", ".json", ".xml", ".yaml", ".yml", ".log", ".py", ".r", ".html", ".css", ".js",
+}
+EXPERIMENT_AI_FIELDS = {"title", "code", "objective", "owner", "status", "start_date", "end_date"}
+RECORD_AI_FIELDS = {"record_date", "operator", "conditions", "content", "result", "remark"}
+AI_FIELD_LABELS = {
+    "title": "实验名称", "code": "实验编号", "objective": "实验目的", "owner": "负责人",
+    "status": "状态", "start_date": "开始日期", "end_date": "结束日期", "record_date": "记录日期",
+    "operator": "实验人员", "conditions": "实验条件", "content": "实验过程", "result": "实验结果",
+    "remark": "结论与备注", "steps": "新增实验步骤",
+}
+AI_FIELD_LIMITS = {"title": 160, "code": 60, "owner": 80, "status": 20, "operator": 80, "result": 20}
 
 
 @bp.before_request
 def enforce_read_only_role():
-    if current_user.is_authenticated and current_user.role == "viewer" and request.method not in {"GET", "HEAD", "OPTIONS"}:
+    personal_endpoints = {"main.appearance_settings", "main.assistant_new", "main.assistant_chat"}
+    if (current_user.is_authenticated and current_user.role == "viewer"
+            and request.method not in {"GET", "HEAD", "OPTIONS"}
+            and request.endpoint not in personal_endpoints):
         abort(403)
+
+
+def _appearance_upload_dir():
+    return Path(current_app.config["APPEARANCE_UPLOAD_DIR"])
+
+
+def _background_extension(data):
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    return None
+
+
+def _preview_image_type(data):
+    extension = _background_extension(data)
+    if extension:
+        return extension, {"png": "image/png", "jpg": "image/jpeg", "webp": "image/webp"}[extension]
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return "gif", "image/gif"
+    return None, None
+
+
+def _attachment_storage_root():
+    return Path(current_app.config["ATTACHMENT_UPLOAD_DIR"])
+
+
+def _clean_upload_relative_path(filename):
+    raw_parts = (filename or "").replace("\\", "/").split("/")
+    if any(part.strip() == ".." for part in raw_parts):
+        raise ValueError("文件夹路径不能包含上级目录。")
+    parts = []
+    for raw_part in raw_parts:
+        part = re.sub(r'[\x00-\x1f<>:"|?*]', "_", raw_part.strip())
+        if part and part != ".":
+            parts.append(part[:120])
+    if not parts:
+        raise ValueError("文件名不能为空。")
+    if len(parts) > 12:
+        raise ValueError("文件夹层级不能超过 12 层。")
+    return "/".join(parts)
+
+
+def _attachment_record_dir(record, record_date=None):
+    target_date = record_date or record.record_date
+    return (_attachment_storage_root() / f"user-{record.experiment.user_id}"
+            / f"experiment-{record.experiment_id}" / target_date.isoformat() / f"record-{record.id}")
+
+
+def _attachment_category(original_name, is_image):
+    if is_image:
+        return "图片"
+    extension = Path(original_name).suffix.lower()
+    if extension in DATA_EXTENSIONS:
+        return "数据"
+    if extension in DOCUMENT_EXTENSIONS:
+        return "文档"
+    if extension in ARCHIVE_EXTENSIONS:
+        return "压缩包"
+    return "其他"
+
+
+def _requested_attachment_category():
+    category = request.form.get("attachment_category", "自动分类").strip()
+    if category == "自动分类":
+        return None
+    if category not in ATTACHMENT_MANUAL_CATEGORIES:
+        abort(400)
+    return category
+
+
+def _save_record_attachment(record, uploaded_file, category=None):
+    relative_path = _clean_upload_relative_path(uploaded_file.filename)
+    original_name = relative_path.rsplit("/", 1)[-1]
+    relative_parent = relative_path.split("/")[:-1]
+    target_dir = _attachment_record_dir(record).joinpath(*relative_parent)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / original_name
+    counter = 2
+    while target_path.exists():
+        suffix = Path(original_name).suffix
+        stem = original_name[:-len(suffix)] if suffix else original_name
+        target_path = target_dir / f"{stem} ({counter}){suffix}"
+        counter += 1
+    temporary_path = target_dir / f".{uuid4().hex}.upload"
+    size = 0
+    prefix = b""
+    try:
+        with temporary_path.open("wb") as output:
+            while True:
+                chunk = uploaded_file.stream.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                limit = current_app.config.get("MAX_ATTACHMENT_BYTES")
+                if limit and size > limit:
+                    raise ValueError("单个文件超过大小限制。")
+                if len(prefix) < 16:
+                    prefix += chunk[:16 - len(prefix)]
+                output.write(chunk)
+        if size == 0:
+            raise ValueError("不能上传空文件。")
+        temporary_path.replace(target_path)
+    except Exception:
+        temporary_path.unlink(missing_ok=True)
+        raise
+
+    image_extension, image_mimetype = _preview_image_type(prefix)
+    guessed_mimetype = mimetypes.guess_type(original_name)[0] or "application/octet-stream"
+    attachment = ExperimentAttachment(
+        experiment_id=record.experiment_id,
+        record_id=record.id,
+        original_name=original_name,
+        relative_path=relative_path,
+        stored_path=target_path.relative_to(_attachment_storage_root()).as_posix(),
+        size_bytes=size,
+        mime_type=image_mimetype or guessed_mimetype,
+        category=category or _attachment_category(original_name, bool(image_extension)),
+        is_previewable_image=bool(image_extension),
+    )
+    db.session.add(attachment)
+    return attachment
+
+
+def _attachment_path(attachment):
+    root = _attachment_storage_root().resolve()
+    path = (root / attachment.stored_path).resolve()
+    if root not in path.parents:
+        abort(404)
+    return path
+
+
+def _remove_attachment_file(attachment):
+    path = _attachment_path(attachment)
+    path.unlink(missing_ok=True)
+    root = _attachment_storage_root().resolve()
+    parent = path.parent
+    while parent != root and root in parent.parents:
+        try:
+            parent.rmdir()
+        except OSError:
+            break
+        parent = parent.parent
+
+
+def _move_record_attachment_files(record, new_date):
+    old_dir = _attachment_record_dir(record)
+    new_dir = _attachment_record_dir(record, new_date)
+    for attachment in record.attachments:
+        old_path = _attachment_path(attachment)
+        try:
+            inside_record = old_path.relative_to(old_dir.resolve())
+        except ValueError:
+            continue
+        new_path = new_dir / inside_record
+        new_path.parent.mkdir(parents=True, exist_ok=True)
+        if old_path.is_file():
+            shutil.move(str(old_path), str(new_path))
+        attachment.stored_path = new_path.relative_to(_attachment_storage_root()).as_posix()
+    if old_dir.exists():
+        shutil.rmtree(old_dir, ignore_errors=True)
+
+
+def _remove_backgrounds(user_id):
+    upload_dir = _appearance_upload_dir()
+    if not upload_dir.exists():
+        return
+    for item in upload_dir.glob(f"user-{user_id}.*"):
+        if item.is_file():
+            item.unlink(missing_ok=True)
+
+
+def _appearance_return_url():
+    next_url = request.form.get("next", "")
+    if next_url.startswith("/") and not next_url.startswith("//"):
+        return next_url
+    return url_for("main.dashboard")
+
+
+@bp.app_context_processor
+def inject_appearance():
+    appearance = {"theme": "research", "color_mode": "light", "background_url": ""}
+    if not current_user.is_authenticated:
+        return {"appearance": appearance}
+    setting = AppearanceSetting.query.filter_by(user_id=current_user.id).first()
+    if not setting:
+        return {"appearance": appearance}
+    appearance["theme"] = setting.theme if setting.theme in APPEARANCE_THEMES else "research"
+    appearance["color_mode"] = setting.color_mode if setting.color_mode in {"light", "dark"} else "light"
+    background_path = _appearance_upload_dir() / (setting.background_filename or "")
+    if setting.background_filename and background_path.is_file():
+        appearance["background_url"] = url_for(
+            "main.appearance_background", version=int(setting.updated_at.timestamp())
+        )
+    return {"appearance": appearance}
 
 
 def parse_date(value):
@@ -42,6 +273,20 @@ def owned_or_404(model, item_id):
     return item
 
 
+def experiment_child_or_404(model, item_id):
+    item = db.session.get(model, item_id)
+    if not item or item.experiment.user_id != current_user.id:
+        abort(404)
+    return item
+
+
+def attachment_owned_or_404(item_id):
+    item = db.session.get(ExperimentAttachment, item_id)
+    if not item or item.record.experiment.user_id != current_user.id:
+        abort(404)
+    return item
+
+
 def current_ai_config():
     setting = ApiSetting.query.filter_by(user_id=current_user.id).first()
     if not setting:
@@ -54,6 +299,274 @@ def current_ai_config():
         source="user",
         allow_private=current_app.config["ALLOW_PRIVATE_API_URLS"],
         allowed_hosts=current_app.config["AI_ALLOWED_HOSTS"],
+    )
+
+
+@bp.app_context_processor
+def inject_assistant_page():
+    page_type = ""
+    page_id = None
+    view_args = request.view_args or {}
+    endpoint = request.endpoint or ""
+    if endpoint == "main.experiment_detail":
+        page_type, page_id = "experiment", view_args.get("item_id")
+    elif endpoint == "main.record_detail":
+        page_type, page_id = "record", view_args.get("record_id")
+    return {"assistant_page": {"type": page_type, "id": page_id}}
+
+
+def _serialize_value(value):
+    return value.isoformat() if hasattr(value, "isoformat") else str(value or "")
+
+
+def _assistant_page_context(page_type, page_id):
+    if page_type == "experiment" and page_id:
+        item = owned_or_404(Experiment, page_id)
+        fields = {field: _serialize_value(getattr(item, field)) for field in EXPERIMENT_AI_FIELDS}
+        return {
+            "page_type": "experiment", "page_id": item.id, "fields": fields,
+            "steps": [
+                {
+                    "title": step.title, "description": step.description, "operator": step.operator,
+                    "planned_date": _serialize_value(step.planned_date), "is_done": step.is_done,
+                }
+                for step in item.steps
+            ],
+        }
+    if page_type == "record" and page_id:
+        item = experiment_child_or_404(ExperimentRecord, page_id)
+        return {
+            "page_type": "record", "page_id": item.id, "experiment_id": item.experiment_id,
+            "experiment_title": item.experiment.title,
+            "fields": {field: _serialize_value(getattr(item, field)) for field in RECORD_AI_FIELDS},
+        }
+    return {"page_type": "", "page_id": None, "fields": {}}
+
+
+def _assistant_system_prompt(page_context, file_context):
+    return f"""你是医学科研实验助手。回答必须严谨，不得编造实验数据、文献或引用；涉及风险、剂量和临床解释时提醒用户人工核对。
+你可以规划实验、分析记录、整理附件，并在用户明确要求时生成结构化页面修改提案。
+始终只输出一个合法 JSON 对象，格式为：
+{{"reply":"给用户的中文回答","proposal":null}}
+proposal 只允许以下格式之一：
+1. 修改当前实验：{{"action":"update_experiment","changes":{{"title":"","code":"","objective":"","owner":"","status":"未开始/进行中/完成/暂停","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"}},"steps":[{{"title":"","description":"","operator":"","planned_date":"YYYY-MM-DD"}}]}}
+2. 修改当前记录：{{"action":"update_record","changes":{{"record_date":"YYYY-MM-DD","operator":"","conditions":"","content":"","result":"待确认/成功/失败","remark":""}}}}
+3. 新建实验计划：{{"action":"create_experiment","changes":{{"title":"","code":"","objective":"","owner":"","status":"未开始/进行中/完成/暂停","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"}},"steps":[{{"title":"","description":"","operator":"","planned_date":"YYYY-MM-DD"}}]}}
+只有用户要求添加或修改页面内容时才返回 proposal；不要返回不在格式中的字段。页面写入前仍需用户确认。
+当前页面上下文：{json.dumps(page_context, ensure_ascii=False)}
+用户上传文件信息与可读取节选：{json.dumps(file_context, ensure_ascii=False)}"""
+
+
+def _safe_json(value, fallback):
+    try:
+        return json.loads(value) if value else fallback
+    except (TypeError, json.JSONDecodeError):
+        return fallback
+
+
+def _clean_ai_step(raw):
+    if not isinstance(raw, dict) or not str(raw.get("title", "")).strip():
+        return None
+    return {
+        "title": str(raw.get("title", "")).strip()[:160],
+        "description": str(raw.get("description", "")).strip(),
+        "operator": str(raw.get("operator", "")).strip()[:80],
+        "planned_date": str(raw.get("planned_date", "")).strip(),
+    }
+
+
+def _normalize_assistant_proposal(raw, page_context):
+    if not isinstance(raw, dict):
+        return None, {}
+    action = str(raw.get("action", "")).strip()
+    if action == "update_experiment" and page_context.get("page_type") == "experiment":
+        allowed = EXPERIMENT_AI_FIELDS
+    elif action == "update_record" and page_context.get("page_type") == "record":
+        allowed = RECORD_AI_FIELDS
+    elif action == "create_experiment":
+        allowed = EXPERIMENT_AI_FIELDS
+    else:
+        return None, {}
+
+    changes = {
+        key: str(value if value is not None else "").strip()[:AI_FIELD_LIMITS.get(key)]
+        if AI_FIELD_LIMITS.get(key) else str(value if value is not None else "").strip()
+        for key, value in (raw.get("changes") or {}).items() if key in allowed
+    }
+    if action == "create_experiment" and not changes.get("title"):
+        return None, {}
+    current_fields = page_context.get("fields", {})
+    if action != "create_experiment":
+        changes = {key: value for key, value in changes.items() if value != current_fields.get(key, "")}
+    steps = []
+    if action in {"update_experiment", "create_experiment"}:
+        steps = [step for step in (_clean_ai_step(item) for item in (raw.get("steps") or [])[:50]) if step]
+    if not changes and not steps:
+        return None, {}
+
+    proposal = {
+        "action": action, "target_id": page_context.get("page_id"),
+        "changes": changes, "steps": steps,
+    }
+    before = {key: current_fields.get(key, "") for key in changes} if action != "create_experiment" else {}
+    diff = [
+        {"field": AI_FIELD_LABELS.get(key, key), "before": before.get(key, "（新建）"), "after": value}
+        for key, value in changes.items()
+    ]
+    if steps:
+        diff.append({
+            "field": AI_FIELD_LABELS["steps"], "before": "0 条" if action == "create_experiment" else "不删除现有步骤",
+            "after": "\n".join(f"{index}. {step['title']}" for index, step in enumerate(steps, 1)),
+        })
+    proposal["diff"] = diff
+    return proposal, before
+
+
+def _ai_upload_root():
+    return Path(current_app.config["AI_UPLOAD_DIR"])
+
+
+def _extract_text_excerpt(path, original_name):
+    extension = Path(original_name).suffix.lower()
+    try:
+        if extension in ASSISTANT_TEXT_EXTENSIONS:
+            data = path.read_bytes()[:200_000]
+            return data.decode("utf-8", errors="replace")[:120_000]
+        if extension == ".docx":
+            with zipfile.ZipFile(path) as archive:
+                xml = archive.read("word/document.xml")[:1_000_000].decode("utf-8", errors="replace")
+            return re.sub(r"<[^>]+>", " ", xml)[:120_000]
+    except (OSError, KeyError, zipfile.BadZipFile):
+        return ""
+    return ""
+
+
+def _save_ai_attachment(message, uploaded_file):
+    clean_name = _clean_upload_relative_path(uploaded_file.filename).rsplit("/", 1)[-1]
+    target_dir = _ai_upload_root() / f"user-{current_user.id}" / f"conversation-{message.conversation_id}" / f"message-{message.id}"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / clean_name
+    counter = 2
+    while target.exists():
+        suffix = Path(clean_name).suffix
+        stem = clean_name[:-len(suffix)] if suffix else clean_name
+        target = target_dir / f"{stem} ({counter}){suffix}"
+        counter += 1
+    size = 0
+    with target.open("wb") as output:
+        while True:
+            chunk = uploaded_file.stream.read(1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            output.write(chunk)
+    attachment = AIChatAttachment(
+        message_id=message.id, original_name=clean_name,
+        stored_path=target.relative_to(_ai_upload_root()).as_posix(), size_bytes=size,
+        mime_type=mimetypes.guess_type(clean_name)[0] or "application/octet-stream",
+        text_excerpt=_extract_text_excerpt(target, clean_name),
+    )
+    db.session.add(attachment)
+    return attachment
+
+
+def _conversation_or_404(conversation_id):
+    item = db.session.get(AIConversation, conversation_id)
+    if not item or item.user_id != current_user.id:
+        abort(404)
+    return item
+
+
+def _assistant_message_payload(message):
+    references = [
+        item for item in _safe_json(message.references_json, [])
+        if isinstance(item, dict) and str(item.get("url", "")).startswith(("http://", "https://"))
+    ]
+    proposal = _safe_json(message.proposal_json, None)
+    return {
+        "id": message.id, "role": message.role, "content": message.content,
+        "created_at": message.created_at.strftime("%Y-%m-%d %H:%M"),
+        "references": references,
+        "attachments": [
+            {"id": item.id, "name": item.original_name, "size": item.size_label}
+            for item in message.attachments
+        ],
+        "proposal": proposal,
+        "applied": bool(message.applied_at),
+    }
+
+
+@bp.post("/settings/appearance")
+@login_required
+def appearance_settings():
+    setting = AppearanceSetting.query.filter_by(user_id=current_user.id).first()
+    if not setting:
+        setting = AppearanceSetting(user_id=current_user.id)
+        db.session.add(setting)
+
+    action = request.form.get("action", "save")
+    if action == "reset":
+        _remove_backgrounds(current_user.id)
+        setting.theme = "research"
+        setting.color_mode = "light"
+        setting.background_filename = ""
+        db.session.commit()
+        flash("外观已恢复默认。", "success")
+        return redirect(_appearance_return_url())
+
+    if action == "clear_background":
+        _remove_backgrounds(current_user.id)
+        setting.background_filename = ""
+        db.session.commit()
+        flash("自定义背景已移除。", "success")
+        return redirect(_appearance_return_url())
+
+    theme = request.form.get("theme", "research")
+    color_mode = "dark" if request.form.get("dark_mode") else "light"
+    if theme not in APPEARANCE_THEMES:
+        abort(400)
+    setting.theme = theme
+    setting.color_mode = color_mode
+
+    background = request.files.get("background")
+    if background and background.filename:
+        data = background.read(MAX_BACKGROUND_BYTES + 1)
+        if len(data) > MAX_BACKGROUND_BYTES:
+            flash("背景图片不能超过 5 MB。", "danger")
+            return redirect(_appearance_return_url())
+        extension = _background_extension(data)
+        if not extension:
+            flash("背景只支持 PNG、JPEG 或 WebP 图片。", "danger")
+            return redirect(_appearance_return_url())
+        upload_dir = _appearance_upload_dir()
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        _remove_backgrounds(current_user.id)
+        filename = f"user-{current_user.id}.{extension}"
+        temporary = upload_dir / f".{filename}.tmp"
+        temporary.write_bytes(data)
+        temporary.replace(upload_dir / filename)
+        setting.background_filename = filename
+
+    db.session.commit()
+    flash("外观设置已保存。", "success")
+    return redirect(_appearance_return_url())
+
+
+@bp.get("/settings/appearance/background")
+@login_required
+def appearance_background():
+    setting = AppearanceSetting.query.filter_by(user_id=current_user.id).first()
+    if not setting or not setting.background_filename:
+        abort(404)
+    background_path = _appearance_upload_dir() / setting.background_filename
+    if not background_path.is_file():
+        abort(404)
+    mimetype = {".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp"}.get(
+        background_path.suffix.lower(), "application/octet-stream"
+    )
+    return send_file(
+        io.BytesIO(background_path.read_bytes()), mimetype=mimetype,
+        download_name=setting.background_filename, max_age=3600
     )
 
 
@@ -178,15 +691,22 @@ def experiment_detail(item_id):
             db.session.commit()
             flash("实验信息已更新。", "success")
             return redirect(url_for("main.experiment_detail", item_id=item.id))
-    return render_template("experiment_detail.html", experiment=item, today=date.today())
+    return render_template(
+        "experiment_detail.html", experiment=item, today=date.today(),
+        attachment_categories=ATTACHMENT_MANUAL_CATEGORIES,
+    )
 
 
 @bp.post("/experiments/<int:item_id>/delete")
 @login_required
 def experiment_delete(item_id):
-    db.session.delete(owned_or_404(Experiment, item_id))
+    item = owned_or_404(Experiment, item_id)
+    for record in item.records:
+        for attachment in record.attachments:
+            _remove_attachment_file(attachment)
+    db.session.delete(item)
     db.session.commit()
-    flash("实验及关联步骤、记录已删除。", "success")
+    flash("实验及关联步骤、记录和文件已删除。", "success")
     return redirect(url_for("main.experiments"))
 
 
@@ -198,18 +718,42 @@ def step_add(item_id):
     if title:
         position = max([step.position for step in item.steps], default=0) + 1
         db.session.add(ExperimentStep(experiment_id=item.id, title=title, position=position,
-                                      planned_date=parse_date(request.form.get("planned_date"))))
+            description=request.form.get("description", "").strip(),
+            operator=request.form.get("operator", "").strip(),
+            planned_date=parse_date(request.form.get("planned_date"))))
         db.session.commit()
+        flash("实验步骤已添加。", "success")
+    else:
+        flash("步骤标题不能为空。", "danger")
     return redirect(url_for("main.experiment_detail", item_id=item.id))
+
+
+@bp.route("/steps/<int:step_id>/edit", methods=["GET", "POST"])
+@login_required
+def step_edit(step_id):
+    step = experiment_child_or_404(ExperimentStep, step_id)
+    if request.method == "POST":
+        title = request.form.get("title", "").strip()
+        if not title:
+            flash("步骤标题不能为空。", "danger")
+        else:
+            step.title = title
+            step.description = request.form.get("description", "").strip()
+            step.operator = request.form.get("operator", "").strip()
+            step.planned_date = parse_date(request.form.get("planned_date"))
+            step.completed_date = parse_date(request.form.get("completed_date")) if step.is_done else None
+            db.session.commit()
+            flash("实验步骤已更新。", "success")
+            return redirect(url_for("main.experiment_detail", item_id=step.experiment_id))
+    return render_template("step_edit.html", step=step)
 
 
 @bp.post("/steps/<int:step_id>/toggle")
 @login_required
 def step_toggle(step_id):
-    step = db.session.get(ExperimentStep, step_id)
-    if not step or step.experiment.user_id != current_user.id:
-        abort(404)
+    step = experiment_child_or_404(ExperimentStep, step_id)
     step.is_done = not step.is_done
+    step.completed_date = date.today() if step.is_done else None
     db.session.commit()
     return redirect(url_for("main.experiment_detail", item_id=step.experiment_id))
 
@@ -217,9 +761,7 @@ def step_toggle(step_id):
 @bp.post("/steps/<int:step_id>/delete")
 @login_required
 def step_delete(step_id):
-    step = db.session.get(ExperimentStep, step_id)
-    if not step or step.experiment.user_id != current_user.id:
-        abort(404)
+    step = experiment_child_or_404(ExperimentStep, step_id)
     experiment_id = step.experiment_id
     db.session.delete(step)
     db.session.commit()
@@ -234,25 +776,238 @@ def record_add(item_id):
     if not content:
         flash("实验过程不能为空。", "danger")
     else:
-        db.session.add(ExperimentRecord(experiment_id=item.id,
+        record = ExperimentRecord(experiment_id=item.id,
             record_date=parse_date(request.form.get("record_date")) or date.today(),
             operator=request.form.get("operator", "").strip(), conditions=request.form.get("conditions", "").strip(),
-            content=content, result=request.form.get("result", "待确认"), remark=request.form.get("remark", "").strip()))
+            content=content, result=request.form.get("result", "待确认"), remark=request.form.get("remark", "").strip())
+        db.session.add(record)
+        db.session.flush()
+
+        files = [uploaded for uploaded in request.files.getlist("files") if uploaded and uploaded.filename]
+        category = _requested_attachment_category()
+        saved = 0
+        errors = []
+        for uploaded_file in files:
+            try:
+                _save_record_attachment(record, uploaded_file, category)
+                saved += 1
+            except ValueError as exc:
+                errors.append(f"{uploaded_file.filename}: {exc}")
         db.session.commit()
-        flash("实验记录已保存。", "success")
+        message = "实验记录已保存。"
+        if saved:
+            message += f" 已同时导入 {saved} 个文件。"
+        flash(message, "success")
+        if errors:
+            flash(f"有 {len(errors)} 个文件未导入：{'；'.join(errors[:3])}", "warning")
+        if files:
+            return redirect(url_for("main.record_detail", record_id=record.id))
     return redirect(url_for("main.experiment_detail", item_id=item.id))
+
+
+@bp.route("/records/<int:record_id>", methods=["GET", "POST"])
+@login_required
+def record_detail(record_id):
+    record = experiment_child_or_404(ExperimentRecord, record_id)
+    if request.method == "POST":
+        content = request.form.get("content", "").strip()
+        if not content:
+            flash("实验过程不能为空。", "danger")
+        else:
+            new_date = parse_date(request.form.get("record_date")) or record.record_date
+            if new_date != record.record_date:
+                _move_record_attachment_files(record, new_date)
+                record.record_date = new_date
+            record.operator = request.form.get("operator", "").strip()
+            record.conditions = request.form.get("conditions", "").strip()
+            record.content = content
+            record.result = request.form.get("result", "待确认")
+            record.remark = request.form.get("remark", "").strip()
+            db.session.commit()
+            flash("实验记录已更新。", "success")
+            return redirect(url_for("main.record_detail", record_id=record.id))
+    attachment_groups = {}
+    for attachment in record.attachments:
+        attachment_groups.setdefault(attachment.category, []).append(attachment)
+    return render_template(
+        "record_detail.html", record=record, attachment_groups=attachment_groups,
+        attachment_storage_path=str(_attachment_record_dir(record).resolve()),
+        attachment_categories=ATTACHMENT_MANUAL_CATEGORIES,
+    )
+
+
+@bp.post("/records/<int:record_id>/attachments")
+@login_required
+def attachment_upload(record_id):
+    record = experiment_child_or_404(ExperimentRecord, record_id)
+    category = _requested_attachment_category()
+    files = [item for item in request.files.getlist("files") if item and item.filename]
+    if not files:
+        flash("请先选择文件或文件夹。", "danger")
+        return redirect(url_for("main.record_detail", record_id=record.id))
+
+    saved = 0
+    errors = []
+    for uploaded_file in files:
+        try:
+            _save_record_attachment(record, uploaded_file, category)
+            saved += 1
+        except ValueError as exc:
+            errors.append(f"{uploaded_file.filename}: {exc}")
+    if saved:
+        db.session.commit()
+        flash(f"已导入 {saved} 个结果或数据文件。", "success")
+    if errors:
+        flash(f"有 {len(errors)} 个文件未导入：{'；'.join(errors[:3])}", "warning")
+    return redirect(url_for("main.record_detail", record_id=record.id))
+
+
+@bp.get("/attachments/<int:item_id>/download")
+@login_required
+def attachment_download(item_id):
+    attachment = attachment_owned_or_404(item_id)
+    path = _attachment_path(attachment)
+    if not path.is_file():
+        abort(404)
+    return send_file(path, mimetype=attachment.mime_type, as_attachment=True,
+                     download_name=attachment.original_name)
+
+
+@bp.get("/attachments/<int:item_id>/preview")
+@login_required
+def attachment_preview(item_id):
+    attachment = attachment_owned_or_404(item_id)
+    if not attachment.is_previewable_image:
+        abort(404)
+    path = _attachment_path(attachment)
+    if not path.is_file():
+        abort(404)
+    return send_file(path, mimetype=attachment.mime_type, max_age=3600)
+
+
+@bp.post("/records/<int:record_id>/open-folder")
+@login_required
+def attachment_open_folder(record_id):
+    record = experiment_child_or_404(ExperimentRecord, record_id)
+    if not current_app.config.get("ALLOW_OPEN_LOCAL_FOLDERS"):
+        abort(404)
+    if request.remote_addr not in {"127.0.0.1", "::1", None}:
+        abort(403)
+    folder = _attachment_record_dir(record).resolve()
+    folder.mkdir(parents=True, exist_ok=True)
+    if os.name != "nt" or not hasattr(os, "startfile"):
+        flash(f"文件目录：{folder}", "warning")
+    else:
+        os.startfile(str(folder))
+        flash("已在资源管理器中打开实验文件夹。", "success")
+    return redirect(url_for("main.record_detail", record_id=record.id))
+
+
+@bp.post("/attachments/<int:item_id>/delete")
+@login_required
+def attachment_delete(item_id):
+    attachment = attachment_owned_or_404(item_id)
+    record_id = attachment.record_id
+    _remove_attachment_file(attachment)
+    db.session.delete(attachment)
+    db.session.commit()
+    flash("文件已删除。", "success")
+    return redirect(url_for("main.record_detail", record_id=record_id))
 
 
 @bp.post("/records/<int:record_id>/delete")
 @login_required
 def record_delete(record_id):
-    record = db.session.get(ExperimentRecord, record_id)
-    if not record or record.experiment.user_id != current_user.id:
-        abort(404)
+    record = experiment_child_or_404(ExperimentRecord, record_id)
     experiment_id = record.experiment_id
+    for attachment in record.attachments:
+        _remove_attachment_file(attachment)
     db.session.delete(record)
     db.session.commit()
     return redirect(url_for("main.experiment_detail", item_id=experiment_id))
+
+
+def _markdown_value(value, fallback="未填写"):
+    return str(value).strip() if value not in (None, "") else fallback
+
+
+@bp.get("/experiments/<int:item_id>/export.md")
+@login_required
+def experiment_export(item_id):
+    item = owned_or_404(Experiment, item_id)
+    lines = [
+        f"# {item.title}",
+        "",
+        f"- 实验编号：{_markdown_value(item.code, '未设置')}",
+        f"- 状态：{item.status}",
+        f"- 负责人：{_markdown_value(item.owner)}",
+        f"- 计划开始：{_markdown_value(item.start_date, '未安排')}",
+        f"- 计划结束：{_markdown_value(item.end_date, '未安排')}",
+        f"- 导出时间：{datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        "",
+        "## 实验目的",
+        "",
+        _markdown_value(item.objective),
+        "",
+        "## 实验步骤",
+        "",
+    ]
+    if item.steps:
+        for step in item.steps:
+            marker = "x" if step.is_done else " "
+            lines.extend([
+                f"{step.position}. [{marker}] {step.title}",
+                f"   - 执行人：{_markdown_value(step.operator)}",
+                f"   - 计划日期：{_markdown_value(step.planned_date, '未安排')}",
+                f"   - 完成日期：{_markdown_value(step.completed_date, '未完成')}",
+                f"   - 步骤说明：{_markdown_value(step.description)}",
+            ])
+    else:
+        lines.append("暂无实验步骤。")
+
+    lines.extend(["", "## 实验记录", ""])
+    records = sorted(item.records, key=lambda record: (record.record_date, record.id))
+    if records:
+        for index, record in enumerate(records, start=1):
+            lines.extend([
+                f"### {index}. {record.record_date} · {record.result}",
+                "",
+                f"- 实验人员：{_markdown_value(record.operator)}",
+                "",
+                "#### 实验条件",
+                "",
+                _markdown_value(record.conditions),
+                "",
+                "#### 实验过程",
+                "",
+                record.content,
+                "",
+                "#### 结论与备注",
+                "",
+                _markdown_value(record.remark),
+                "",
+            ])
+            if record.attachments:
+                lines.extend(["#### 结果与数据文件", ""])
+                for attachment in sorted(record.attachments, key=lambda item: item.relative_path.lower()):
+                    lines.append(
+                        f"- [{attachment.category}] {attachment.relative_path} ({attachment.size_label})"
+                    )
+                lines.append("")
+    else:
+        lines.append("暂无实验记录。")
+
+    content = "\ufeff" + "\n".join(lines).rstrip() + "\n"
+    display_name = f"{item.code or f'experiment-{item.id}'}-{item.title}.md"
+    return Response(
+        content,
+        mimetype="text/markdown; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename=experiment-{item.id}.md; filename*=UTF-8''{quote(display_name, safe='')}"
+            )
+        },
+    )
 
 
 @bp.route("/samples", methods=["GET", "POST"])
@@ -385,6 +1140,268 @@ def statistics():
                "monthly_records": sum(count for _, count in result_rows), "failed": dict(result_rows).get("失败", 0)}
     return render_template("statistics.html", metrics=metrics, task_counts=task_counts,
                            experiment_counts=dict(experiment_rows), result_counts=dict(result_rows))
+
+
+@bp.get("/assistant/state")
+@login_required
+def assistant_state():
+    conversation_id = request.args.get("conversation_id", type=int)
+    if conversation_id:
+        conversation = _conversation_or_404(conversation_id)
+    else:
+        conversation = AIConversation.query.filter_by(user_id=current_user.id).order_by(
+            AIConversation.updated_at.desc()
+        ).first()
+    try:
+        config = current_ai_config()
+        enabled = config.enabled
+        web_capable = config.enabled and (config.api_url.startswith("https://api.openai.com/") or config.api_url == "https://api.openai.com")
+        model = config.model
+    except SecretDecryptionError:
+        enabled, web_capable, model = False, False, ""
+    return {
+        "conversation": ({
+            "id": conversation.id, "title": conversation.title,
+            "messages": [_assistant_message_payload(message) for message in conversation.messages],
+        } if conversation else None),
+        "api": {"enabled": enabled, "web_capable": web_capable, "model": model},
+    }
+
+
+@bp.post("/assistant/conversations")
+@login_required
+def assistant_new():
+    page_type = request.form.get("page_type", "").strip()
+    page_id = request.form.get("page_id", type=int)
+    context = _assistant_page_context(page_type, page_id) if page_type and page_id else {"page_type": "", "page_id": None}
+    item = AIConversation(
+        user_id=current_user.id, title="新对话",
+        page_type=context.get("page_type", ""), page_id=context.get("page_id"),
+    )
+    db.session.add(item)
+    db.session.commit()
+    return {"id": item.id, "title": item.title}
+
+
+@bp.post("/assistant/chat")
+@login_required
+def assistant_chat():
+    content = request.form.get("message", "").strip()
+    uploads = [item for item in request.files.getlist("files") if item and item.filename]
+    if not content and not uploads:
+        return {"error": "请输入消息或选择文件。"}, 400
+
+    conversation_id = request.form.get("conversation_id", type=int)
+    page_type = request.form.get("page_type", "").strip()
+    page_id = request.form.get("page_id", type=int)
+    page_context = _assistant_page_context(page_type, page_id) if page_type and page_id else {
+        "page_type": "", "page_id": None, "fields": {},
+    }
+    if conversation_id:
+        conversation = _conversation_or_404(conversation_id)
+    else:
+        conversation = AIConversation(
+            user_id=current_user.id, title=(content or uploads[0].filename)[:60],
+            page_type=page_context.get("page_type", ""), page_id=page_context.get("page_id"),
+        )
+        db.session.add(conversation)
+        db.session.flush()
+    if conversation.title == "新对话" and content:
+        conversation.title = content[:60]
+
+    user_message = AIMessage(conversation_id=conversation.id, role="user", content=content or "请分析上传的文件。")
+    db.session.add(user_message)
+    conversation.updated_at = utcnow()
+    db.session.flush()
+    saved_attachments = []
+    for upload in uploads:
+        try:
+            saved_attachments.append(_save_ai_attachment(user_message, upload))
+        except ValueError as exc:
+            db.session.rollback()
+            return {"error": str(exc)}, 400
+    db.session.commit()
+
+    file_context = [
+        {
+            "name": item.original_name, "mime_type": item.mime_type, "size": item.size_label,
+            "text_excerpt": item.text_excerpt,
+        }
+        for item in saved_attachments
+    ]
+    history = [
+        {"role": item.role, "content": item.content}
+        for item in conversation.messages[-16:] if item.role in {"user", "assistant"}
+    ]
+    try:
+        result = chat_with_assistant(
+            history, _assistant_system_prompt(page_context, file_context), current_ai_config(),
+            web_access=bool(request.form.get("web_access")),
+        )
+        proposal, before = _normalize_assistant_proposal(result.get("proposal"), page_context)
+        reply = result["reply"]
+        if result.get("web_requested") and not result.get("web_used"):
+            reply += "\n\n当前兼容 API 未启用内置网页检索，本次回答未声称使用网络来源。"
+        assistant_message = AIMessage(
+            conversation_id=conversation.id, role="assistant", content=reply,
+            references_json=json.dumps(result.get("references", []), ensure_ascii=False),
+            proposal_json=json.dumps(proposal, ensure_ascii=False) if proposal else "",
+            before_json=json.dumps(before, ensure_ascii=False) if before else "",
+        )
+        db.session.add(assistant_message)
+        db.session.commit()
+        return {
+            "conversation_id": conversation.id,
+            "user_message": _assistant_message_payload(user_message),
+            "assistant_message": _assistant_message_payload(assistant_message),
+        }
+    except (AIServiceError, SecretDecryptionError) as exc:
+        error_message = AIMessage(
+            conversation_id=conversation.id, role="assistant",
+            content=f"AI 调用失败：{exc}",
+        )
+        db.session.add(error_message)
+        db.session.commit()
+        return {
+            "conversation_id": conversation.id,
+            "user_message": _assistant_message_payload(user_message),
+            "assistant_message": _assistant_message_payload(error_message),
+            "error": str(exc),
+        }, 502
+
+
+def _set_ai_fields(item, changes, date_fields=()):
+    for field, value in changes.items():
+        setattr(item, field, parse_date(value) if field in date_fields else value)
+
+
+def _invalid_ai_date(changes, fields):
+    return next((field for field in fields if field in changes and changes[field] and not parse_date(changes[field])), None)
+
+
+@bp.post("/assistant/proposals/<int:message_id>/apply")
+@login_required
+def assistant_apply_proposal(message_id):
+    message = db.session.get(AIMessage, message_id)
+    if not message or message.conversation.user_id != current_user.id or message.role != "assistant":
+        abort(404)
+    if message.applied_at:
+        return {"error": "这个修改提案已经保存过。"}, 409
+    proposal = _safe_json(message.proposal_json, None)
+    before = _safe_json(message.before_json, {})
+    if not isinstance(proposal, dict):
+        return {"error": "没有可应用的页面修改提案。"}, 400
+    action = proposal.get("action")
+    changes = proposal.get("changes") or {}
+    steps = proposal.get("steps") or []
+    redirect_url = ""
+
+    if action == "update_experiment":
+        item = owned_or_404(Experiment, proposal.get("target_id"))
+        if any(_serialize_value(getattr(item, field)) != old for field, old in before.items()):
+            return {"error": "页面内容在提案生成后已发生变化，请重新让 AI 生成修改建议。"}, 409
+        if changes.get("status") and changes["status"] not in {"未开始", "进行中", "完成", "暂停"}:
+            return {"error": "实验状态不合法。"}, 400
+        invalid_date = _invalid_ai_date(changes, {"start_date", "end_date"})
+        if invalid_date:
+            return {"error": f"{AI_FIELD_LABELS[invalid_date]}格式不合法。"}, 400
+        if "title" in changes and not changes["title"]:
+            return {"error": "实验名称不能为空。"}, 400
+        _set_ai_fields(item, changes, {"start_date", "end_date"})
+        if not item.title:
+            return {"error": "实验名称不能为空。"}, 400
+        position = max([step.position for step in item.steps], default=0)
+        for raw in steps:
+            position += 1
+            db.session.add(ExperimentStep(
+                experiment_id=item.id, position=position, title=raw["title"],
+                description=raw.get("description", ""), operator=raw.get("operator", ""),
+                planned_date=parse_date(raw.get("planned_date")),
+            ))
+        redirect_url = url_for("main.experiment_detail", item_id=item.id)
+    elif action == "update_record":
+        item = experiment_child_or_404(ExperimentRecord, proposal.get("target_id"))
+        if any(_serialize_value(getattr(item, field)) != old for field, old in before.items()):
+            return {"error": "页面内容在提案生成后已发生变化，请重新让 AI 生成修改建议。"}, 409
+        if changes.get("result") and changes["result"] not in {"待确认", "成功", "失败"}:
+            return {"error": "实验结果不合法。"}, 400
+        if "record_date" in changes and not parse_date(changes["record_date"]):
+            return {"error": "记录日期格式不合法。"}, 400
+        if "content" in changes and not changes["content"]:
+            return {"error": "实验过程不能为空。"}, 400
+        new_date = parse_date(changes.get("record_date")) if "record_date" in changes else item.record_date
+        if new_date and new_date != item.record_date:
+            _move_record_attachment_files(item, new_date)
+        _set_ai_fields(item, changes, {"record_date"})
+        if not item.content:
+            return {"error": "实验过程不能为空。"}, 400
+        redirect_url = url_for("main.record_detail", record_id=item.id)
+    elif action == "create_experiment":
+        if changes.get("status") and changes["status"] not in {"未开始", "进行中", "完成", "暂停"}:
+            return {"error": "实验状态不合法。"}, 400
+        invalid_date = _invalid_ai_date(changes, {"start_date", "end_date"})
+        if invalid_date:
+            return {"error": f"{AI_FIELD_LABELS[invalid_date]}格式不合法。"}, 400
+        item = Experiment(user_id=current_user.id, title=changes.get("title", "").strip())
+        if not item.title:
+            return {"error": "实验名称不能为空。"}, 400
+        _set_ai_fields(item, changes, {"start_date", "end_date"})
+        db.session.add(item)
+        db.session.flush()
+        for position, raw in enumerate(steps, 1):
+            db.session.add(ExperimentStep(
+                experiment_id=item.id, position=position, title=raw["title"],
+                description=raw.get("description", ""), operator=raw.get("operator", ""),
+                planned_date=parse_date(raw.get("planned_date")),
+            ))
+        redirect_url = url_for("main.experiment_detail", item_id=item.id)
+    else:
+        return {"error": "不支持的修改类型。"}, 400
+
+    message.applied_at = utcnow()
+    db.session.commit()
+    return {"ok": True, "redirect_url": redirect_url}
+
+
+@bp.get("/assistant/files/<int:item_id>/download")
+@login_required
+def assistant_file_download(item_id):
+    item = db.session.get(AIChatAttachment, item_id)
+    if not item or item.message.conversation.user_id != current_user.id:
+        abort(404)
+    root = _ai_upload_root().resolve()
+    path = (root / item.stored_path).resolve()
+    if root not in path.parents or not path.is_file():
+        abort(404)
+    return send_file(path, as_attachment=True, download_name=item.original_name, mimetype=item.mime_type)
+
+
+@bp.get("/assistant/conversations/<int:conversation_id>/export.md")
+@login_required
+def assistant_export(conversation_id):
+    conversation = _conversation_or_404(conversation_id)
+    lines = [f"# AI 对话：{conversation.title}", "", f"- 导出时间：{datetime.now().strftime('%Y-%m-%d %H:%M')}", ""]
+    for message in conversation.messages:
+        lines.extend([f"## {'用户' if message.role == 'user' else 'AI 助手'} · {message.created_at.strftime('%Y-%m-%d %H:%M')}", "", message.content, ""])
+        if message.attachments:
+            lines.extend(["### 附件", ""])
+            lines.extend(f"- {item.original_name}（{item.size_label}）" for item in message.attachments)
+            lines.append("")
+        references = _safe_json(message.references_json, [])
+        if references:
+            lines.extend(["### 引用", ""])
+            lines.extend(f"- [{item.get('title') or item.get('url')}]({item.get('url')})" for item in references if item.get("url"))
+            lines.append("")
+        proposal = _safe_json(message.proposal_json, None)
+        if proposal:
+            lines.extend(["### 页面修改提案", ""])
+            for item in proposal.get("diff", []):
+                lines.extend([f"- {item['field']}", f"  - 修改前：{item['before']}", f"  - 修改后：{item['after']}"])
+            lines.extend(["", f"状态：{'已保存' if message.applied_at else '未保存'}", ""])
+    content = "\ufeff" + "\n".join(lines).rstrip() + "\n"
+    return Response(content, mimetype="text/markdown; charset=utf-8", headers={
+        "Content-Disposition": f"attachment; filename=ai-chat-{conversation.id}.md"
+    })
 
 
 @bp.route("/ai", methods=["GET", "POST"])

@@ -11,7 +11,7 @@ from flask_login import LoginManager
 from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
 from flask_wtf.csrf import CSRFProtect
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 
@@ -27,6 +27,13 @@ def _env_bool(name, default=False):
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _optional_megabytes(name):
+    value = os.getenv(name, "").strip()
+    if not value or value == "0":
+        return None
+    return int(value) * 1024 * 1024
 
 
 def _load_or_create_key(instance_path, env_name, filename):
@@ -88,7 +95,8 @@ def create_app(test_config=None):
         SQLALCHEMY_DATABASE_URI=_database_url(app.instance_path),
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
         SQLALCHEMY_ENGINE_OPTIONS={"pool_pre_ping": True},
-        MAX_CONTENT_LENGTH=8 * 1024 * 1024,
+        MAX_CONTENT_LENGTH=_optional_megabytes("MAX_UPLOAD_REQUEST_MB"),
+        MAX_ATTACHMENT_BYTES=_optional_megabytes("MAX_ATTACHMENT_MB"),
         SESSION_COOKIE_SECURE=production,
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
@@ -113,6 +121,16 @@ def create_app(test_config=None):
         SMTP_USE_TLS=_env_bool("SMTP_USE_TLS", True),
         MAIL_FROM=os.getenv("MAIL_FROM", ""),
         PUBLIC_BASE_URL=os.getenv("PUBLIC_BASE_URL", "").rstrip("/"),
+        APPEARANCE_UPLOAD_DIR=os.getenv(
+            "APPEARANCE_UPLOAD_DIR", str(Path(app.instance_path) / "uploads" / "backgrounds")
+        ),
+        ATTACHMENT_UPLOAD_DIR=os.getenv(
+            "ATTACHMENT_UPLOAD_DIR", str(Path(app.instance_path) / "uploads" / "experiments")
+        ),
+        AI_UPLOAD_DIR=os.getenv(
+            "AI_UPLOAD_DIR", str(Path(app.instance_path) / "uploads" / "assistant")
+        ),
+        ALLOW_OPEN_LOCAL_FOLDERS=_env_bool("ALLOW_OPEN_LOCAL_FOLDERS", not production),
     )
     trusted_hosts = [host.strip() for host in os.getenv("TRUSTED_HOSTS", "").split(",") if host.strip()]
     if trusted_hosts:
@@ -188,9 +206,17 @@ def create_app(test_config=None):
     def rate_limited(_error):
         return render_template("error.html", code=429, title="请求过于频繁", message="请稍后再试。"), 429
 
+    @app.errorhandler(413)
+    def upload_too_large(_error):
+        return render_template(
+            "error.html", code=413, title="上传内容过大",
+            message="单次上传内容超过服务器限制，请减少文件数量或拆分上传。",
+        ), 413
+
     if app.config["AUTO_CREATE_DB"]:
         with app.app_context():
-            db.create_all()
+            if not inspect(db.engine).get_table_names():
+                db.create_all()
 
     from .commands import register_commands
 

@@ -181,6 +181,120 @@ def organize_note(note, config=None):
         raise AIServiceError("AI 返回结构不符合 Chat Completions 格式。") from exc
 
 
+def _is_official_openai(config):
+    return (urlparse(config.api_url).hostname or "").lower() == "api.openai.com"
+
+
+def _assistant_result(content):
+    text = str(content or "").strip()
+    fenced = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.S | re.I)
+    candidate = fenced.group(1) if fenced else text
+    try:
+        parsed = json.loads(candidate)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", candidate, re.S)
+        try:
+            parsed = json.loads(match.group()) if match else None
+        except json.JSONDecodeError:
+            parsed = None
+    if not isinstance(parsed, dict):
+        return {"reply": text, "proposal": None}
+    reply = str(parsed.get("reply") or parsed.get("answer") or "").strip()
+    proposal = parsed.get("proposal") if isinstance(parsed.get("proposal"), dict) else None
+    return {"reply": reply or "已完成分析，请核对下方建议。", "proposal": proposal}
+
+
+def _responses_content(body):
+    texts = []
+    references = []
+    for item in body.get("output", []) if isinstance(body, dict) else []:
+        if not isinstance(item, dict) or item.get("type") != "message":
+            continue
+        for part in item.get("content", []):
+            if not isinstance(part, dict) or part.get("type") != "output_text":
+                continue
+            texts.append(str(part.get("text", "")))
+            for annotation in part.get("annotations", []):
+                if not isinstance(annotation, dict) or annotation.get("type") != "url_citation":
+                    continue
+                citation = annotation.get("url_citation") if isinstance(annotation.get("url_citation"), dict) else annotation
+                url = str(citation.get("url", "")).strip()
+                if url:
+                    references.append({"title": str(citation.get("title") or url), "url": url})
+    unique = []
+    seen = set()
+    for reference in references:
+        if reference["url"] not in seen:
+            unique.append(reference)
+            seen.add(reference["url"])
+    return "\n".join(texts).strip(), unique
+
+
+def chat_with_assistant(messages, system_prompt, config=None, web_access=False):
+    config = config or config_from_environment()
+    if not config.enabled:
+        raise AIServiceError("请先在 API 设置中启用 API 并配置 Key。")
+    if not config.model.strip():
+        raise AIServiceError("请先配置模型名称。")
+
+    normalized = [
+        {"role": item.get("role", "user"), "content": str(item.get("content", ""))}
+        for item in messages if item.get("role") in {"user", "assistant"}
+    ]
+    references = []
+    web_used = False
+    if web_access and _is_official_openai(config):
+        payload = {
+            "model": config.model,
+            "input": [{"role": "system", "content": system_prompt}, *normalized],
+            "tools": [{"type": "web_search"}],
+        }
+        request = urllib.request.Request(
+            _endpoint(config, "responses"),
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers=_headers(config.api_key), method="POST",
+        )
+        body = _read_json(request, timeout=90)
+        content, references = _responses_content(body)
+        if not content:
+            raise AIServiceError("Responses API 没有返回可读取的文本内容。")
+        web_used = True
+    else:
+        compatibility_note = (
+            "当前是兼容 API，未启用内置网页检索。不得声称已联网或编造引用。"
+            if web_access else ""
+        )
+        payload = {
+            "model": config.model,
+            "temperature": 0.2,
+            "messages": [
+                {"role": "system", "content": f"{system_prompt}\n{compatibility_note}".strip()},
+                *normalized,
+            ],
+        }
+        request = urllib.request.Request(
+            _endpoint(config, "chat/completions"),
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers=_headers(config.api_key), method="POST",
+        )
+        body = _read_json(request, timeout=90)
+        try:
+            content = body["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise AIServiceError("AI 返回结构不符合 Chat Completions 格式。") from exc
+        for citation in body.get("citations", []) if isinstance(body, dict) else []:
+            if isinstance(citation, str) and citation.startswith(("http://", "https://")):
+                references.append({"title": citation, "url": citation})
+            elif isinstance(citation, dict) and citation.get("url"):
+                references.append({"title": str(citation.get("title") or citation["url"]), "url": str(citation["url"])})
+
+    result = _assistant_result(content)
+    result["references"] = references
+    result["web_used"] = web_used
+    result["web_requested"] = bool(web_access)
+    return result
+
+
 def local_draft(note):
     lines = [line.strip(" -•\t") for line in note.splitlines() if line.strip()]
     title = lines[0][:80] if lines else "未命名实验记录"

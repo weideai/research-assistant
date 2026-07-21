@@ -1,14 +1,17 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="{{ appearance.theme }}" data-mode="{{ appearance.color_mode }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f3f5f7">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <title>{% block title %}科研助手{% endblock %} · R/LAB</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/themes.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/assistant.css') }}">
   <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" defer></script>
 </head>
-<body class="{% if not current_user.is_authenticated %}auth-body{% endif %}">
+<body class="{% if not current_user.is_authenticated %}auth-body{% endif %}{% if appearance.background_url %} has-custom-background{% endif %}" data-assistant-page-type="{{ assistant_page.type }}" data-assistant-page-id="{{ assistant_page.id or '' }}"{% if appearance.background_url %} style="--workspace-background-image: url('{{ appearance.background_url }}')"{% endif %}>
 {% if current_user.is_authenticated %}
   <aside class="sidebar" id="sidebar">
     <a class="brand" href="{{ url_for('main.dashboard') }}" aria-label="返回首页">
@@ -21,7 +24,7 @@
         ('main.papers','file-text','论文'), ('main.statistics','chart-no-axes-combined','统计'),
         ('main.ai_assistant','sparkles','AI 助手'), ('auth.change_password','shield-check','账号安全') ] %}
       {% for endpoint, icon, label in nav %}
-      <a href="{{ url_for(endpoint) }}" class="{{ 'active' if request.endpoint == endpoint or (endpoint == 'main.experiments' and request.endpoint == 'main.experiment_detail') or (endpoint == 'main.papers' and request.endpoint == 'main.paper_detail') }}">
+      <a href="{{ url_for(endpoint) }}" class="{{ 'active' if request.endpoint == endpoint or (endpoint == 'main.experiments' and request.endpoint in ['main.experiment_detail', 'main.record_detail', 'main.step_edit']) or (endpoint == 'main.papers' and request.endpoint == 'main.paper_detail') }}">
         <i data-lucide="{{ icon }}"></i><span>{{ label }}</span>
       </a>
       {% endfor %}
@@ -41,6 +44,42 @@
     <button class="icon-btn" id="menu-toggle" aria-label="打开导航"><i data-lucide="menu"></i></button>
     <a class="brand compact" href="{{ url_for('main.dashboard') }}"><span class="brand-mark">R/</span><b>LAB</b></a>
   </div>
+  <button class="appearance-launch icon-btn" id="appearance-toggle" type="button" title="外观设置" aria-label="打开外观设置"><i data-lucide="palette"></i></button>
+  <dialog class="appearance-dialog" id="appearance-dialog" aria-labelledby="appearance-title">
+    <div class="appearance-dialog-head">
+      <div><p class="eyebrow">APPEARANCE</p><h2 id="appearance-title">外观设置</h2></div>
+      <button class="icon-btn" id="appearance-close" type="button" aria-label="关闭外观设置"><i data-lucide="x"></i></button>
+    </div>
+    <form method="post" action="{{ url_for('main.appearance_settings') }}" enctype="multipart/form-data" class="appearance-form" id="appearance-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
+      <fieldset class="theme-fieldset">
+        <legend>界面风格</legend>
+        <div class="theme-options">
+          {% for value, label in [('research','科研'),('tech','科技'),('minimal','极简'),('cute','可爱')] %}
+          <label class="theme-option">
+            <input type="radio" name="theme" value="{{ value }}" {{ 'checked' if appearance.theme == value }}>
+            <span class="theme-preview theme-preview-{{ value }}" aria-hidden="true"><i></i><i></i><i></i></span>
+            <b>{{ label }}</b>
+          </label>
+          {% endfor %}
+        </div>
+      </fieldset>
+      <label class="mode-control" for="dark-mode-toggle">
+        <span><i data-lucide="moon"></i><b>夜间模式</b></span>
+        <input id="dark-mode-toggle" type="checkbox" name="dark_mode" value="1" {{ 'checked' if appearance.color_mode == 'dark' }}>
+      </label>
+      <div class="background-control">
+        <div class="background-preview{% if appearance.background_url %} has-image{% endif %}" id="background-preview"{% if appearance.background_url %} style="background-image: url('{{ appearance.background_url }}')"{% endif %}><i data-lucide="image"></i></div>
+        <label class="background-file">背景图片<input id="background-input" type="file" name="background" accept="image/png,image/jpeg,image/webp"><small>PNG、JPEG 或 WebP，最大 5 MB</small></label>
+      </div>
+      <div class="appearance-actions">
+        <button class="btn ghost" name="action" value="reset"><i data-lucide="rotate-ccw"></i> 恢复默认</button>
+        {% if appearance.background_url %}<button class="btn secondary" name="action" value="clear_background"><i data-lucide="image-off"></i> 清除背景</button>{% endif %}
+        <button class="btn primary" name="action" value="save"><i data-lucide="save"></i> 保存外观</button>
+      </div>
+    </form>
+  </dialog>
   <main class="main-shell">
 {% else %}
   <main>
@@ -52,6 +91,47 @@
     {% endwith %}
     {% block content %}{% endblock %}
   </main>
+  {% if current_user.is_authenticated %}
+  <button class="ai-fab" id="ai-fab" type="button" aria-label="打开 AI 悬浮助手" title="AI 悬浮助手">
+    <i data-lucide="sparkles"></i><span>AI</span>
+  </button>
+  <section class="ai-dock" id="ai-dock" aria-label="AI 悬浮助手" aria-hidden="true">
+    <header class="ai-dock-head">
+      <div><span class="ai-presence"></span><div><b>科研 AI 助手</b><small id="ai-model-label">准备就绪</small></div></div>
+      <div class="ai-dock-actions">
+        <button class="icon-btn" id="ai-new-chat" type="button" title="新建对话" aria-label="新建对话"><i data-lucide="square-pen"></i></button>
+        <a class="icon-btn disabled" id="ai-export-chat" href="#" title="导出聊天记录" aria-label="导出聊天记录"><i data-lucide="download"></i></a>
+        <a class="icon-btn" href="{{ url_for('main.api_settings') }}" title="API 设置" aria-label="API 设置"><i data-lucide="settings"></i></a>
+        <button class="icon-btn" id="ai-close" type="button" title="关闭" aria-label="关闭 AI 助手"><i data-lucide="x"></i></button>
+      </div>
+    </header>
+    <div class="ai-context-bar" id="ai-context-bar"><i data-lucide="scan-text"></i><span>当前页面仅在生成修改建议时使用</span></div>
+    <div class="ai-messages" id="ai-messages" aria-live="polite">
+      <div class="ai-welcome">
+        <i data-lucide="flask-conical"></i>
+        <b>可以开始讨论实验了</b>
+        <p>询问实验规划、分析记录，或让我修改当前实验/记录。所有页面修改都要经过差异确认。</p>
+      </div>
+    </div>
+    <div class="ai-quick-prompts" id="ai-quick-prompts">
+      <button type="button">规划一个新实验</button>
+      <button type="button">检查当前页面内容</button>
+      <button type="button">优化实验步骤</button>
+    </div>
+    <form class="ai-composer" id="ai-composer" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="ai-file-list" id="ai-file-list"></div>
+      <textarea name="message" id="ai-message-input" rows="3" placeholder="输入指令，例如：把当前实验补充为 4 个步骤……"></textarea>
+      <div class="ai-composer-tools">
+        <div>
+          <label class="icon-btn ai-file-button" title="上传文件" aria-label="上传文件"><i data-lucide="paperclip"></i><input id="ai-file-input" name="files" type="file" multiple></label>
+          <label class="ai-web-toggle" title="使用官方 OpenAI 网页检索并返回引用"><input id="ai-web-access" name="web_access" type="checkbox" value="1"><i data-lucide="globe-2"></i><span>联网</span></label>
+        </div>
+        <button class="ai-send" type="submit" aria-label="发送消息"><i data-lucide="arrow-up"></i></button>
+      </div>
+    </form>
+  </section>
+  {% endif %}
   <script src="{{ url_for('static', filename='js/app.js') }}"></script>
   {% block scripts %}{% endblock %}
 </body>

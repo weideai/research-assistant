@@ -1,18 +1,133 @@
-{% extends "base.html" %}{% block title %}{{ experiment.title }}{% endblock %}{% block content %}
-<header class="page-head"><div><a class="back-link" href="{{ url_for('main.experiments') }}"><i data-lucide="arrow-left"></i> 实验计划</a><h1>{{ experiment.title }}</h1><p class="muted">{{ experiment.code or '未设置编号' }} · 最后更新 {{ experiment.updated_at.strftime('%Y-%m-%d %H:%M') }}</p></div><span class="badge large state-{{ experiment.status }}">{{ experiment.status }}</span></header>
+{% extends "base.html" %}
+{% block title %}{{ experiment.title }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <a class="back-link" href="{{ url_for('main.experiments') }}"><i data-lucide="arrow-left"></i> 实验计划</a>
+    <h1>{{ experiment.title }}</h1>
+    <p class="muted">{{ experiment.code or '未设置编号' }} · 最后更新 {{ experiment.updated_at.strftime('%Y-%m-%d %H:%M') }}</p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn secondary" href="{{ url_for('main.experiment_export', item_id=experiment.id) }}"><i data-lucide="download"></i> 导出报告</a>
+    <span class="badge large state-{{ experiment.status }}">{{ experiment.status }}</span>
+  </div>
+</header>
 <div class="detail-layout">
   <div class="detail-main">
-    <section class="panel"><div class="panel-head"><div><p class="eyebrow">PROTOCOL</p><h2>实验步骤</h2></div></div>
-      <form method="post" action="{{ url_for('main.step_add', item_id=experiment.id) }}" class="inline-add"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input name="title" required placeholder="新增步骤，例如：药物处理 24h"><input type="date" name="planned_date"><button class="btn primary"><i data-lucide="plus"></i> 添加</button></form>
-      <div class="timeline">{% for step in experiment.steps %}<div class="timeline-step {{ 'done' if step.is_done }}"><form method="post" action="{{ url_for('main.step_toggle', step_id=step.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="step-marker">{{ step.position }}</button></form><div><b>{{ step.title }}</b><small>{{ step.planned_date or '未安排日期' }}</small></div><form method="post" action="{{ url_for('main.step_delete', step_id=step.id) }}" data-confirm="删除这个步骤？"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-btn danger"><i data-lucide="trash-2"></i></button></form></div>{% else %}<div class="empty compact-empty"><p>添加第一步，开始拆解实验流程。</p></div>{% endfor %}</div>
+    <section class="panel">
+      <div class="panel-head"><div><p class="eyebrow">PROTOCOL</p><h2>实验步骤</h2></div><span class="count-label">{{ experiment.steps|selectattr('is_done')|list|length }}/{{ experiment.steps|length }} 完成</span></div>
+      <form method="post" action="{{ url_for('main.step_add', item_id=experiment.id) }}" class="step-add-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label class="step-title">步骤标题<input name="title" required placeholder="例如：药物处理 24h"></label>
+        <label>执行人<input name="operator" value="{{ experiment.owner or current_user.name }}"></label>
+        <label>计划日期<input type="date" name="planned_date"></label>
+        <label class="step-description">步骤说明<textarea name="description" rows="2" placeholder="关键参数、操作要点或验收标准"></textarea></label>
+        <button class="btn primary"><i data-lucide="plus"></i> 添加步骤</button>
+      </form>
+      <div class="timeline">
+        {% for step in experiment.steps %}
+        <div class="timeline-step {{ 'done' if step.is_done }}">
+          <form method="post" action="{{ url_for('main.step_toggle', step_id=step.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="step-marker" title="{{ '标记未完成' if step.is_done else '标记完成' }}">{% if step.is_done %}<i data-lucide="check"></i>{% else %}{{ step.position }}{% endif %}</button>
+          </form>
+          <div class="step-content">
+            <b>{{ step.title }}</b>
+            <div class="step-meta">
+              <span><i data-lucide="calendar"></i>{{ step.planned_date or '未安排日期' }}</span>
+              <span><i data-lucide="user"></i>{{ step.operator or '未指定执行人' }}</span>
+              {% if step.completed_date %}<span><i data-lucide="circle-check"></i>{{ step.completed_date }} 完成</span>{% endif %}
+            </div>
+            {% if step.description %}<p>{{ step.description }}</p>{% endif %}
+          </div>
+          <div class="row-actions">
+            <a class="icon-btn" href="{{ url_for('main.step_edit', step_id=step.id) }}" title="编辑步骤"><i data-lucide="pencil"></i></a>
+            <form method="post" action="{{ url_for('main.step_delete', step_id=step.id) }}" data-confirm="删除这个步骤？">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="icon-btn danger" title="删除步骤"><i data-lucide="trash-2"></i></button>
+            </form>
+          </div>
+        </div>
+        {% else %}
+        <div class="empty compact-empty"><p>尚无实验步骤</p></div>
+        {% endfor %}
+      </div>
     </section>
-    <section class="panel"><div class="panel-head"><div><p class="eyebrow">RECORD</p><h2>新增实验记录</h2></div><a href="{{ url_for('main.ai_assistant') }}"><i data-lucide="sparkles"></i> AI 整理笔记</a></div>
-      <form method="post" action="{{ url_for('main.record_add', item_id=experiment.id) }}" class="stack-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="form-grid three"><label>日期<input type="date" name="record_date" value="{{ today }}"></label><label>实验人员<input name="operator" value="{{ current_user.name }}"></label><label>结果<select name="result"><option>待确认</option><option>成功</option><option>失败</option></select></label></div><label>实验条件<textarea name="conditions" rows="3" placeholder="浓度、时间、温度、批次等关键变量"></textarea></label><label>实验过程<textarea name="content" rows="6" required placeholder="今天做了什么？观察到了什么？"></textarea></label><label>结论与下次注意<textarea name="remark" rows="3" placeholder="异常原因、改进建议、后续计划"></textarea></label><div class="form-actions"><button class="btn primary"><i data-lucide="save"></i> 保存记录</button></div></form>
+
+    <section class="panel">
+      <div class="panel-head"><div><p class="eyebrow">RECORD</p><h2>新增实验记录</h2></div><a href="{{ url_for('main.ai_assistant') }}"><i data-lucide="sparkles"></i> AI 整理笔记</a></div>
+      <form method="post" action="{{ url_for('main.record_add', item_id=experiment.id) }}" enctype="multipart/form-data" class="stack-form record-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-grid three"><label>日期<input type="date" name="record_date" value="{{ today }}"></label><label>实验人员<input name="operator" value="{{ current_user.name }}"></label><label>结果<select name="result"><option>待确认</option><option>成功</option><option>失败</option></select></label></div>
+        <label>实验条件<textarea name="conditions" rows="3" placeholder="浓度、时间、温度、批次等关键变量"></textarea></label>
+        <label>实验过程<textarea name="content" rows="6" required placeholder="今天做了什么？观察到了什么？"></textarea></label>
+        <label>结论与下次注意<textarea name="remark" rows="3" placeholder="异常原因、改进建议、后续计划"></textarea></label>
+        <fieldset class="record-attachment-field">
+          <legend><i data-lucide="paperclip"></i> 实验结果与数据 <small>可选</small></legend>
+          <div class="record-attachment-controls">
+            <label>文件分类
+              <select name="attachment_category">
+                <option>自动分类</option>
+                {% for category in attachment_categories %}<option>{{ category }}</option>{% endfor %}
+              </select>
+            </label>
+            <p>文件会按实验、记录日期和分类管理；原始文件不加密、不限大小。</p>
+          </div>
+          <div class="attachment-pickers record-attachment-pickers">
+            <label class="attachment-picker"><span><i data-lucide="files"></i><b>添加文件或图片</b></span><input type="file" name="files" multiple><small>支持任意格式，可一次选择多个文件</small></label>
+            <label class="attachment-picker folder-picker"><span><i data-lucide="folder-up"></i><b>添加整个文件夹</b></span><input type="file" name="files" multiple webkitdirectory directory><small>保留文件夹层级和相对路径</small></label>
+          </div>
+        </fieldset>
+        <div class="form-actions"><button class="btn primary"><i data-lucide="save"></i> 保存记录</button></div>
+      </form>
     </section>
-    <section class="panel"><div class="panel-head"><div><p class="eyebrow">HISTORY</p><h2>记录时间线</h2></div><span class="count-label">{{ experiment.records|length }} 条</span></div>
-      <div class="record-list">{% for record in experiment.records %}<article class="record-item"><div class="record-date"><b>{{ record.record_date.strftime('%m/%d') }}</b><small>{{ record.record_date.strftime('%Y') }}</small></div><div class="record-body"><div class="record-head"><span class="badge result-{{ record.result }}">{{ record.result }}</span><span>{{ record.operator or '未填写人员' }}</span></div>{% if record.conditions %}<div class="record-block"><b>条件</b><p>{{ record.conditions }}</p></div>{% endif %}<div class="record-block"><b>过程</b><p>{{ record.content }}</p></div>{% if record.remark %}<div class="record-block note"><b>结论与备注</b><p>{{ record.remark }}</p></div>{% endif %}</div><form method="post" action="{{ url_for('main.record_delete', record_id=record.id) }}" data-confirm="确定删除这条实验记录？"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-btn danger"><i data-lucide="trash-2"></i></button></form></article>{% else %}<div class="empty"><i data-lucide="notebook-pen"></i><p>尚无实验记录</p></div>{% endfor %}</div>
+
+    <section class="panel">
+      <div class="panel-head"><div><p class="eyebrow">HISTORY</p><h2>记录时间线</h2></div><span class="count-label">{{ experiment.records|length }} 条</span></div>
+      <div class="record-list">
+        {% for record in experiment.records %}
+        <article class="record-item">
+          <div class="record-date"><b>{{ record.record_date.strftime('%m/%d') }}</b><small>{{ record.record_date.strftime('%Y') }}</small></div>
+          <div class="record-body">
+            <div class="record-head"><span class="badge result-{{ record.result }}">{{ record.result }}</span><span>{{ record.operator or '未填写人员' }}</span>{% if record.attachments %}<span><i data-lucide="paperclip"></i>{{ record.attachments|length }} 个文件</span>{% endif %}</div>
+            {% if record.conditions %}<div class="record-block"><b>条件</b><p>{{ record.conditions }}</p></div>{% endif %}
+            <div class="record-block"><b>过程</b><p>{{ record.content }}</p></div>
+            {% if record.remark %}<div class="record-block note"><b>结论与备注</b><p>{{ record.remark }}</p></div>{% endif %}
+          </div>
+          <div class="record-actions">
+            <a class="icon-btn" href="{{ url_for('main.record_detail', record_id=record.id) }}" title="查看并编辑记录"><i data-lucide="square-pen"></i></a>
+            <form method="post" action="{{ url_for('main.record_delete', record_id=record.id) }}" data-confirm="确定删除这条实验记录？">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="icon-btn danger" title="删除记录"><i data-lucide="trash-2"></i></button>
+            </form>
+          </div>
+        </article>
+        {% else %}
+        <div class="empty"><i data-lucide="notebook-pen"></i><p>尚无实验记录</p></div>
+        {% endfor %}
+      </div>
     </section>
   </div>
-  <aside class="detail-side"><section class="panel sticky-panel"><div class="panel-head"><div><p class="eyebrow">OVERVIEW</p><h2>实验信息</h2></div></div><form method="post" class="stack-form compact-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>实验名称<input name="title" value="{{ experiment.title }}" required></label><label>实验编号<input name="code" value="{{ experiment.code }}"></label><label>负责人<input name="owner" value="{{ experiment.owner }}"></label><label>状态<select name="status">{% for v in ['未开始','进行中','完成','暂停'] %}<option {{ 'selected' if experiment.status == v }}>{{ v }}</option>{% endfor %}</select></label><div class="form-grid"><label>开始<input type="date" name="start_date" value="{{ experiment.start_date or '' }}"></label><label>结束<input type="date" name="end_date" value="{{ experiment.end_date or '' }}"></label></div><label>实验目的<textarea name="objective" rows="6">{{ experiment.objective }}</textarea></label><button class="btn secondary full">保存信息</button></form><hr><form method="post" action="{{ url_for('main.experiment_delete', item_id=experiment.id) }}" data-confirm="这会同时删除所有步骤和记录，确定继续？"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="text-danger"><i data-lucide="trash-2"></i> 删除整个实验</button></form></section></aside>
-</div>{% endblock %}
 
+  <aside class="detail-side">
+    <section class="panel sticky-panel">
+      <div class="panel-head"><div><p class="eyebrow">OVERVIEW</p><h2>实验信息</h2></div></div>
+      <form method="post" class="stack-form compact-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>实验名称<input name="title" value="{{ experiment.title }}" required></label>
+        <label>实验编号<input name="code" value="{{ experiment.code }}"></label>
+        <label>负责人<input name="owner" value="{{ experiment.owner }}"></label>
+        <label>状态<select name="status">{% for v in ['未开始','进行中','完成','暂停'] %}<option {{ 'selected' if experiment.status == v }}>{{ v }}</option>{% endfor %}</select></label>
+        <div class="form-grid"><label>开始<input type="date" name="start_date" value="{{ experiment.start_date or '' }}"></label><label>结束<input type="date" name="end_date" value="{{ experiment.end_date or '' }}"></label></div>
+        <label>实验目的<textarea name="objective" rows="6">{{ experiment.objective }}</textarea></label>
+        <button class="btn secondary full"><i data-lucide="save"></i> 保存信息</button>
+      </form>
+      <hr>
+      <form method="post" action="{{ url_for('main.experiment_delete', item_id=experiment.id) }}" data-confirm="这会同时删除所有步骤和记录，确定继续？">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="text-danger"><i data-lucide="trash-2"></i> 删除整个实验</button>
+      </form>
+    </section>
+  </aside>
+</div>
+{% endblock %}
