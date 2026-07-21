@@ -7,7 +7,7 @@
     <h1>{{ record.record_date }} 实验记录</h1>
     <p class="muted">创建于 {{ record.created_at.strftime('%Y-%m-%d %H:%M') }} · 更新于 {{ record.updated_at.strftime('%Y-%m-%d %H:%M') }}</p>
   </div>
-  <span class="badge large result-{{ record.result }}">{{ record.result }}</span>
+  <div class="page-head-actions"><a class="btn primary" href="#record-template-tools"><i data-lucide="copy-plus"></i> 保存为记录模板</a><span class="badge large result-{{ record.result }}">{{ record.result }}</span></div>
 </header>
 <div class="detail-layout record-detail-layout">
   <div class="detail-main">
@@ -15,6 +15,19 @@
       <div class="panel-head"><div><p class="eyebrow">RECORD</p><h2>记录内容</h2></div></div>
       <div class="record-view">
         <div class="record-facts"><span><small>实验人员</small><b>{{ record.operator or '未填写' }}</b></span><span><small>记录日期</small><b>{{ record.record_date }}</b></span><span><small>实验结果</small><b>{{ record.result }}</b></span></div>
+        <div class="record-parameters-section">
+          <div class="record-section-head"><small>结构化参数</small><span>{{ record.parameters|length }} 项</span></div>
+          <div class="parameter-list compact-parameter-list">
+            {% for parameter in record.parameters %}
+            <div class="parameter-row"><span><b>{{ parameter.name }}</b><small>{{ parameter.notes or '本次记录值' }}</small></span><strong>{{ parameter.value or '—' }} {{ parameter.unit }}</strong><form method="post" action="{{ url_for('main.record_parameter_delete', item_id=parameter.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-btn danger" title="删除参数"><i data-lucide="trash-2"></i></button></form></div>
+            {% else %}<p class="muted">尚无结构化参数。</p>{% endfor %}
+          </div>
+          <form method="post" action="{{ url_for('main.record_parameter_add', record_id=record.id) }}" class="parameter-form inline-parameter-form" data-parameter-builder>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="parameter-rows" data-parameter-rows><div class="parameter-input-row"><input name="record_parameter_name" placeholder="参数名" required><input name="record_parameter_value" placeholder="数值"><input name="record_parameter_unit" placeholder="单位"><input name="record_parameter_notes" placeholder="说明"><button class="icon-btn" type="button" data-remove-parameter title="移除此行"><i data-lucide="x"></i></button></div></div>
+            <div class="parameter-actions"><button class="btn ghost" type="button" data-add-parameter><i data-lucide="plus"></i> 添加一行</button><button class="btn secondary"><i data-lucide="save"></i> 保存参数</button></div>
+          </form>
+        </div>
         <div><small>实验条件</small><p>{{ record.conditions or '未填写' }}</p></div>
         <div><small>实验过程</small><p>{{ record.content }}</p></div>
         <div class="record-conclusion"><small>结论与备注</small><p>{{ record.remark or '未填写' }}</p></div>
@@ -65,15 +78,19 @@
               <div class="attachment-meta">
                 <b>{{ attachment.original_name }}</b>
                 <small class="attachment-path">{{ attachment.relative_path }}</small>
-                <small>{{ attachment.size_label }} · {{ attachment.mime_type }}</small>
+                <small>{{ attachment.size_label }} · {{ attachment.mime_type }} · v{{ attachment.version_number }}</small>
+                <small class="attachment-hash" title="{{ attachment.sha256 }}">SHA-256 {{ attachment.sha256[:12] if attachment.sha256 else '旧文件未计算' }}{% if attachment.sha256 %}…{% endif %}</small>
+                {% if attachment.tags %}<small class="attachment-tags">{{ attachment.tags }}</small>{% endif %}
               </div>
               <div class="row-actions">
                 <a class="icon-btn" href="{{ url_for('main.attachment_download', item_id=attachment.id) }}" title="下载文件"><i data-lucide="download"></i></a>
+                <form method="post" action="{{ url_for('main.attachment_verify', item_id=attachment.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-btn" title="校验文件完整性"><i data-lucide="shield-check"></i></button></form>
                 <form method="post" action="{{ url_for('main.attachment_delete', item_id=attachment.id) }}" data-confirm="确定删除这个文件？">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <button class="icon-btn danger" title="删除文件"><i data-lucide="trash-2"></i></button>
                 </form>
               </div>
+              <details class="attachment-detail"><summary>标签与说明</summary><form method="post" action="{{ url_for('main.attachment_metadata', item_id=attachment.id) }}" class="attachment-metadata-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>分类<select name="category">{% for value in attachment_metadata_categories %}<option {{ 'selected' if attachment.category == value }}>{{ value }}</option>{% endfor %}</select></label><label>标签<input name="tags" value="{{ attachment.tags or '' }}" placeholder="WB, 原始数据, Figure 1"></label><label class="grow">说明<input name="description" value="{{ attachment.description or '' }}" placeholder="文件内容、分析方法或版本说明"></label><button class="btn secondary"><i data-lucide="save"></i> 保存</button></form></details>
             </article>
             {% endfor %}
           </div>
@@ -85,16 +102,29 @@
     </section>
   </div>
 
-  <aside>
+  <aside class="detail-side">
+    <details class="panel template-save-panel feature-disclosure" id="record-template-tools" data-disclosure-key="record-{{ record.id }}-template" open>
+      <summary class="feature-summary"><div><p class="eyebrow">REUSE</p><h2>记录模板</h2></div><span class="feature-summary-meta"><span class="template-ready-label">{{ record.parameters|length }} 个参数</span><i data-lucide="chevron-down"></i></span></summary>
+      <div class="feature-body">
+        <form method="post" action="{{ url_for('main.record_template_save', record_id=record.id) }}" class="stack-form compact-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <label>模板名称<input name="name" value="{{ record.experiment.title }}记录" required></label>
+          <label>模板说明<textarea name="description" rows="3" placeholder="适用条件或填写说明"></textarea></label>
+          <p class="muted small-text">保存实验条件、过程、备注和结构化参数，不保存日期、人员、结果或附件。</p>
+          <button class="btn primary full"><i data-lucide="copy-plus"></i> 保存记录模板</button>
+        </form>
+        {% if record_templates %}<div class="saved-template-list"><small>已保存记录模板</small>{% for template in record_templates %}<a href="{{ url_for('main.record_template_detail', item_id=template.id) }}"><span><b>{{ template.name }}</b><small>{{ template.parameters|length }} 个参数</small></span><i data-lucide="arrow-right"></i></a>{% endfor %}</div>{% endif %}
+      </div>
+    </details>
     <section class="panel sticky-panel record-edit-panel">
       <div class="panel-head"><div><p class="eyebrow">EDIT</p><h2>编辑记录</h2></div></div>
       <form method="post" class="stack-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="form-grid"><label>日期<input type="date" name="record_date" value="{{ record.record_date }}"></label><label>实验人员<input name="operator" value="{{ record.operator }}"></label></div>
         <label>结果<select name="result">{% for value in ['待确认','成功','失败'] %}<option {{ 'selected' if record.result == value }}>{{ value }}</option>{% endfor %}</select></label>
-        <label>实验条件<textarea name="conditions" rows="4">{{ record.conditions }}</textarea></label>
+        <label>实验条件<textarea name="conditions" rows="4">{{ record.conditions or '' }}</textarea></label>
         <label>实验过程<textarea name="content" rows="8" required>{{ record.content }}</textarea></label>
-        <label>结论与备注<textarea name="remark" rows="4">{{ record.remark }}</textarea></label>
+        <label>结论与备注<textarea name="remark" rows="4">{{ record.remark or '' }}</textarea></label>
         <button class="btn primary full"><i data-lucide="save"></i> 保存修改</button>
       </form>
     </section>

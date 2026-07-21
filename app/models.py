@@ -108,6 +108,7 @@ class AIConversation(TimestampMixin, db.Model):
     title = db.Column(db.String(160), nullable=False, default="新对话")
     page_type = db.Column(db.String(30), default="")
     page_id = db.Column(db.Integer)
+    selected_experiment_ids_json = db.Column(db.Text, nullable=False, default="[]")
     messages = db.relationship(
         "AIMessage", backref="conversation", cascade="all, delete-orphan",
         order_by="AIMessage.created_at",
@@ -122,6 +123,10 @@ class AIMessage(TimestampMixin, db.Model):
     references_json = db.Column(db.Text, nullable=False, default="[]")
     proposal_json = db.Column(db.Text, nullable=False, default="")
     before_json = db.Column(db.Text, nullable=False, default="")
+    model_name = db.Column(db.String(160), nullable=False, default="")
+    prompt_snapshot = db.Column(db.Text, nullable=False, default="")
+    context_snapshot_json = db.Column(db.Text, nullable=False, default="{}")
+    requires_human_review = db.Column(db.Boolean, nullable=False, default=False)
     applied_at = db.Column(db.DateTime)
     attachments = db.relationship(
         "AIChatAttachment", backref="message", cascade="all, delete-orphan",
@@ -168,8 +173,87 @@ class Experiment(TimestampMixin, db.Model):
     status = db.Column(db.String(20), nullable=False, default="未开始", index=True)
     start_date = db.Column(db.Date)
     end_date = db.Column(db.Date)
+    batch_code = db.Column(db.String(80), default="")
+    repeat_kind = db.Column(db.String(30), default="独立实验")
+    repeat_number = db.Column(db.Integer, nullable=False, default=1)
+    group_name = db.Column(db.String(80), default="")
+    sample_requirements_json = db.Column(db.Text, nullable=False, default="[]")
+    record_conditions_template = db.Column(db.Text, default="")
+    record_content_template = db.Column(db.Text, default="")
+    record_remark_template = db.Column(db.Text, default="")
     steps = db.relationship("ExperimentStep", backref="experiment", cascade="all, delete-orphan", order_by="ExperimentStep.position")
     records = db.relationship("ExperimentRecord", backref="experiment", cascade="all, delete-orphan", order_by="ExperimentRecord.record_date.desc()")
+    sample_usages = db.relationship(
+        "ExperimentSample", backref="experiment", cascade="all, delete-orphan",
+        order_by="ExperimentSample.created_at",
+    )
+    plan_parameters = db.relationship(
+        "ExperimentParameter", backref="experiment", cascade="all, delete-orphan",
+        order_by="ExperimentParameter.position",
+    )
+
+
+class ExperimentTemplate(TimestampMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    name = db.Column(db.String(160), nullable=False)
+    description = db.Column(db.Text, default="")
+    objective = db.Column(db.Text, default="")
+    sample_requirements_json = db.Column(db.Text, nullable=False, default="[]")
+    record_conditions_template = db.Column(db.Text, default="")
+    record_content_template = db.Column(db.Text, default="")
+    record_remark_template = db.Column(db.Text, default="")
+    steps = db.relationship(
+        "ExperimentTemplateStep", backref="template", cascade="all, delete-orphan",
+        order_by="ExperimentTemplateStep.position",
+    )
+    parameters = db.relationship(
+        "ExperimentTemplateParameter", backref="template", cascade="all, delete-orphan",
+        order_by="ExperimentTemplateParameter.position",
+    )
+
+
+class ExperimentTemplateParameter(TimestampMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    template_id = db.Column(db.Integer, db.ForeignKey("experiment_template.id"), nullable=False, index=True)
+    position = db.Column(db.Integer, nullable=False, default=1)
+    name = db.Column(db.String(120), nullable=False)
+    value = db.Column(db.String(160), default="")
+    unit = db.Column(db.String(40), default="")
+    notes = db.Column(db.String(255), default="")
+
+
+class ExperimentTemplateStep(TimestampMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    template_id = db.Column(db.Integer, db.ForeignKey("experiment_template.id"), nullable=False, index=True)
+    position = db.Column(db.Integer, nullable=False, default=1)
+    title = db.Column(db.String(160), nullable=False)
+    description = db.Column(db.Text, default="")
+    planned_offset_days = db.Column(db.Integer, nullable=False, default=0)
+
+
+class RecordTemplate(TimestampMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    name = db.Column(db.String(160), nullable=False)
+    description = db.Column(db.Text, default="")
+    conditions = db.Column(db.Text, default="")
+    content = db.Column(db.Text, nullable=False, default="")
+    remark = db.Column(db.Text, default="")
+    parameters = db.relationship(
+        "RecordTemplateParameter", backref="template", cascade="all, delete-orphan",
+        order_by="RecordTemplateParameter.position",
+    )
+
+
+class RecordTemplateParameter(TimestampMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    template_id = db.Column(db.Integer, db.ForeignKey("record_template.id"), nullable=False, index=True)
+    position = db.Column(db.Integer, nullable=False, default=1)
+    name = db.Column(db.String(120), nullable=False)
+    value = db.Column(db.String(160), default="")
+    unit = db.Column(db.String(40), default="")
+    notes = db.Column(db.String(255), default="")
 
 
 class ExperimentStep(TimestampMixin, db.Model):
@@ -197,6 +281,30 @@ class ExperimentRecord(TimestampMixin, db.Model):
         "ExperimentAttachment", backref="record", cascade="all, delete-orphan",
         order_by="ExperimentAttachment.created_at.desc()",
     )
+    parameters = db.relationship(
+        "RecordParameter", backref="record", cascade="all, delete-orphan",
+        order_by="RecordParameter.position",
+    )
+
+
+class ExperimentParameter(TimestampMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    experiment_id = db.Column(db.Integer, db.ForeignKey("experiment.id"), nullable=False, index=True)
+    position = db.Column(db.Integer, nullable=False, default=1)
+    name = db.Column(db.String(120), nullable=False)
+    value = db.Column(db.String(160), default="")
+    unit = db.Column(db.String(40), default="")
+    notes = db.Column(db.String(255), default="")
+
+
+class RecordParameter(TimestampMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    record_id = db.Column(db.Integer, db.ForeignKey("experiment_record.id"), nullable=False, index=True)
+    position = db.Column(db.Integer, nullable=False, default=1)
+    name = db.Column(db.String(120), nullable=False)
+    value = db.Column(db.String(160), default="")
+    unit = db.Column(db.String(40), default="")
+    notes = db.Column(db.String(255), default="")
 
 
 class ExperimentAttachment(TimestampMixin, db.Model):
@@ -210,6 +318,10 @@ class ExperimentAttachment(TimestampMixin, db.Model):
     mime_type = db.Column(db.String(160), nullable=False, default="application/octet-stream")
     category = db.Column(db.String(20), nullable=False, default="其他")
     is_previewable_image = db.Column(db.Boolean, nullable=False, default=False)
+    sha256 = db.Column(db.String(64), nullable=False, default="", index=True)
+    tags = db.Column(db.String(255), default="")
+    description = db.Column(db.Text, default="")
+    version_number = db.Column(db.Integer, nullable=False, default=1)
 
     @property
     def size_label(self):
@@ -230,6 +342,21 @@ class Sample(TimestampMixin, db.Model):
     quantity = db.Column(db.String(60), default="")
     status = db.Column(db.String(20), nullable=False, default="可用")
     notes = db.Column(db.Text, default="")
+    experiment_usages = db.relationship(
+        "ExperimentSample", backref="sample", cascade="all, delete-orphan",
+        order_by="ExperimentSample.created_at.desc()",
+    )
+
+
+class ExperimentSample(TimestampMixin, db.Model):
+    __table_args__ = (db.UniqueConstraint("experiment_id", "sample_id", name="uq_experiment_sample"),)
+
+    id = db.Column(db.Integer, primary_key=True)
+    experiment_id = db.Column(db.Integer, db.ForeignKey("experiment.id"), nullable=False, index=True)
+    sample_id = db.Column(db.Integer, db.ForeignKey("sample.id"), nullable=False, index=True)
+    role = db.Column(db.String(80), default="实验样本")
+    amount_used = db.Column(db.String(80), default="")
+    notes = db.Column(db.String(255), default="")
 
 
 class Paper(TimestampMixin, db.Model):

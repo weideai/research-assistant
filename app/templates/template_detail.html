@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{{ template.name }} · 步骤模板{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div><p class="eyebrow">STEP TEMPLATE</p><h1>{{ template.name }}</h1><p class="muted">独立管理实验步骤、说明和相对计划日期。</p></div>
+  <a class="btn ghost" href="{{ url_for('main.experiments') }}"><i data-lucide="arrow-left"></i> 返回实验</a>
+</header>
+<div class="template-detail-layout">
+  <main class="detail-main">
+    <section class="panel">
+      <div class="panel-head"><div><p class="eyebrow">IDENTITY</p><h2>步骤模板信息</h2></div><span class="count-label">{{ template.steps|length }} 个步骤</span></div>
+      <form method="post" class="stack-form template-edit-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>模板名称<input name="name" value="{{ template.name }}" required></label>
+        <label>适用说明<textarea name="description" rows="4" placeholder="适用实验、关键限制或准备要求">{{ template.description or '' }}</textarea></label>
+        <div class="form-actions"><button class="btn primary"><i data-lucide="save"></i> 保存步骤模板</button></div>
+      </form>
+    </section>
+    <section class="panel template-component-panel">
+      <div class="panel-head"><div><p class="eyebrow">PROTOCOL</p><h2>模板步骤</h2></div></div>
+      <form method="post" action="{{ url_for('main.experiment_template_step_add', item_id=template.id) }}" class="step-add-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>步骤标题<input name="title" required placeholder="如：细胞铺板"></label>
+        <label>开始后第几天<input type="number" name="planned_offset_days" min="0" value="0"></label>
+        <label class="step-description">步骤说明<textarea name="description" rows="2" placeholder="操作、判定标准和注意事项"></textarea></label>
+        <button class="btn secondary"><i data-lucide="plus"></i> 添加步骤</button>
+      </form>
+      <div class="template-step-list">
+        {% for step in template.steps %}<div class="template-step-row"><span class="step-number">{{ '%02d'|format(loop.index) }}</span><span><b>{{ step.title }}</b><small>{{ step.description or '未填写说明' }} · 开始后第 {{ step.planned_offset_days }} 天</small></span><form method="post" action="{{ url_for('main.experiment_template_step_delete', item_id=step.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-btn danger" title="删除步骤"><i data-lucide="trash-2"></i></button></form></div>{% else %}<div class="empty compact-empty"><p>还没有模板步骤</p></div>{% endfor %}
+      </div>
+    </section>
+  </main>
+  <aside class="detail-side">
+    <section class="panel template-apply-panel">
+      <div class="panel-head"><div><p class="eyebrow">USE TEMPLATE</p><h2>调用步骤模板</h2></div></div>
+      <form method="post" action="{{ url_for('main.experiment_template_apply', item_id=template.id) }}" class="stack-form compact-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>目标实验<select name="experiment_id" required><option value="">请选择实验</option>{% for experiment in experiments %}<option value="{{ experiment.id }}">{{ experiment.title }} · {{ experiment.status }}</option>{% endfor %}</select></label>
+        <label>调用方式<select name="apply_mode"><option value="append">追加到现有步骤</option><option value="replace">替换现有步骤</option></select></label>
+        <p class="muted small-text">只处理实验步骤，不会修改实验信息、参数、样本或记录。</p>
+        <button class="btn primary full"><i data-lucide="list-plus"></i> 调用此模板</button>
+      </form>
+    </section>
+    <section class="panel template-summary-panel"><div class="panel-head"><div><p class="eyebrow">CONTENTS</p><h2>模板摘要</h2></div></div><div class="template-summary-list"><div><b>{{ template.steps|length }}</b><span>步骤</span></div><div><b>{{ template.updated_at.strftime('%m-%d') }}</b><span>最近更新</span></div></div></section>
+  </aside>
+</div>
+{% endblock %}

@@ -5,17 +5,34 @@
   <div>
     <a class="back-link" href="{{ url_for('main.experiments') }}"><i data-lucide="arrow-left"></i> 实验计划</a>
     <h1>{{ experiment.title }}</h1>
-    <p class="muted">{{ experiment.code or '未设置编号' }} · 最后更新 {{ experiment.updated_at.strftime('%Y-%m-%d %H:%M') }}</p>
+    <p class="muted">{{ experiment.code or '未设置编号' }} · {{ experiment.batch_code or '未设置批次' }} · {{ experiment.repeat_kind }} #{{ experiment.repeat_number }}{% if experiment.group_name %} · {{ experiment.group_name }}{% endif %}</p>
   </div>
   <div class="page-head-actions">
-    <a class="btn secondary" href="{{ url_for('main.experiment_export', item_id=experiment.id) }}"><i data-lucide="download"></i> 导出报告</a>
+    <a class="btn ghost" href="{{ url_for('main.experiment_export', item_id=experiment.id) }}"><i data-lucide="file-down"></i> Markdown</a>
+    <a class="btn secondary" href="{{ url_for('main.experiment_archive', item_id=experiment.id) }}"><i data-lucide="archive"></i> 完整归档</a>
     <span class="badge large state-{{ experiment.status }}">{{ experiment.status }}</span>
   </div>
 </header>
 <div class="detail-layout">
   <div class="detail-main">
-    <section class="panel">
-      <div class="panel-head"><div><p class="eyebrow">PROTOCOL</p><h2>实验步骤</h2></div><span class="count-label">{{ experiment.steps|selectattr('is_done')|list|length }}/{{ experiment.steps|length }} 完成</span></div>
+    <details class="panel feature-disclosure" data-disclosure-key="experiment-{{ experiment.id }}-steps" open>
+      <summary class="feature-summary"><div><p class="eyebrow">PROTOCOL</p><h2>实验步骤</h2></div><span class="feature-summary-meta"><span class="count-label">{{ experiment.steps|selectattr('is_done')|list|length }}/{{ experiment.steps|length }} 完成</span><i data-lucide="chevron-down"></i></span></summary>
+      <div class="feature-body">
+      <div class="component-template-tools" id="step-templates">
+        <form method="post" action="{{ url_for('main.experiment_save_template', item_id=experiment.id) }}" class="component-template-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <label>保存当前步骤为模板<input name="name" value="{{ experiment.title }}步骤" required></label>
+          <label class="grow">模板说明<input name="description" placeholder="适用实验或关键注意事项"></label>
+          <button class="btn secondary"><i data-lucide="copy-plus"></i> 保存步骤模板</button>
+        </form>
+        {% if step_templates %}<form method="post" action="{{ url_for('main.experiment_apply_step_template', item_id=experiment.id) }}" class="component-template-form template-use-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <label>调用步骤模板<select name="template_id" data-template-select required>{% for template in step_templates %}<option value="{{ template.id }}" data-view-url="{{ url_for('main.experiment_template_detail', item_id=template.id) }}">{{ template.name }} · {{ template.steps|length }} 步</option>{% endfor %}</select></label>
+          <label>调用方式<select name="apply_mode"><option value="append">追加步骤</option><option value="replace">替换步骤</option></select></label>
+          <a class="btn ghost" data-template-view href="{{ url_for('main.experiment_template_detail', item_id=step_templates[0].id) }}"><i data-lucide="eye"></i> 查看</a>
+          <button class="btn primary"><i data-lucide="list-plus"></i> 调用</button>
+        </form>{% else %}<div class="component-template-empty"><i data-lucide="info"></i><span>还没有步骤模板，保存当前步骤后可在这里调用。</span></div>{% endif %}
+      </div>
       <form method="post" action="{{ url_for('main.step_add', item_id=experiment.id) }}" class="step-add-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <label class="step-title">步骤标题<input name="title" required placeholder="例如：药物处理 24h"></label>
@@ -52,16 +69,73 @@
         <div class="empty compact-empty"><p>尚无实验步骤</p></div>
         {% endfor %}
       </div>
-    </section>
+      </div>
+    </details>
 
-    <section class="panel">
-      <div class="panel-head"><div><p class="eyebrow">RECORD</p><h2>新增实验记录</h2></div><a href="{{ url_for('main.ai_assistant') }}"><i data-lucide="sparkles"></i> AI 整理笔记</a></div>
+    <div class="research-trace-grid">
+      <details class="panel trace-panel feature-disclosure" data-disclosure-key="experiment-{{ experiment.id }}-samples">
+        <summary class="feature-summary"><div><p class="eyebrow">SAMPLES</p><h2>关联样本</h2></div><span class="feature-summary-meta"><span class="count-label">{{ experiment.sample_usages|length }} 个</span><i data-lucide="chevron-down"></i></span></summary>
+        <div class="feature-body">
+        {% if sample_requirements %}<div class="template-requirement-hint"><i data-lucide="clipboard-list"></i><span><b>模板样本要求</b>{% for requirement in sample_requirements %}<small>{{ requirement.role }} · {{ requirement.amount_used or '用量待定' }}{% if requirement.notes %} · {{ requirement.notes }}{% endif %}</small>{% endfor %}</span></div>{% endif %}
+        <form method="post" action="{{ url_for('main.experiment_sample_add', item_id=experiment.id) }}" class="trace-add-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <label>样本<select name="sample_id" required><option value="">选择样本</option>{% for sample in available_samples %}<option value="{{ sample.id }}">{{ sample.sample_code }} · {{ sample.sample_type or '未分类' }}</option>{% endfor %}</select></label>
+          <label>用途<input name="role" value="实验样本" placeholder="对照 / 处理 / 校准"></label>
+          <label>使用量<input name="amount_used" placeholder="1 管 / 20 μL"></label>
+          <label class="grow">备注<input name="notes" placeholder="处理组、取样时间等"></label>
+          <button class="btn secondary"><i data-lucide="link"></i> 关联</button>
+        </form>
+        <div class="trace-list">
+          {% for usage in experiment.sample_usages %}
+          <div class="trace-row"><span><b>{{ usage.sample.sample_code }}</b><small>{{ usage.role }} · {{ usage.amount_used or '用量未填' }}{% if usage.notes %} · {{ usage.notes }}{% endif %}</small></span><form method="post" action="{{ url_for('main.experiment_sample_delete', item_id=usage.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-btn danger" title="解除关联"><i data-lucide="unlink"></i></button></form></div>
+          {% else %}<div class="empty compact-empty"><p>尚未关联样本</p></div>{% endfor %}
+        </div>
+        </div>
+      </details>
+
+      <details class="panel trace-panel feature-disclosure" data-disclosure-key="experiment-{{ experiment.id }}-parameters">
+        <summary class="feature-summary"><div><p class="eyebrow">VARIABLES</p><h2>计划参数</h2></div><span class="feature-summary-meta"><span class="count-label">{{ experiment.plan_parameters|length }} 项</span><i data-lucide="chevron-down"></i></span></summary>
+        <div class="feature-body">
+        <form method="post" action="{{ url_for('main.experiment_parameter_add', item_id=experiment.id) }}" class="parameter-form" data-parameter-builder>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="parameter-rows" data-parameter-rows>
+            <div class="parameter-input-row"><input name="plan_parameter_name" placeholder="参数名，如药物浓度" required><input name="plan_parameter_value" placeholder="数值"><input name="plan_parameter_unit" placeholder="单位"><input name="plan_parameter_notes" placeholder="说明"><button class="icon-btn" type="button" data-remove-parameter title="移除此行"><i data-lucide="x"></i></button></div>
+          </div>
+          <div class="parameter-actions"><button class="btn ghost" type="button" data-add-parameter><i data-lucide="plus"></i> 添加一行</button><button class="btn secondary"><i data-lucide="save"></i> 保存参数</button></div>
+        </form>
+        <div class="parameter-list">
+          {% for parameter in experiment.plan_parameters %}
+          <div class="parameter-row"><span><b>{{ parameter.name }}</b><small>{{ parameter.notes or '计划值' }}</small></span><strong>{{ parameter.value or '—' }} {{ parameter.unit }}</strong><form method="post" action="{{ url_for('main.experiment_parameter_delete', item_id=parameter.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-btn danger" title="删除参数"><i data-lucide="trash-2"></i></button></form></div>
+          {% else %}<div class="empty compact-empty"><p>尚无结构化参数</p></div>{% endfor %}
+        </div>
+        </div>
+      </details>
+    </div>
+
+    <details class="panel feature-disclosure" id="new-record" data-disclosure-key="experiment-{{ experiment.id }}-new-record" open>
+      <summary class="feature-summary"><div><p class="eyebrow">RECORD</p><h2>新增实验记录</h2></div><span class="feature-summary-meta"><span class="summary-hint">记录过程、参数与附件</span><i data-lucide="chevron-down"></i></span></summary>
+      <div class="feature-body">
+      <div class="record-template-picker">
+        {% if record_templates %}<form method="get" action="{{ url_for('main.experiment_detail', item_id=experiment.id) }}" class="component-template-form template-use-form">
+          <label>调用记录模板<select name="record_template_id" data-template-select required>{% for template in record_templates %}<option value="{{ template.id }}" data-view-url="{{ url_for('main.record_template_detail', item_id=template.id) }}" {{ 'selected' if selected_record_template and selected_record_template.id == template.id }}>{{ template.name }} · {{ template.parameters|length }} 参数</option>{% endfor %}</select></label>
+          <a class="btn ghost" data-template-view href="{{ url_for('main.record_template_detail', item_id=(selected_record_template.id if selected_record_template else record_templates[0].id)) }}"><i data-lucide="eye"></i> 查看</a>
+          <button class="btn secondary"><i data-lucide="notebook-tabs"></i> 填入表单</button>
+        </form>{% else %}<div class="component-template-empty"><i data-lucide="info"></i><span>记录模板需要在一条已保存的实验记录详情页中创建。</span></div>{% endif %}
+        {% if selected_record_template %}<div class="template-applied-note"><i data-lucide="circle-check"></i><span>已填入记录模板 <b>{{ selected_record_template.name }}</b>，检查后再保存为新记录。</span></div>{% endif %}
+      </div>
       <form method="post" action="{{ url_for('main.record_add', item_id=experiment.id) }}" enctype="multipart/form-data" class="stack-form record-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="form-grid three"><label>日期<input type="date" name="record_date" value="{{ today }}"></label><label>实验人员<input name="operator" value="{{ current_user.name }}"></label><label>结果<select name="result"><option>待确认</option><option>成功</option><option>失败</option></select></label></div>
-        <label>实验条件<textarea name="conditions" rows="3" placeholder="浓度、时间、温度、批次等关键变量"></textarea></label>
-        <label>实验过程<textarea name="content" rows="6" required placeholder="今天做了什么？观察到了什么？"></textarea></label>
-        <label>结论与下次注意<textarea name="remark" rows="3" placeholder="异常原因、改进建议、后续计划"></textarea></label>
+        <label>实验条件<textarea name="conditions" rows="3" placeholder="浓度、时间、温度、批次等关键变量">{{ (selected_record_template.conditions if selected_record_template else experiment.record_conditions_template) or '' }}</textarea></label>
+        <label>实验过程<textarea name="content" rows="6" required placeholder="今天做了什么？观察到了什么？">{{ (selected_record_template.content if selected_record_template else experiment.record_content_template) or '' }}</textarea></label>
+        <label>结论与下次注意<textarea name="remark" rows="3" placeholder="异常原因、改进建议、后续计划">{{ (selected_record_template.remark if selected_record_template else experiment.record_remark_template) or '' }}</textarea></label>
+        <fieldset class="record-attachment-field parameter-field" data-parameter-builder>
+          <legend><i data-lucide="sliders-horizontal"></i> 本次实验参数 <small>可选</small></legend>
+          <div class="parameter-rows" data-parameter-rows>
+            {% if selected_record_template and selected_record_template.parameters %}{% for parameter in selected_record_template.parameters %}<div class="parameter-input-row"><input name="record_parameter_name" value="{{ parameter.name }}" placeholder="参数名，如药物浓度"><input name="record_parameter_value" value="{{ parameter.value or '' }}" placeholder="数值"><input name="record_parameter_unit" value="{{ parameter.unit or '' }}" placeholder="单位"><input name="record_parameter_notes" value="{{ parameter.notes or '' }}" placeholder="批次或说明"><button class="icon-btn" type="button" data-remove-parameter title="移除此行"><i data-lucide="x"></i></button></div>{% endfor %}{% else %}<div class="parameter-input-row"><input name="record_parameter_name" placeholder="参数名，如药物浓度"><input name="record_parameter_value" placeholder="数值"><input name="record_parameter_unit" placeholder="单位"><input name="record_parameter_notes" placeholder="批次或说明"><button class="icon-btn" type="button" data-remove-parameter title="移除此行"><i data-lucide="x"></i></button></div>{% endif %}
+          </div>
+          <button class="btn ghost parameter-add-inline" type="button" data-add-parameter><i data-lucide="plus"></i> 添加参数</button>
+        </fieldset>
         <fieldset class="record-attachment-field">
           <legend><i data-lucide="paperclip"></i> 实验结果与数据 <small>可选</small></legend>
           <div class="record-attachment-controls">
@@ -80,16 +154,19 @@
         </fieldset>
         <div class="form-actions"><button class="btn primary"><i data-lucide="save"></i> 保存记录</button></div>
       </form>
-    </section>
+      </div>
+    </details>
 
-    <section class="panel">
-      <div class="panel-head"><div><p class="eyebrow">HISTORY</p><h2>记录时间线</h2></div><span class="count-label">{{ experiment.records|length }} 条</span></div>
+    <details class="panel feature-disclosure" data-disclosure-key="experiment-{{ experiment.id }}-history" open>
+      <summary class="feature-summary"><div><p class="eyebrow">HISTORY</p><h2>记录时间线</h2></div><span class="feature-summary-meta"><span class="count-label">{{ experiment.records|length }} 条</span><i data-lucide="chevron-down"></i></span></summary>
+      <div class="feature-body">
       <div class="record-list">
         {% for record in experiment.records %}
         <article class="record-item">
           <div class="record-date"><b>{{ record.record_date.strftime('%m/%d') }}</b><small>{{ record.record_date.strftime('%Y') }}</small></div>
           <div class="record-body">
             <div class="record-head"><span class="badge result-{{ record.result }}">{{ record.result }}</span><span>{{ record.operator or '未填写人员' }}</span>{% if record.attachments %}<span><i data-lucide="paperclip"></i>{{ record.attachments|length }} 个文件</span>{% endif %}</div>
+            {% if record.parameters %}<div class="record-parameter-chips">{% for parameter in record.parameters %}<span>{{ parameter.name }} <b>{{ parameter.value }} {{ parameter.unit }}</b></span>{% endfor %}</div>{% endif %}
             {% if record.conditions %}<div class="record-block"><b>条件</b><p>{{ record.conditions }}</p></div>{% endif %}
             <div class="record-block"><b>过程</b><p>{{ record.content }}</p></div>
             {% if record.remark %}<div class="record-block note"><b>结论与备注</b><p>{{ record.remark }}</p></div>{% endif %}
@@ -106,16 +183,21 @@
         <div class="empty"><i data-lucide="notebook-pen"></i><p>尚无实验记录</p></div>
         {% endfor %}
       </div>
-    </section>
+      </div>
+    </details>
   </div>
 
   <aside class="detail-side">
-    <section class="panel sticky-panel">
-      <div class="panel-head"><div><p class="eyebrow">OVERVIEW</p><h2>实验信息</h2></div></div>
+    <details class="panel sticky-panel feature-disclosure" data-disclosure-key="experiment-{{ experiment.id }}-overview" open>
+      <summary class="feature-summary"><div><p class="eyebrow">OVERVIEW</p><h2>实验信息</h2></div><span class="feature-summary-meta"><span class="count-label">{{ experiment.status }}</span><i data-lucide="chevron-down"></i></span></summary>
+      <div class="feature-body">
       <form method="post" class="stack-form compact-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <label>实验名称<input name="title" value="{{ experiment.title }}" required></label>
         <label>实验编号<input name="code" value="{{ experiment.code }}"></label>
+        <label>实验批次<input name="batch_code" value="{{ experiment.batch_code or '' }}" placeholder="BATCH-01"></label>
+        <div class="form-grid"><label>重复类型<select name="repeat_kind">{% for kind in repeat_kinds %}<option {{ 'selected' if experiment.repeat_kind == kind }}>{{ kind }}</option>{% endfor %}</select></label><label>重复序号<input type="number" name="repeat_number" min="1" value="{{ experiment.repeat_number }}"></label></div>
+        <label>实验分组<input name="group_name" value="{{ experiment.group_name or '' }}" placeholder="对照组 / 处理组"></label>
         <label>负责人<input name="owner" value="{{ experiment.owner }}"></label>
         <label>状态<select name="status">{% for v in ['未开始','进行中','完成','暂停'] %}<option {{ 'selected' if experiment.status == v }}>{{ v }}</option>{% endfor %}</select></label>
         <div class="form-grid"><label>开始<input type="date" name="start_date" value="{{ experiment.start_date or '' }}"></label><label>结束<input type="date" name="end_date" value="{{ experiment.end_date or '' }}"></label></div>
@@ -127,7 +209,8 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button class="text-danger"><i data-lucide="trash-2"></i> 删除整个实验</button>
       </form>
-    </section>
+      </div>
+    </details>
   </aside>
 </div>
 {% endblock %}

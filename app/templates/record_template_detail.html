@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}{{ template.name }} · 记录模板{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div><p class="eyebrow">RECORD TEMPLATE</p><h1>{{ template.name }}</h1><p class="muted">独立管理实验记录正文和结构化参数。</p></div>
+  <a class="btn ghost" href="{{ url_for('main.experiments') }}"><i data-lucide="arrow-left"></i> 返回实验</a>
+</header>
+<div class="template-detail-layout">
+  <main class="detail-main">
+    <section class="panel">
+      <div class="panel-head"><div><p class="eyebrow">CONTENT</p><h2>记录模板内容</h2></div><span class="count-label">{{ template.parameters|length }} 个参数</span></div>
+      <form method="post" class="stack-form template-edit-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>模板名称<input name="name" value="{{ template.name }}" required></label>
+        <label>适用说明<textarea name="description" rows="3">{{ template.description or '' }}</textarea></label>
+        <label>实验条件<textarea name="conditions" rows="4">{{ template.conditions or '' }}</textarea></label>
+        <label>实验过程<textarea name="content" rows="8" required>{{ template.content }}</textarea></label>
+        <label>结论与备注<textarea name="remark" rows="4">{{ template.remark or '' }}</textarea></label>
+        <div class="form-actions"><button class="btn primary"><i data-lucide="save"></i> 保存记录模板</button></div>
+      </form>
+    </section>
+    <section class="panel template-component-panel">
+      <div class="panel-head"><div><p class="eyebrow">VARIABLES</p><h2>模板参数</h2></div></div>
+      <form method="post" action="{{ url_for('main.record_template_parameter_add', item_id=template.id) }}" class="parameter-form" data-parameter-builder>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="parameter-rows" data-parameter-rows><div class="parameter-input-row"><input name="record_template_parameter_name" placeholder="参数名称" required><input name="record_template_parameter_value" placeholder="数值"><input name="record_template_parameter_unit" placeholder="单位"><input name="record_template_parameter_notes" placeholder="说明"><button class="icon-btn" type="button" data-remove-parameter title="移除"><i data-lucide="x"></i></button></div></div>
+        <div class="parameter-actions"><button class="btn ghost" type="button" data-add-parameter><i data-lucide="plus"></i> 添加一行</button><button class="btn secondary"><i data-lucide="save"></i> 保存参数</button></div>
+      </form>
+      <div class="parameter-list">{% for parameter in template.parameters %}<div class="parameter-row"><span><b>{{ parameter.name }}</b><small>{{ parameter.notes or '模板默认值' }}</small></span><strong>{{ parameter.value or '—' }} {{ parameter.unit }}</strong><form method="post" action="{{ url_for('main.record_template_parameter_delete', item_id=parameter.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-btn danger" title="删除参数"><i data-lucide="trash-2"></i></button></form></div>{% else %}<div class="empty compact-empty"><p>还没有模板参数</p></div>{% endfor %}</div>
+    </section>
+  </main>
+  <aside class="detail-side">
+    <section class="panel template-apply-panel"><div class="panel-head"><div><p class="eyebrow">USE TEMPLATE</p><h2>调用记录模板</h2></div></div><form method="get" action="{{ url_for('main.record_template_use', item_id=template.id) }}" class="stack-form compact-form"><label>目标实验<select name="experiment_id" required><option value="">请选择实验</option>{% for experiment in experiments %}<option value="{{ experiment.id }}">{{ experiment.title }}</option>{% endfor %}</select></label><p class="muted small-text">打开目标实验的新增记录表单并填入模板，不会直接创建记录。</p><button class="btn primary full"><i data-lucide="notebook-tabs"></i> 在新增记录中调用</button></form></section>
+    <section class="panel danger-zone"><form method="post" action="{{ url_for('main.record_template_delete', item_id=template.id) }}" data-confirm="删除这个记录模板？"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ url_for('main.experiments') }}"><button class="text-danger"><i data-lucide="trash-2"></i> 删除记录模板</button></form></section>
+  </aside>
+</div>
+{% endblock %}

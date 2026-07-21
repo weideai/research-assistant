@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}实验周报 PPT{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div><p class="eyebrow">POWERPOINT REPORT</p><h1>实验周报 PPT</h1><p class="muted">从实验记录、参数、结果与图片生成可编辑的 Office PowerPoint。</p></div>
+</header>
+
+<div class="presentation-builder-layout">
+  <section class="panel presentation-form-panel">
+    <div class="panel-head"><div><p class="eyebrow">SCOPE</p><h2>选择汇报范围</h2></div><span class="count-label">{{ experiments|length }} 个实验可用</span></div>
+    <form method="post" class="stack-form presentation-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>汇报标题<input name="title" value="实验周报 · {{ week_start }}" maxlength="120" required></label>
+      <div class="form-grid"><label>开始日期<input type="date" name="start_date" value="{{ week_start }}" required></label><label>结束日期<input type="date" name="end_date" value="{{ week_end }}" required></label></div>
+      <fieldset class="presentation-experiment-field"><legend>纳入实验</legend><div class="presentation-select-actions"><button type="button" class="btn ghost" data-report-select="all"><i data-lucide="list-checks"></i> 全选</button><button type="button" class="btn ghost" data-report-select="none"><i data-lucide="square"></i> 清空</button></div><div class="presentation-experiment-list">
+        {% for experiment in experiments %}<label class="presentation-experiment-option"><input type="checkbox" name="experiment_ids" value="{{ experiment.id }}" {{ 'checked' if experiment.id in selected_ids }}><span><b>{{ experiment.title }}</b><small>{{ experiment.code or '未编号' }} · {{ experiment.status }} · {{ experiment.records|length }} 条记录 · {{ experiment.steps|length }} 步骤</small></span></label>{% else %}<div class="empty compact-empty"><p>还没有实验，请先创建实验和记录。</p></div>{% endfor %}
+      </div></fieldset>
+      <label class="toggle-line"><span><b>包含结果图片</b><small>自动选取日期范围内可预览的实验图片，保持比例排版。</small></span><input type="checkbox" name="include_images" value="1" checked></label>
+      <div class="presentation-review-note"><i data-lucide="shield-alert"></i><span><b>输出仍需人工核验</b><small>剂量、临床解释、统计结论、图片标注和原始数据完整性不会由系统自动判定。</small></span></div>
+      <div class="form-actions"><button class="btn primary"><i data-lucide="presentation"></i> 生成并下载 PPTX</button></div>
+    </form>
+  </section>
+
+  <aside class="detail-side">
+    <section class="panel presentation-outline"><div class="panel-head"><div><p class="eyebrow">DECK OUTLINE</p><h2>自动排版结构</h2></div></div><ol><li><b>周报封面</b><span>标题、日期、汇报人和核心数量</span></li><li><b>本周概览</b><span>实验状态与记录统计</span></li><li><b>实验进展</b><span>目的、步骤和最新结果</span></li><li><b>参数与结果证据</b><span>从记录中提取关键参数并保留来源语义</span></li><li><b>实验结果图片</b><span>从附件读取原图并等比例排版</span></li><li><b>下周计划</b><span>未完成步骤与人工核验清单</span></li></ol></section>
+    <section class="panel presentation-office-note"><div class="panel-head"><div><p class="eyebrow">OFFICE</p><h2>与 PowerPoint 配合</h2></div></div><div><i data-lucide="file-edit"></i><p>下载的是标准 `.pptx`，文字、形状和图片都可在 Microsoft PowerPoint 中继续编辑。后续接入 Office 插件时也可复用同一份实验数据和输出格式。</p></div></section>
+  </aside>
+</div>
+{% endblock %}
+{% block scripts %}<script>
+document.querySelectorAll('[data-report-select]').forEach((button) => button.addEventListener('click', () => {
+  document.querySelectorAll('.presentation-experiment-option input').forEach((input) => { input.checked = button.dataset.reportSelect === 'all'; });
+}));
+</script>{% endblock %}

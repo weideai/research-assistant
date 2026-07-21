@@ -22,6 +22,7 @@
         ('main.dashboard','layout-dashboard','总览'), ('main.tasks','check-square-2','任务'),
         ('main.experiments','flask-conical','实验'), ('main.samples','archive','样本'),
         ('main.papers','file-text','论文'), ('main.statistics','chart-no-axes-combined','统计'),
+        ('main.presentation_report','presentation','周报 PPT'),
         ('main.ai_assistant','sparkles','AI 助手'), ('auth.change_password','shield-check','账号安全') ] %}
       {% for endpoint, icon, label in nav %}
       <a href="{{ url_for(endpoint) }}" class="{{ 'active' if request.endpoint == endpoint or (endpoint == 'main.experiments' and request.endpoint in ['main.experiment_detail', 'main.record_detail', 'main.step_edit']) or (endpoint == 'main.papers' and request.endpoint == 'main.paper_detail') }}">
@@ -95,28 +96,38 @@
   <button class="ai-fab" id="ai-fab" type="button" aria-label="打开 AI 悬浮助手" title="AI 悬浮助手">
     <i data-lucide="sparkles"></i><span>AI</span>
   </button>
+  <button class="ai-completion-toast" id="ai-completion-toast" type="button" hidden aria-live="polite">
+    <i data-lucide="circle-check"></i><span><b>AI 已完成</b><small>点击查看结果</small></span>
+  </button>
   <section class="ai-dock" id="ai-dock" aria-label="AI 悬浮助手" aria-hidden="true">
     <header class="ai-dock-head">
       <div><span class="ai-presence"></span><div><b>科研 AI 助手</b><small id="ai-model-label">准备就绪</small></div></div>
       <div class="ai-dock-actions">
         <button class="icon-btn" id="ai-new-chat" type="button" title="新建对话" aria-label="新建对话"><i data-lucide="square-pen"></i></button>
+        <a class="icon-btn" id="ai-create-ppt" href="{{ url_for('main.presentation_report') }}" title="用所选实验制作 PPT" aria-label="制作实验周报 PPT"><i data-lucide="presentation"></i></a>
         <a class="icon-btn disabled" id="ai-export-chat" href="#" title="导出聊天记录" aria-label="导出聊天记录"><i data-lucide="download"></i></a>
         <a class="icon-btn" href="{{ url_for('main.api_settings') }}" title="API 设置" aria-label="API 设置"><i data-lucide="settings"></i></a>
         <button class="icon-btn" id="ai-close" type="button" title="关闭" aria-label="关闭 AI 助手"><i data-lucide="x"></i></button>
       </div>
     </header>
-    <div class="ai-context-bar" id="ai-context-bar"><i data-lucide="scan-text"></i><span>当前页面仅在生成修改建议时使用</span></div>
+    <div class="ai-context-bar" id="ai-context-bar"><i data-lucide="database"></i><span>可检索本人实验、记录、参数与附件说明，并返回来源</span></div>
+    <details class="ai-history-scope" id="ai-history-scope">
+      <summary><span><i data-lucide="list-filter"></i><b>选择实验历史</b></span><small id="ai-history-count">未选择</small></summary>
+      <div class="ai-history-tools"><button type="button" id="ai-select-current">仅当前实验</button><button type="button" id="ai-select-all">全选</button><button type="button" id="ai-clear-selection">清空</button></div>
+      <div class="ai-history-list" id="ai-history-list"><p>打开助手后加载实验列表</p></div>
+    </details>
     <div class="ai-messages" id="ai-messages" aria-live="polite">
       <div class="ai-welcome">
         <i data-lucide="flask-conical"></i>
         <b>可以开始讨论实验了</b>
-        <p>询问实验规划、分析记录，或让我修改当前实验/记录。所有页面修改都要经过差异确认。</p>
+        <p>可以比较历史实验、生成下一次计划或周报。所有页面修改都要经过差异确认。</p>
       </div>
     </div>
     <div class="ai-quick-prompts" id="ai-quick-prompts">
-      <button type="button">规划一个新实验</button>
-      <button type="button">检查当前页面内容</button>
-      <button type="button">优化实验步骤</button>
+      <button type="button">根据历史实验生成下一次计划</button>
+      <button type="button">比较当前实验与历史重复实验</button>
+      <button type="button">生成本周实验周报</button>
+      <button type="button">检索与当前实验相关的记录</button>
     </div>
     <form class="ai-composer" id="ai-composer" enctype="multipart/form-data">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -129,6 +140,7 @@
         </div>
         <button class="ai-send" type="submit" aria-label="发送消息"><i data-lucide="arrow-up"></i></button>
       </div>
+      <p class="ai-review-note"><i data-lucide="shield-alert"></i> 剂量、临床解释和统计结论需人工核验</p>
     </form>
   </section>
   {% endif %}

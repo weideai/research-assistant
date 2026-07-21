@@ -23,6 +23,7 @@ def app(tmp_path):
         "APPEARANCE_UPLOAD_DIR": str(tmp_path / "backgrounds"),
         "ATTACHMENT_UPLOAD_DIR": str(tmp_path / "experiment-files"),
         "AI_UPLOAD_DIR": str(tmp_path / "assistant-files"),
+        "BACKUP_DIR": str(tmp_path / "backups"),
     })
     with app.app_context():
         db.create_all()

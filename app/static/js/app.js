@@ -70,6 +70,29 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!window.confirm(form.dataset.confirm)) event.preventDefault();
     });
   });
+
+  document.querySelectorAll("details[data-disclosure-key]").forEach((details) => {
+    const storageKey = `research-assistant-disclosure:${details.dataset.disclosureKey}`;
+    try {
+      const savedState = window.localStorage.getItem(storageKey);
+      if (savedState !== null) details.open = savedState === "open";
+    } catch (_error) {
+      // The panel still works when browser storage is unavailable.
+    }
+    details.addEventListener("toggle", () => {
+      try {
+        window.localStorage.setItem(storageKey, details.open ? "open" : "closed");
+      } catch (_error) {
+        // Ignore private-mode storage failures.
+      }
+    });
+  });
+  document.querySelectorAll('a[href^="#"]').forEach((link) => {
+    link.addEventListener("click", () => {
+      const target = document.querySelector(link.getAttribute("href"));
+      if (target?.matches("details")) target.open = true;
+    });
+  });
   document.querySelectorAll(".flash-close").forEach((button) => {
     button.addEventListener("click", () => button.closest(".flash")?.remove());
   });
@@ -98,6 +121,38 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
+  document.querySelectorAll("[data-parameter-builder]").forEach((builder) => {
+    const rows = builder.querySelector("[data-parameter-rows]");
+    builder.querySelector("[data-add-parameter]")?.addEventListener("click", () => {
+      const source = rows?.querySelector(".parameter-input-row");
+      if (!source || !rows) return;
+      const clone = source.cloneNode(true);
+      clone.querySelectorAll("input").forEach((input) => { input.value = ""; });
+      rows.append(clone);
+      if (window.lucide) window.lucide.createIcons();
+      clone.querySelector("input")?.focus();
+    });
+    rows?.addEventListener("click", (event) => {
+      const removeButton = event.target.closest("[data-remove-parameter]");
+      if (!removeButton) return;
+      const row = removeButton.closest(".parameter-input-row");
+      const rowCount = rows.querySelectorAll(".parameter-input-row").length;
+      if (rowCount > 1) row?.remove();
+      else row?.querySelectorAll("input").forEach((input) => { input.value = ""; });
+    });
+  });
+
+  document.querySelectorAll("[data-template-select]").forEach((select) => {
+    const container = select.closest("form");
+    const viewLink = container?.querySelector("[data-template-view]");
+    const updateViewLink = () => {
+      const option = select.options[select.selectedIndex];
+      if (viewLink && option?.dataset.viewUrl) viewLink.href = option.dataset.viewUrl;
+    };
+    select.addEventListener("change", updateViewLink);
+    updateViewLink();
+  });
+
   const aiFab = document.querySelector("#ai-fab");
   const aiDock = document.querySelector("#ai-dock");
   const aiMessages = document.querySelector("#ai-messages");
@@ -107,6 +162,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const aiFileList = document.querySelector("#ai-file-list");
   const aiExport = document.querySelector("#ai-export-chat");
   const aiModelLabel = document.querySelector("#ai-model-label");
+  const aiHistoryList = document.querySelector("#ai-history-list");
+  const aiHistoryCount = document.querySelector("#ai-history-count");
+  const aiCompletionToast = document.querySelector("#ai-completion-toast");
   const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
   const assistantPage = {
     type: document.body.dataset.assistantPageType || "",
@@ -114,6 +172,25 @@ document.addEventListener("DOMContentLoaded", () => {
   };
   let aiConversationId = window.localStorage.getItem("research-assistant-conversation") || "";
   let aiLoaded = false;
+  let aiExperimentOptions = [];
+  let aiRequestRunning = false;
+  const baseDocumentTitle = document.title;
+
+  const hideAiNotice = () => {
+    if (aiCompletionToast) aiCompletionToast.hidden = true;
+    aiFab?.classList.remove("complete");
+    document.title = baseDocumentTitle;
+  };
+
+  const showAiNotice = (message, failed = false) => {
+    if (!aiCompletionToast) return;
+    aiCompletionToast.querySelector("b").textContent = failed ? "AI 运行失败" : "AI 已完成";
+    aiCompletionToast.querySelector("small").textContent = message;
+    aiCompletionToast.classList.toggle("failed", failed);
+    aiCompletionToast.hidden = false;
+    aiFab?.classList.toggle("complete", !failed);
+    document.title = `${failed ? "!" : "✓"} ${failed ? "AI 运行失败" : "AI 已完成"} · ${baseDocumentTitle}`;
+  };
 
   const makeElement = (tag, className, text) => {
     const element = document.createElement(tag);
@@ -126,7 +203,7 @@ document.addEventListener("DOMContentLoaded", () => {
     aiMessages.innerHTML = "";
     const welcome = makeElement("div", "ai-welcome");
     welcome.append(makeElement("b", "", "可以开始讨论实验了"));
-    welcome.append(makeElement("p", "", "询问实验规划、分析记录，或让我修改当前实验/记录。所有页面修改都要经过差异确认。"));
+    welcome.append(makeElement("p", "", "比较历史实验、生成下一次计划或周报，也可以修改当前页面。所有写入都要经过差异确认。"));
     aiMessages.append(welcome);
   };
 
@@ -135,6 +212,24 @@ document.addEventListener("DOMContentLoaded", () => {
     const label = makeElement("small", "ai-message-role", message.role === "user" ? "你" : "AI 助手");
     const content = makeElement("div", "ai-message-content", message.content);
     article.append(label, content);
+
+    if (message.role === "assistant" && (message.model_name || message.created_at)) {
+      const meta = makeElement("div", "ai-message-meta");
+      meta.append(makeElement("span", "", `${message.model_name || "模型未记录"} · ${message.created_at || ""}`));
+      if (message.has_prompt_snapshot) {
+        const promptLink = makeElement("a", "", "查看本次提示词");
+        promptLink.href = `/assistant/messages/${message.id}/prompt.txt`;
+        meta.append(promptLink);
+      }
+      article.append(meta);
+    }
+
+    if (message.requires_human_review) {
+      const warning = makeElement("div", "ai-human-review");
+      warning.append(makeElement("b", "", "需要人工核验"));
+      warning.append(makeElement("span", "", "此回复涉及剂量、临床解释或统计结论，不能直接作为最终判断。"));
+      article.append(warning);
+    }
 
     if (message.attachments?.length) {
       const files = makeElement("div", "ai-message-files");
@@ -150,11 +245,17 @@ document.addEventListener("DOMContentLoaded", () => {
       const references = makeElement("div", "ai-references");
       references.append(makeElement("b", "", "引用来源"));
       message.references.forEach((reference, index) => {
-        const link = makeElement("a", "", `[${index + 1}] ${reference.title || reference.url}`);
+        const row = makeElement("div", "ai-reference-row");
+        const marker = reference.citation ? `[${reference.citation}]` : `[${index + 1}]`;
+        const link = makeElement("a", "", `${marker} ${reference.title || reference.url}`);
         link.href = reference.url;
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        references.append(link);
+        if (/^https?:\/\//.test(reference.url)) {
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+        }
+        row.append(link);
+        if (reference.excerpt) row.append(makeElement("small", "", reference.excerpt));
+        references.append(row);
       });
       article.append(references);
     }
@@ -206,6 +307,48 @@ document.addEventListener("DOMContentLoaded", () => {
     conversation.messages.forEach(renderAiMessage);
   };
 
+  const selectedExperimentIds = () => Array.from(
+    aiHistoryList?.querySelectorAll('input[type="checkbox"]:checked') || []
+  ).map((input) => String(input.value));
+
+  const updateHistoryCount = () => {
+    const count = selectedExperimentIds().length;
+    if (aiHistoryCount) aiHistoryCount.textContent = count ? `已选择 ${count} 个实验` : "未选择实验";
+    const pptLink = document.querySelector("#ai-create-ppt");
+    if (pptLink) {
+      const query = selectedExperimentIds().map((id) => `experiment_id=${encodeURIComponent(id)}`).join("&");
+      pptLink.href = `/reports/presentation${query ? `?${query}` : ""}`;
+    }
+  };
+
+  const renderExperimentScope = (experiments, selectedIds = []) => {
+    if (!aiHistoryList) return;
+    aiExperimentOptions = experiments || [];
+    const selected = new Set((selectedIds || []).map(String));
+    if (!selected.size && assistantPage.type === "experiment" && assistantPage.id) selected.add(String(assistantPage.id));
+    aiHistoryList.innerHTML = "";
+    aiExperimentOptions.forEach((experiment) => {
+      const label = makeElement("label", "ai-history-option");
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.name = "experiment_ids";
+      input.value = String(experiment.id);
+      input.checked = selected.has(String(experiment.id));
+      const copy = makeElement("span", "");
+      copy.append(makeElement("b", "", experiment.title));
+      copy.append(makeElement("small", "", `${experiment.code} · ${experiment.status} · ${experiment.updated_at}`));
+      label.append(input, copy);
+      aiHistoryList.append(label);
+    });
+    if (!aiExperimentOptions.length) aiHistoryList.append(makeElement("p", "", "还没有可选择的实验"));
+    updateHistoryCount();
+  };
+
+  const appendExperimentScope = (data) => {
+    data.set("experiment_scope_present", "1");
+    selectedExperimentIds().forEach((itemId) => data.append("experiment_ids", itemId));
+  };
+
   const loadAiState = async () => {
     const query = aiConversationId ? `?conversation_id=${encodeURIComponent(aiConversationId)}` : "";
     let response = await fetch(`/assistant/state${query}`, {headers: {"Accept": "application/json"}});
@@ -217,11 +360,16 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!response.ok) throw new Error("无法读取 AI 会话");
     const state = await response.json();
     setConversation(state.conversation);
-    if (aiModelLabel) aiModelLabel.textContent = state.api.enabled ? state.api.model : "未配置 API";
+    renderExperimentScope(state.experiments, state.conversation?.selected_experiment_ids || []);
+    if (aiModelLabel) {
+      aiModelLabel.dataset.idleLabel = state.api.enabled ? state.api.model : "未配置 API";
+      aiModelLabel.textContent = aiModelLabel.dataset.idleLabel;
+    }
     aiLoaded = true;
   };
 
   aiFab?.addEventListener("click", async () => {
+    hideAiNotice();
     aiDock?.classList.add("open");
     aiDock?.setAttribute("aria-hidden", "false");
     if (!aiLoaded) {
@@ -233,12 +381,14 @@ document.addEventListener("DOMContentLoaded", () => {
     aiDock?.classList.remove("open");
     aiDock?.setAttribute("aria-hidden", "true");
   });
+  aiCompletionToast?.addEventListener("click", () => aiFab?.click());
 
   document.querySelector("#ai-new-chat")?.addEventListener("click", async () => {
     const data = new FormData();
     data.set("csrf_token", csrfToken);
     data.set("page_type", assistantPage.type);
     data.set("page_id", assistantPage.id);
+    appendExperimentScope(data);
     const response = await fetch("/assistant/conversations", {method: "POST", body: data});
     if (!response.ok) return;
     const conversation = await response.json();
@@ -252,16 +402,42 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
+  aiHistoryList?.addEventListener("change", updateHistoryCount);
+  document.querySelector("#ai-select-current")?.addEventListener("click", () => {
+    aiHistoryList?.querySelectorAll('input[type="checkbox"]').forEach((input) => {
+      input.checked = assistantPage.type === "experiment" && String(input.value) === String(assistantPage.id);
+    });
+    updateHistoryCount();
+  });
+  document.querySelector("#ai-select-all")?.addEventListener("click", () => {
+    aiHistoryList?.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.checked = true; });
+    updateHistoryCount();
+  });
+  document.querySelector("#ai-clear-selection")?.addEventListener("click", () => {
+    aiHistoryList?.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.checked = false; });
+    updateHistoryCount();
+  });
+
   aiFiles?.addEventListener("change", () => {
     aiFileList.innerHTML = "";
     Array.from(aiFiles.files || []).slice(0, 8).forEach((file) => aiFileList.append(makeElement("span", "", file.name)));
   });
 
+  aiInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      aiComposer?.requestSubmit();
+    }
+  });
+
   aiComposer?.addEventListener("submit", async (event) => {
     event.preventDefault();
-    if (!aiInput.value.trim() && !(aiFiles.files || []).length) return;
+    if (aiRequestRunning || (!aiInput.value.trim() && !(aiFiles.files || []).length)) return;
     const sendButton = aiComposer.querySelector(".ai-send");
+    aiRequestRunning = true;
     sendButton.disabled = true;
+    aiFab?.classList.add("working");
+    if (aiModelLabel) aiModelLabel.textContent = "正在后台运行…";
     const pending = makeElement("div", "ai-thinking", "AI 正在分析…");
     aiMessages.append(pending);
     aiMessages.scrollTop = aiMessages.scrollHeight;
@@ -269,6 +445,7 @@ document.addEventListener("DOMContentLoaded", () => {
     data.set("conversation_id", aiConversationId);
     data.set("page_type", assistantPage.type);
     data.set("page_id", assistantPage.id);
+    appendExperimentScope(data);
     try {
       const response = await fetch("/assistant/chat", {method: "POST", body: data});
       const result = await response.json();
@@ -286,10 +463,15 @@ document.addEventListener("DOMContentLoaded", () => {
       aiInput.value = "";
       aiFiles.value = "";
       aiFileList.innerHTML = "";
+      if (!aiDock?.classList.contains("open")) showAiNotice("点击查看本次回复");
     } catch (_error) {
       pending.textContent = "发送失败，请检查本地服务和 API 设置。";
+      if (!aiDock?.classList.contains("open")) showAiNotice("点击查看错误信息", true);
     } finally {
+      aiRequestRunning = false;
       sendButton.disabled = false;
+      aiFab?.classList.remove("working");
+      if (aiModelLabel) aiModelLabel.textContent = aiModelLabel.dataset.idleLabel || "准备就绪";
     }
   });
 

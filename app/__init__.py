@@ -130,6 +130,7 @@ def create_app(test_config=None):
         AI_UPLOAD_DIR=os.getenv(
             "AI_UPLOAD_DIR", str(Path(app.instance_path) / "uploads" / "assistant")
         ),
+        BACKUP_DIR=os.getenv("BACKUP_DIR", str(Path(app.instance_path) / "backups")),
         ALLOW_OPEN_LOCAL_FOLDERS=_env_bool("ALLOW_OPEN_LOCAL_FOLDERS", not production),
     )
     trusted_hosts = [host.strip() for host in os.getenv("TRUSTED_HOSTS", "").split(",") if host.strip()]

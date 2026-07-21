@@ -83,6 +83,34 @@
   filter: brightness(.94);
 }
 
+.ai-fab.working svg { animation: ai-spin 1.1s linear infinite; }
+.ai-fab.complete { background: var(--green); }
+@keyframes ai-spin { to { transform: rotate(360deg); } }
+
+.ai-completion-toast {
+  position: fixed;
+  right: 24px;
+  bottom: 82px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 190px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--green) 45%, var(--line));
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 12px 30px rgba(16, 34, 50, .2);
+  text-align: left;
+}
+.ai-completion-toast[hidden] { display: none; }
+.ai-completion-toast > svg { color: var(--green); }
+.ai-completion-toast b, .ai-completion-toast small { display: block; }
+.ai-completion-toast small { color: var(--muted); font-size: 10px; }
+.ai-completion-toast.failed { border-color: color-mix(in srgb, var(--red) 45%, var(--line)); }
+.ai-completion-toast.failed > svg { color: var(--red); }
+
 .ai-fab svg {
   width: 18px;
   height: 18px;
@@ -94,7 +122,7 @@
   bottom: 82px;
   z-index: 49;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto auto;
   width: min(440px, calc(100vw - 32px));
   height: min(720px, calc(100vh - 108px));
   overflow: hidden;
@@ -180,6 +208,25 @@
   color: var(--blue);
 }
 
+.ai-history-scope { border-bottom: 1px solid var(--line); background: var(--surface); }
+.ai-history-scope > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 40px; padding: 8px 15px; cursor: pointer; list-style: none; }
+.ai-history-scope > summary::-webkit-details-marker { display: none; }
+.ai-history-scope > summary span { display: flex; align-items: center; gap: 7px; }
+.ai-history-scope > summary svg { width: 14px; color: var(--blue); }
+.ai-history-scope > summary b { font-size: 11px; }
+.ai-history-scope > summary small { color: var(--muted); font-size: 10px; }
+.ai-history-tools { display: flex; gap: 5px; padding: 0 12px 8px; }
+.ai-history-tools button { padding: 4px 7px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface-soft); color: var(--muted); font-size: 10px; }
+.ai-history-tools button:hover { border-color: var(--blue); color: var(--blue); }
+.ai-history-list { display: grid; gap: 1px; max-height: 190px; overflow-y: auto; border-top: 1px solid var(--line); background: var(--line); }
+.ai-history-list > p { margin: 0; padding: 12px 15px; background: var(--surface); color: var(--muted); font-size: 11px; }
+.ai-history-option { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: center; gap: 8px; padding: 8px 14px; background: var(--surface); cursor: pointer; }
+.ai-history-option:hover { background: var(--surface-soft); }
+.ai-history-option input { width: 14px; min-height: 14px; accent-color: var(--blue); }
+.ai-history-option b, .ai-history-option small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-history-option b { font-size: 11px; }
+.ai-history-option small { color: var(--muted); font-size: 9px; }
+
 .ai-messages {
   min-height: 0;
   overflow-y: auto;
@@ -244,6 +291,35 @@
   color: #fff;
 }
 
+.ai-message-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+  max-width: 92%;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.ai-message-meta a {
+  color: var(--blue);
+  font-weight: 700;
+}
+
+.ai-human-review {
+  display: grid;
+  gap: 2px;
+  max-width: 92%;
+  padding: 9px 10px;
+  border-left: 3px solid var(--yellow);
+  background: var(--yellow-soft);
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.ai-human-review span {
+  color: var(--muted);
+}
+
 .ai-message-files,
 .ai-references {
   display: grid;
@@ -267,6 +343,19 @@
 
 .ai-references b {
   font-size: 11px;
+}
+
+.ai-reference-row {
+  display: grid;
+  gap: 1px;
+}
+
+.ai-reference-row small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ai-proposal {
@@ -461,6 +550,21 @@
   font-size: 10px;
 }
 
+.ai-review-note {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.ai-review-note svg {
+  width: 13px;
+  height: 13px;
+  color: var(--yellow);
+}
+
 @media (max-width: 600px) {
   .attachment-head-actions {
     align-items: flex-end;
@@ -476,6 +580,8 @@
     right: 14px;
     bottom: 14px;
   }
+
+  .ai-completion-toast { right: 14px; bottom: 70px; }
 
   .ai-dock {
     inset: 58px 0 0;
