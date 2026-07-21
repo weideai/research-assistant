@@ -10,10 +10,9 @@
         "FLASK_APP": "run.py",
         "FLASK_DEBUG": "1"
       },
-      "args": ["run", "--host", "127.0.0.1", "--port", "5000"],
+      "args": ["run", "--host", "127.0.0.1", "--port", "5001"],
       "jinja": true,
       "justMyCode": true
     }
   ]
 }
-

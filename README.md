@@ -46,9 +46,20 @@ python -m pip install -r requirements.txt
 ```
 
 4. 按 `F5` 并选择“运行 Research Assistant”，或执行 `python run.py`。
-5. 浏览器打开 <http://127.0.0.1:5000>，先创建本地账户。
+5. 浏览器打开 <http://127.0.0.1:5001>，先创建本地账户。
 
 数据库会在首次运行时自动创建于 `instance/research.db`。
+
+### 本地端口
+
+项目当前统一使用 `5001` 作为本地开发端口，完整地址是 <http://127.0.0.1:5001>。
+
+- 使用 `python run.py` 启动时，默认端口定义在 `run.py`，也可以在项目根目录的 `.env` 中设置 `PORT=5001`。
+- 使用 VS Code 的 `F5` 启动时，端口位于 `.vscode/launch.json` 的 `--port` 参数。
+- 服务启动后，终端中的 `Running on http://127.0.0.1:端口` 就是实际访问地址。
+- Windows 也可以执行 `netstat -ano | findstr :5001`，检查该端口是否正在监听。
+
+如需改成 `5050`，请将 `.env` 写为 `PORT=5050`，并把 `.vscode/launch.json` 中的 `--port` 同步改为 `5050`。修改端口后需要停止并重新启动服务。
 
 ## 本地备份与恢复
 
