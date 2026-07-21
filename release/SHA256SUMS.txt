@@ -1,0 +1,2 @@
+2d280d770610a23f777c7bd653f8dbc285f1b32cb62b28137daae79035cc70e6  ResearchAssistant-Windows-Setup.exe
+17846ad0954ae5fb0bd3ac7fa77394227a1e279604045ce20075ef1fd66d4c71  ResearchAssistant-Linux-Installer.run
