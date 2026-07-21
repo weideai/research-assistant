@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}任务管理{% endblock %}
+{% block content %}
+<header class="page-head"><div><p class="eyebrow">TASKS</p><h1>任务管理</h1><p class="muted">按优先级安排实验、论文与日常事务。</p></div><a class="btn secondary" href="{{ url_for('main.export_csv', resource='tasks') }}"><i data-lucide="download"></i> 导出 CSV</a></header>
+<section class="panel form-panel">
+  <form method="post" class="quick-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label class="grow">任务标题<input name="title" required placeholder="例如：完成 PCR 扩增"></label>
+    <label>分类<select name="category"><option>实验</option><option>论文</option><option>学习</option><option>会议</option><option>行政</option></select></label>
+    <label>优先级<select name="priority"><option>高</option><option selected>中</option><option>低</option></select></label>
+    <label>截止日期<input type="date" name="deadline"></label>
+    <label class="grow">备注<input name="notes" placeholder="可选"></label>
+    <button class="btn primary" type="submit"><i data-lucide="plus"></i> 添加任务</button>
+  </form>
+</section>
+<div class="filter-bar"><span>筛选</span>{% for s in ['全部','待办','完成'] %}<a class="chip {{ 'active' if selected_status == s }}" href="{{ url_for('main.tasks', status=s, category=selected_category) }}">{{ s }}</a>{% endfor %}<span class="divider"></span>{% for c in ['全部','实验','论文','学习','会议','行政'] %}<a class="chip {{ 'active' if selected_category == c }}" href="{{ url_for('main.tasks', status=selected_status, category=c) }}">{{ c }}</a>{% endfor %}</div>
+<section class="panel table-panel"><div class="table-wrap"><table><thead><tr><th class="check-col"></th><th>任务</th><th>分类</th><th>优先级</th><th>截止日期</th><th>状态</th><th class="actions-col"></th></tr></thead><tbody>
+{% for task in tasks %}<tr class="{{ 'row-done' if task.status == '完成' }}">
+  <td><form method="post" action="{{ url_for('main.task_toggle', item_id=task.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="check-btn"><i data-lucide="{{ 'check-square-2' if task.status == '完成' else 'square' }}"></i></button></form></td>
+  <td><b>{{ task.title }}</b>{% if task.notes %}<small class="cell-note">{{ task.notes }}</small>{% endif %}</td><td>{{ task.category }}</td><td><span class="badge priority-{{ task.priority }}">{{ task.priority }}</span></td>
+  <td class="{{ 'overdue' if task.deadline and task.deadline < today and task.status != '完成' }}">{{ task.deadline or '—' }}</td><td>{{ task.status }}</td><td><div class="row-actions"><a class="icon-btn" href="{{ url_for('main.task_edit', item_id=task.id) }}" title="编辑"><i data-lucide="pencil"></i></a><form method="post" action="{{ url_for('main.task_delete', item_id=task.id) }}" data-confirm="确定删除这个任务？"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-btn danger" title="删除"><i data-lucide="trash-2"></i></button></form></div></td>
+</tr>{% else %}<tr><td colspan="7" class="empty-cell">当前筛选条件下没有任务</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% endblock %}
+

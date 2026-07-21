@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f3f5f7">
+  <title>{% block title %}科研助手{% endblock %} · R/LAB</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" defer></script>
+</head>
+<body class="{% if not current_user.is_authenticated %}auth-body{% endif %}">
+{% if current_user.is_authenticated %}
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="{{ url_for('main.dashboard') }}" aria-label="返回首页">
+      <span class="brand-mark">R/</span><span><b>LAB</b><small>Research Assistant</small></span>
+    </a>
+    <nav class="nav-list" aria-label="主导航">
+      {% set nav = [
+        ('main.dashboard','layout-dashboard','总览'), ('main.tasks','check-square-2','任务'),
+        ('main.experiments','flask-conical','实验'), ('main.samples','archive','样本'),
+        ('main.papers','file-text','论文'), ('main.statistics','chart-no-axes-combined','统计'),
+        ('main.ai_assistant','sparkles','AI 助手'), ('auth.change_password','shield-check','账号安全') ] %}
+      {% for endpoint, icon, label in nav %}
+      <a href="{{ url_for(endpoint) }}" class="{{ 'active' if request.endpoint == endpoint or (endpoint == 'main.experiments' and request.endpoint == 'main.experiment_detail') or (endpoint == 'main.papers' and request.endpoint == 'main.paper_detail') }}">
+        <i data-lucide="{{ icon }}"></i><span>{{ label }}</span>
+      </a>
+      {% endfor %}
+      {% if not config.AI_SETTINGS_ADMIN_ONLY or current_user.is_admin %}<a href="{{ url_for('main.api_settings') }}" class="{{ 'active' if request.endpoint == 'main.api_settings' }}"><i data-lucide="settings"></i><span>API 设置</span></a>{% endif %}
+      {% if current_user.is_admin %}<a href="{{ url_for('admin.dashboard') }}" class="{{ 'active' if request.blueprint == 'admin' }}"><i data-lucide="shield"></i><span>系统管理</span></a>{% endif %}
+    </nav>
+    <div class="sidebar-foot">
+      <span class="avatar">{{ current_user.name[:1]|upper }}</span>
+      <span class="user-meta"><b>{{ current_user.name }}</b><small>{{ current_user.email }}</small></span>
+      <form method="post" action="{{ url_for('auth.logout') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="icon-btn" title="退出登录" aria-label="退出登录"><i data-lucide="log-out"></i></button>
+      </form>
+    </div>
+  </aside>
+  <div class="mobile-bar">
+    <button class="icon-btn" id="menu-toggle" aria-label="打开导航"><i data-lucide="menu"></i></button>
+    <a class="brand compact" href="{{ url_for('main.dashboard') }}"><span class="brand-mark">R/</span><b>LAB</b></a>
+  </div>
+  <main class="main-shell">
+{% else %}
+  <main>
+{% endif %}
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}<div class="flash-stack">
+        {% for category, message in messages %}<div class="flash {{ category }}">{{ message }}<button class="icon-btn flash-close" aria-label="关闭"><i data-lucide="x"></i></button></div>{% endfor %}
+      </div>{% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

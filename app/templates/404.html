@@ -1,0 +1,1 @@
+{% extends "base.html" %}{% block title %}页面不存在{% endblock %}{% block content %}<div class="not-found"><b>404</b><h1>没有找到这个页面</h1><p class="muted">记录可能已删除，或你没有访问权限。</p><a class="btn primary" href="{{ url_for('main.dashboard') if current_user.is_authenticated else url_for('auth.login') }}">返回首页</a></div>{% endblock %}

@@ -1,0 +1,1 @@
+{% extends "base.html" %}{% block title %}{{ title }}{% endblock %}{% block content %}<div class="not-found"><b>{{ code }}</b><h1>{{ title }}</h1><p class="muted">{{ message }}</p><a class="btn primary" href="{{ url_for('main.dashboard') if current_user.is_authenticated else url_for('auth.login') }}">返回首页</a></div>{% endblock %}

@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}总览{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div><p class="eyebrow">{{ today.strftime('%Y.%m.%d') }}</p><h1>早上好，{{ current_user.name }}</h1><p class="muted">这里是今天的科研进度。</p></div>
+  <a class="btn primary" href="{{ url_for('main.experiments') }}"><i data-lucide="plus"></i> 新建实验</a>
+</header>
+<section class="metric-grid">
+  <div class="metric accent-red"><span>今日待办</span><b>{{ stats.due_today }}</b><small>截止到今天</small></div>
+  <div class="metric accent-blue"><span>进行中实验</span><b>{{ stats.active_experiments }}</b><small>当前计划</small></div>
+  <div class="metric accent-green"><span>可用样本</span><b>{{ stats.available_samples }}</b><small>库存状态</small></div>
+  <div class="metric accent-yellow"><span>任务完成率</span><b>{{ stats.completion }}%</b><small>全部任务</small></div>
+</section>
+<div class="dashboard-grid">
+  <section class="panel span-2">
+    <div class="panel-head"><div><p class="eyebrow">FOCUS</p><h2>近期任务</h2></div><a href="{{ url_for('main.tasks') }}">查看全部 <i data-lucide="arrow-up-right"></i></a></div>
+    {% if tasks %}<div class="task-list">
+      {% for task in tasks %}<div class="task-row {{ 'done' if task.status == '完成' }}">
+        <form method="post" action="{{ url_for('main.task_toggle', item_id=task.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="check-btn" aria-label="切换完成状态"><i data-lucide="{{ 'check' if task.status == '完成' else 'circle' }}"></i></button></form>
+        <span class="task-main"><b>{{ task.title }}</b><small>{{ task.category }} · {{ task.deadline or '无截止日期' }}</small></span>
+        <span class="badge priority-{{ task.priority }}">{{ task.priority }}</span>
+      </div>{% endfor %}
+    </div>{% else %}<div class="empty"><i data-lucide="check-circle-2"></i><p>还没有任务</p><a href="{{ url_for('main.tasks') }}">添加第一项任务</a></div>{% endif %}
+  </section>
+  <section class="panel">
+    <div class="panel-head"><div><p class="eyebrow">ACTIVE</p><h2>实验进度</h2></div><a href="{{ url_for('main.experiments') }}"><i data-lucide="arrow-up-right"></i></a></div>
+    {% for exp in experiments %}<a class="experiment-mini" href="{{ url_for('main.experiment_detail', item_id=exp.id) }}">
+      <span class="status-dot status-{{ exp.status }}"></span><span><b>{{ exp.title }}</b><small>{{ exp.code or '未设置编号' }} · {{ exp.status }}</small></span><i data-lucide="chevron-right"></i>
+    </a>{% else %}<div class="empty compact-empty"><p>暂无实验计划</p></div>{% endfor %}
+  </section>
+  <section class="panel span-3">
+    <div class="panel-head"><div><p class="eyebrow">RECENT LOG</p><h2>最近实验记录</h2></div></div>
+    <div class="table-wrap"><table><thead><tr><th>日期</th><th>实验</th><th>执行人</th><th>结果</th><th>摘要</th></tr></thead><tbody>
+      {% for record in records %}<tr><td>{{ record.record_date }}</td><td><a href="{{ url_for('main.experiment_detail', item_id=record.experiment_id) }}">{{ record.experiment.title }}</a></td><td>{{ record.operator or '—' }}</td><td><span class="badge result-{{ record.result }}">{{ record.result }}</span></td><td class="truncate">{{ record.content }}</td></tr>
+      {% else %}<tr><td colspan="5" class="empty-cell">尚无实验记录</td></tr>{% endfor %}
+    </tbody></table></div>
+  </section>
+</div>
+{% if not tasks and not experiments %}<form method="post" action="{{ url_for('main.seed_demo') }}" class="demo-bar"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><span><b>第一次使用？</b> 添加一组可随时删除的示例数据。</span><button class="btn secondary">载入示例</button></form>{% endif %}
+{% endblock %}
+
