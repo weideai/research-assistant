@@ -6,3 +6,8 @@ __pycache__/
 instance/
 backups/
 .env.production
+build/windows/
+dist/windows/
+build/linux/
+dist/linux/
+build/linux-source/

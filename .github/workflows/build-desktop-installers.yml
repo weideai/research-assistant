@@ -1,0 +1,40 @@
+name: Build desktop installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -r requirements.txt -r requirements-build.txt
+      - shell: powershell
+        run: .\scripts\build_windows_installer.ps1 -Python python
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ResearchAssistant-Windows
+          path: dist/windows/ResearchAssistant-Setup.exe
+
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -r requirements.txt PyInstaller==6.16.0
+      - run: chmod +x scripts/build_linux_packages.sh scripts/build_linux_source_installer.sh && ./scripts/build_linux_packages.sh && ./scripts/build_linux_source_installer.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ResearchAssistant-Linux
+          path: |
+            dist/linux/research-assistant_1.0.0_amd64.deb
+            dist/linux/research-assistant_1.0.0_linux_amd64.tar.gz
+            dist/linux/ResearchAssistant-Linux-Installer.run

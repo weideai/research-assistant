@@ -1,0 +1,9 @@
+Package: research-assistant
+Version: 1.0.0
+Section: science
+Priority: optional
+Architecture: amd64
+Maintainer: R/LAB
+Description: Medical research planning and experiment record assistant
+ A local Flask-based desktop application for experiment planning,
+ structured records, attachments, templates, reports, and AI assistance.

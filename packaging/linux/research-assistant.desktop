@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=R/LAB Research Assistant
+Comment=Medical research planning and experiment records
+Exec=/opt/research-assistant/ResearchAssistant
+Icon=research-assistant
+Terminal=false
+Categories=Science;Education;Office;
+StartupNotify=true

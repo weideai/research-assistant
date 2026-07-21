@@ -61,6 +61,69 @@ python -m pip install -r requirements.txt
 
 如需改成 `5050`，请将 `.env` 写为 `PORT=5050`，并把 `.vscode/launch.json` 中的 `--port` 同步改为 `5050`。修改端口后需要停止并重新启动服务。
 
+## Windows EXE 安装版
+
+项目可以构建为 Windows 本地安装程序。安装版仍在本机运行，通过浏览器打开 `127.0.0.1:5001`，不会把数据上传到网络。
+
+安装后的目录：
+
+- 程序：`%LOCALAPPDATA%\Programs\ResearchAssistant`
+- 数据库、附件和本地密钥：`%LOCALAPPDATA%\ResearchAssistant\data`
+- 运行日志：`%LOCALAPPDATA%\ResearchAssistant\logs\desktop.log`
+
+构建安装包：
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
+.\scripts\build_windows_installer.ps1
+```
+
+生成的安装程序位于 `dist\windows\ResearchAssistant-Setup.exe`。双击后选择“快速安装”，程序会创建桌面和开始菜单快捷方式。如果从当前项目的 `dist\windows` 目录直接安装，并且安装数据目录还是空的，安装程序会自动复制当前 `instance` 中的账户、实验记录、附件和密钥；重复安装或升级不会覆盖已经存在的安装版数据。
+
+启动后会自动打开网页，并在 Windows 右下角显示 R/LAB 托盘图标。托盘菜单可重新打开网页、打开数据目录或退出本地服务。Windows“已安装的应用”中可以卸载程序；卸载默认保留科研数据，避免误删实验记录。
+
+## Linux 安装包
+
+Linux 不使用 Windows `.exe` 格式。项目生成以下两种 Linux x86-64 产物：
+
+- `research-assistant_1.0.0_amd64.deb`：适用于 Ubuntu、Debian、Linux Mint 等 Debian 系发行版。
+- `research-assistant_1.0.0_linux_amd64.tar.gz`：包含独立可执行文件，适用于其他常见 x86-64 Linux 发行版。
+- `ResearchAssistant-Linux-Installer.run`：可在 Windows 上预先生成的 Linux 安装器；在目标 Linux 中创建独立 Python 环境，适合暂时没有 Linux 构建机时使用，需要目标电脑安装 Python 3、`python3-venv` 并能下载 Python 依赖。
+
+必须在 Linux 环境中构建，因为 PyInstaller 不支持从 Windows 交叉生成 Linux 二进制文件：
+
+```bash
+python3 -m venv .venv-linux
+source .venv-linux/bin/activate
+python -m pip install -r requirements.txt PyInstaller==6.16.0
+chmod +x scripts/build_linux_packages.sh
+./scripts/build_linux_packages.sh
+```
+
+安装 `.deb`：
+
+```bash
+sudo apt install ./dist/linux/research-assistant_1.0.0_amd64.deb
+research-assistant
+```
+
+Linux 版默认后台运行并打开 <http://127.0.0.1:5001>。可使用 `research-assistant --status` 查看状态，使用 `research-assistant --stop` 停止服务。数据保存在 `~/.local/share/research-assistant/data`，卸载程序不会删除该目录。
+
+在 Windows 上生成可交付给 Linux 的 `.run` 安装器：
+
+```powershell
+.\scripts\build_linux_source_installer.ps1
+```
+
+复制到 Linux 后安装：
+
+```bash
+chmod +x ResearchAssistant-Linux-Installer.run
+./ResearchAssistant-Linux-Installer.run
+```
+
+仓库中的 `.github/workflows/build-desktop-installers.yml` 会在 GitHub Actions 中同时生成 Windows 安装包和 Linux `.deb`/压缩包。进入 GitHub 仓库的 Actions 页面，手动运行 `Build desktop installers` 即可下载两个平台的构建产物。
+
 ## 本地备份与恢复
 
 创建完整备份：

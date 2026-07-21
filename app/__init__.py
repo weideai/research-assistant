@@ -71,7 +71,11 @@ def _database_url(instance_path):
 
 def create_app(test_config=None):
     load_dotenv()
-    app = Flask(__name__, instance_relative_config=True)
+    configured_instance_path = os.getenv("RESEARCH_ASSISTANT_INSTANCE_DIR", "").strip()
+    app = Flask(
+        __name__, instance_relative_config=True,
+        instance_path=configured_instance_path or None,
+    )
     Path(app.instance_path).mkdir(parents=True, exist_ok=True)
     production = os.getenv("APP_ENV", "development").strip().lower() == "production"
     explicit_secret_key = str((test_config or {}).get("SECRET_KEY") or os.getenv("SECRET_KEY", "")).strip()
