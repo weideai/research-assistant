@@ -81,6 +81,9 @@ tbody tr:hover { background: var(--surface-hover); }
 html[data-theme="minimal"] .sidebar { border-right: 1px solid var(--line); color: var(--ink); }
 html[data-theme="minimal"] .brand-mark { color: var(--surface); }
 html[data-theme="minimal"] .sidebar-foot { border-color: var(--line); }
+html[data-theme="minimal"] .project-credit { border-color: var(--line); color: var(--sidebar-muted); }
+html[data-theme="minimal"] .project-credit b { color: var(--ink); }
+html[data-theme="minimal"] .project-credit a:hover { background: var(--surface-soft); color: var(--ink); }
 html[data-theme="minimal"] .panel,
 html[data-theme="minimal"] .metric,
 html[data-theme="minimal"] .experiment-card,

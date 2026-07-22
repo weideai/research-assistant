@@ -11,7 +11,7 @@ a { color: inherit; text-decoration: none; }
 button, input, textarea, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
 svg { width: 18px; height: 18px; stroke-width: 1.8; flex: 0 0 auto; }
-.sidebar { position: fixed; inset: 0 auto 0 0; z-index: 20; width: 236px; display: flex; flex-direction: column; padding: 26px 18px 18px; background: var(--sidebar); color: #fff; }
+.sidebar { position: fixed; inset: 0 auto 0 0; z-index: 20; width: 236px; display: flex; flex-direction: column; overflow-y: auto; padding: 26px 18px 18px; background: var(--sidebar); color: #fff; }
 .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .brand-mark { display: grid; place-items: center; width: 40px; height: 40px; background: #d9ff43; color: #17242b; font: 900 17px/1 Arial, sans-serif; }
 .brand b { display: block; font-size: 18px; line-height: 1.1; }
@@ -26,6 +26,14 @@ svg { width: 18px; height: 18px; stroke-width: 1.8; flex: 0 0 auto; }
 .user-meta { min-width: 0; flex: 1; }
 .user-meta b, .user-meta small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .user-meta b { font-size: 13px; }.user-meta small { color: var(--sidebar-muted); font-size: 10px; }
+.project-credit { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; padding: 10px 2px 0; border-top: 1px solid #30414a; color: var(--sidebar-muted); }
+.project-credit span { min-width: 0; }
+.project-credit b, .project-credit small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-credit b { color: #fff; font-size: 10px; font-weight: 700; }
+.project-credit small { margin-top: 2px; font-size: 9px; }
+.project-credit a { display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 auto; border-radius: 5px; color: var(--sidebar-muted); }
+.project-credit a:hover { background: #2a3b44; color: #fff; }
+.project-credit svg { width: 15px; height: 15px; }
 .main-shell { min-height: 100vh; margin-left: 236px; padding: 36px clamp(24px, 4vw, 58px) 64px; }
 .mobile-bar { display: none; }
 .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 26px; }

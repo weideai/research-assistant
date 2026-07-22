@@ -1,5 +1,7 @@
 # R/LAB Research Assistant
 
+项目作者：面壁者 · [GitHub 仓库](https://github.com/weideai/research-assistant)
+
 一个面向医学研究生和实验室工作的科研助手，可在 Windows 本地运行，也可用 Docker 部署到公网。它不是简单的 Todo List，而是把任务、实验计划、实验记录、样本库存、论文返修和 AI 笔记整理放进同一个工作台。
 
 仓库内已生成可分发安装文件：Windows 使用 `release/ResearchAssistant-Windows-Setup.exe`，Linux 使用 `release/ResearchAssistant-Linux-Installer.run`。安装说明和 SHA-256 校验值位于 `release/README.md`。

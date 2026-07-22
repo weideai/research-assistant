@@ -424,3 +424,11 @@ def test_assistant_ui_exposes_chat_history_and_cherry_style_shortcuts(client, au
     assert b'event.key.toLowerCase() === "n"' in script
     assert b'event.key.toLowerCase() === "k"' in script
     assert b'event.key.toLowerCase() === "l"' in script
+
+
+def test_project_credit_exposes_author_and_repository(client, auth):
+    auth.register()
+    page = client.get("/").data
+    assert "作者：面壁者".encode() in page
+    assert b'https://github.com/weideai/research-assistant' in page
+    assert 'aria-label="打开项目 GitHub 仓库"'.encode() in page
