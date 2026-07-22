@@ -2,7 +2,10 @@ import io
 
 from app import db
 from app.ai_service import AIConfig
-from app.models import AIChatAttachment, AIConversation, AIMessage, Experiment, ExperimentStep
+from app.models import (
+    AIAssistantPreference, AIChatAttachment, AIConversation, AIKnowledgeBase,
+    AIKnowledgeDocument, AIMessage, Experiment, ExperimentStep,
+)
 
 
 def create_experiment(client, app):
@@ -207,3 +210,217 @@ def test_assistant_limits_research_context_to_selected_experiments(client, auth,
     assert "FIRST PRIVATE RESULT" not in captured["prompt"]
     state = client.get(f"/assistant/state?conversation_id={response.get_json()['conversation_id']}").get_json()
     assert state["conversation"]["selected_experiment_ids"] == [second_id]
+
+
+def test_user_can_build_private_knowledge_base_and_reset_prompt(client, auth, app, monkeypatch):
+    auth.register(email="knowledge-owner@example.com")
+    created = client.post("/assistant/knowledge-bases", data={
+        "name": "细胞培养 SOP", "description": "实验室内部流程",
+        "custom_instructions": "优先提醒无菌操作。",
+    })
+    assert created.status_code == 200
+    base_id = created.get_json()["id"]
+    added = client.post(f"/assistant/knowledge-bases/{base_id}/documents", data={
+        "title": "换液规范", "text_content": "细胞融合度达到 70% 后按 SOP 换液。",
+    })
+    assert added.status_code == 200
+    saved_prompt = client.post("/assistant/preferences", data={
+        "custom_prompt": "回答时先给出操作清单，再列出风险点。",
+    })
+    assert saved_prompt.status_code == 200
+
+    captured = {}
+
+    def fake_chat(_messages, system_prompt, _config, **_kwargs):
+        captured["prompt"] = system_prompt
+        return {
+            "reply": "知识库要求在 70% 融合度后换液 [K1]。",
+            "proposal": None, "references": [], "web_requested": False, "web_used": False,
+        }
+
+    monkeypatch.setattr("app.main.current_ai_config", lambda: AIConfig(
+        api_url="https://api.example.test/v1", api_key="test", model="knowledge-model", enabled=True,
+    ))
+    monkeypatch.setattr("app.main.chat_with_assistant", fake_chat)
+    chat = client.post("/assistant/chat", data={
+        "message": "根据知识库说明换液时间", "knowledge_scope_present": "1",
+        "knowledge_base_ids": [str(base_id)],
+    })
+    assert chat.status_code == 200
+    assert "细胞融合度达到 70%" in captured["prompt"]
+    assert "先给出操作清单" in captured["prompt"]
+    assert "必须由用户查看修改前后差异并确认" in captured["prompt"]
+    assert chat.get_json()["assistant_message"]["references"][0]["citation"] == "K1"
+
+    state = client.get(f"/assistant/state?conversation_id={chat.get_json()['conversation_id']}").get_json()
+    assert state["conversation"]["selected_knowledge_base_ids"] == [base_id]
+    assert state["knowledge_bases"][0]["documents"][0]["readable"] is True
+
+    reset = client.post("/assistant/preferences", data={"action": "reset"})
+    assert reset.status_code == 200
+    assert reset.get_json()["using_default"] is True
+    with app.app_context():
+        assert AIAssistantPreference.query.one().custom_prompt == ""
+        document_id = AIKnowledgeDocument.query.one().id
+
+    auth.logout()
+    auth.register(email="knowledge-other@example.com")
+    assert client.get(f"/assistant/knowledge-documents/{document_id}/download").status_code == 404
+    assert client.post(f"/assistant/knowledge-bases/{base_id}", data={"action": "delete"}).status_code == 404
+
+
+def test_assistant_applies_selected_diff_only_and_can_revert(client, auth, app, monkeypatch):
+    auth.register()
+    experiment_id = create_experiment(client, app)
+    monkeypatch.setattr("app.main.current_ai_config", lambda: AIConfig(
+        api_url="https://api.example.test/v1", api_key="test", model="test-model", enabled=True,
+    ))
+    monkeypatch.setattr("app.main.chat_with_assistant", lambda *_args, **_kwargs: {
+        "reply": "Prepared two field changes.",
+        "proposal": {
+            "action": "manage_experiment",
+            "changes": {"objective": "Selected objective", "owner": "AI owner"},
+        },
+        "references": [], "web_requested": False, "web_used": False,
+    })
+    response = client.post("/assistant/chat", data={
+        "message": "Update objective and owner", "page_type": "experiment", "page_id": experiment_id,
+    })
+    message_id = response.get_json()["assistant_message"]["id"]
+    applied = client.post(f"/assistant/proposals/{message_id}/apply", data={
+        "selection_present": "1", "selected_change_ids": ["field:objective"],
+    })
+    assert applied.status_code == 200
+    assert applied.get_json()["can_revert"] is True
+    with app.app_context():
+        experiment = db.session.get(Experiment, experiment_id)
+        assert experiment.objective == "Selected objective"
+        assert experiment.owner == "Researcher"
+
+    reverted = client.post(f"/assistant/proposals/{message_id}/revert")
+    assert reverted.status_code == 200
+    with app.app_context():
+        experiment = db.session.get(Experiment, experiment_id)
+        assert experiment.objective == "Original objective"
+        assert experiment.owner == "Researcher"
+        assert db.session.get(AIMessage, message_id).reverted_at is not None
+
+
+def test_assistant_ui_exposes_window_knowledge_and_message_controls(client, auth):
+    auth.register()
+    response = client.get("/")
+    assert response.status_code == 200
+    for control_id in (
+        "ai-dock-left", "ai-dock-right", "ai-maximize", "ai-popout",
+        "ai-knowledge-create-form", "ai-prompt-form", "ai-prompt-reset", "ai-stop",
+    ):
+        assert f'id="{control_id}"'.encode() in response.data
+    assert client.get("/assistant/popup").status_code == 200
+    script = client.get("/static/js/app.js").data
+    assert b"ResizeObserver" in script
+    assert b"selected_change_ids" in script
+    assert b"navigator.clipboard.writeText" in script
+
+
+def test_assistant_conversations_can_be_listed_renamed_and_deleted_privately(client, auth, app):
+    auth.register(email="conversation-owner@example.com")
+    first = client.post("/assistant/conversations", data={}).get_json()
+    second = client.post("/assistant/conversations", data={}).get_json()
+
+    renamed = client.post(f"/assistant/conversations/{first['id']}", data={
+        "action": "rename", "title": "细胞实验复盘",
+    })
+    assert renamed.status_code == 200
+    state = client.get(f"/assistant/state?conversation_id={first['id']}").get_json()
+    assert state["conversation"]["title"] == "细胞实验复盘"
+    assert {item["id"] for item in state["conversations"]} == {first["id"], second["id"]}
+
+    auth.logout()
+    auth.register(email="conversation-other@example.com")
+    assert client.post(f"/assistant/conversations/{first['id']}", data={"action": "delete"}).status_code == 404
+
+    auth.logout()
+    auth.login(email="conversation-owner@example.com")
+    deleted = client.post(f"/assistant/conversations/{first['id']}", data={"action": "delete"})
+    assert deleted.status_code == 200
+    assert deleted.get_json()["next_conversation_id"] == second["id"]
+    with app.app_context():
+        assert db.session.get(AIConversation, first["id"]) is None
+
+
+def test_assistant_can_edit_final_prompt_and_regenerate_final_reply(client, auth, app, monkeypatch):
+    auth.register()
+    replies = iter(("first reply", "edited reply", "regenerated reply"))
+    monkeypatch.setattr("app.main.current_ai_config", lambda: AIConfig(
+        api_url="https://api.example.test/v1", api_key="test", model="history-model", enabled=True,
+    ))
+    monkeypatch.setattr("app.main.chat_with_assistant", lambda *_args, **_kwargs: {
+        "reply": next(replies), "proposal": None, "references": [],
+        "web_requested": False, "web_used": False,
+    })
+
+    chat = client.post("/assistant/chat", data={"message": "original prompt"}).get_json()
+    conversation_id = chat["conversation_id"]
+    state = client.get(f"/assistant/state?conversation_id={conversation_id}").get_json()["conversation"]
+    user_message, assistant_message = state["messages"]
+    assert user_message["can_edit"] is True
+    assert assistant_message["can_regenerate"] is True
+
+    edited = client.post(f"/assistant/messages/{user_message['id']}", data={
+        "action": "edit", "content": "edited prompt",
+    })
+    assert edited.status_code == 200
+    assert edited.get_json()["assistant_message"]["content"] == "edited reply"
+    state = client.get(f"/assistant/state?conversation_id={conversation_id}").get_json()["conversation"]
+    assert [item["content"] for item in state["messages"]] == ["edited prompt", "edited reply"]
+
+    final_reply_id = state["messages"][-1]["id"]
+    regenerated = client.post(f"/assistant/messages/{final_reply_id}/regenerate")
+    assert regenerated.status_code == 200
+    assert regenerated.get_json()["assistant_message"]["content"] == "regenerated reply"
+    with app.app_context():
+        assert AIMessage.query.filter_by(conversation_id=conversation_id).count() == 2
+
+
+def test_assistant_rejects_editing_older_turn_and_active_applied_reply(client, auth, app, monkeypatch):
+    auth.register()
+    monkeypatch.setattr("app.main.current_ai_config", lambda: AIConfig(
+        api_url="https://api.example.test/v1", api_key="test", model="guard-model", enabled=True,
+    ))
+    monkeypatch.setattr("app.main.chat_with_assistant", lambda *_args, **_kwargs: {
+        "reply": "reply", "proposal": None, "references": [],
+        "web_requested": False, "web_used": False,
+    })
+    first = client.post("/assistant/chat", data={"message": "first"}).get_json()
+    conversation_id = first["conversation_id"]
+    client.post("/assistant/chat", data={"conversation_id": conversation_id, "message": "second"})
+    state = client.get(f"/assistant/state?conversation_id={conversation_id}").get_json()["conversation"]
+    assert state["messages"][0]["can_edit"] is False
+    assert client.post(f"/assistant/messages/{state['messages'][0]['id']}", data={
+        "action": "edit", "content": "changed first",
+    }).status_code == 409
+
+    final_reply_id = state["messages"][-1]["id"]
+    with app.app_context():
+        message = db.session.get(AIMessage, final_reply_id)
+        message.applied_at = message.created_at
+        db.session.commit()
+    assert client.post(f"/assistant/messages/{final_reply_id}/regenerate").status_code == 409
+    assert client.post(f"/assistant/messages/{final_reply_id}", data={"action": "delete"}).status_code == 409
+
+
+def test_assistant_ui_exposes_chat_history_and_cherry_style_shortcuts(client, auth):
+    auth.register()
+    page = client.get("/").data
+    for control_id in (
+        "ai-sidebar-toggle", "ai-new-chat", "ai-new-chat-side",
+        "ai-conversation-search", "ai-conversation-list",
+    ):
+        assert f'id="{control_id}"'.encode() in page
+    script = client.get("/static/js/app.js").data
+    assert b"ai-edit-message" in script
+    assert b"ai-delete-message" in script
+    assert b"ai-regenerate-message" in script
+    assert b'event.key.toLowerCase() === "n"' in script
+    assert b'event.key.toLowerCase() === "k"' in script
+    assert b'event.key.toLowerCase() === "l"' in script

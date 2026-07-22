@@ -6,6 +6,8 @@ File: `ResearchAssistant-Windows-Setup.exe`
 
 Double-click the installer. It installs the application for the current Windows user, creates Desktop and Start Menu shortcuts, and keeps research data under `%LOCALAPPDATA%\ResearchAssistant\data`.
 
+The release installer contains application code only. It does not include the developer's accounts, database, attachments, knowledge-base files, `.env`, API keys, or local credential key. Each installation creates and keeps its own local data directory.
+
 ## Linux
 
 File: `ResearchAssistant-Linux-Installer.run`
@@ -18,6 +20,8 @@ chmod +x ResearchAssistant-Linux-Installer.run
 ```
 
 This installer requires Python 3, `python3-venv`, and network access for Python dependencies. Research data is stored under `~/.local/share/research-assistant/data`.
+
+The Linux source payload also excludes `instance/`, `.env`, build output, release output, and local virtual environments.
 
 ## Integrity
 

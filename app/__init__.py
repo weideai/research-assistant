@@ -134,6 +134,9 @@ def create_app(test_config=None):
         AI_UPLOAD_DIR=os.getenv(
             "AI_UPLOAD_DIR", str(Path(app.instance_path) / "uploads" / "assistant")
         ),
+        KNOWLEDGE_UPLOAD_DIR=os.getenv(
+            "KNOWLEDGE_UPLOAD_DIR", str(Path(app.instance_path) / "uploads" / "knowledge")
+        ),
         BACKUP_DIR=os.getenv("BACKUP_DIR", str(Path(app.instance_path) / "backups")),
         ALLOW_OPEN_LOCAL_FOLDERS=_env_bool("ALLOW_OPEN_LOCAL_FOLDERS", not production),
     )

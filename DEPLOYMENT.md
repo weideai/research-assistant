@@ -124,7 +124,7 @@ cd /opt/research-assistant
 如果暂时不用 Git，可在 Windows 项目目录创建压缩包：
 
 ```powershell
-cd "C:\Users\32406\Documents\New project\research_assistant"
+cd "C:\path\to\research_assistant"
 tar --exclude=.venv --exclude=instance --exclude=.pytest_cache --exclude=.env -czf ..\research-assistant.tar.gz .
 scp ..\research-assistant.tar.gz deploy@203.0.113.10:/tmp/
 ```

@@ -109,9 +109,10 @@ class AIConversation(TimestampMixin, db.Model):
     page_type = db.Column(db.String(30), default="")
     page_id = db.Column(db.Integer)
     selected_experiment_ids_json = db.Column(db.Text, nullable=False, default="[]")
+    selected_knowledge_base_ids_json = db.Column(db.Text, nullable=False, default="[]")
     messages = db.relationship(
         "AIMessage", backref="conversation", cascade="all, delete-orphan",
-        order_by="AIMessage.created_at",
+        order_by="AIMessage.created_at, AIMessage.id",
     )
 
 
@@ -128,6 +129,9 @@ class AIMessage(TimestampMixin, db.Model):
     context_snapshot_json = db.Column(db.Text, nullable=False, default="{}")
     requires_human_review = db.Column(db.Boolean, nullable=False, default=False)
     applied_at = db.Column(db.DateTime)
+    undo_json = db.Column(db.Text, nullable=False, default="")
+    after_json = db.Column(db.Text, nullable=False, default="")
+    reverted_at = db.Column(db.DateTime)
     attachments = db.relationship(
         "AIChatAttachment", backref="message", cascade="all, delete-orphan",
         order_by="AIChatAttachment.created_at",
@@ -142,6 +146,46 @@ class AIChatAttachment(TimestampMixin, db.Model):
     size_bytes = db.Column(db.BigInteger, nullable=False, default=0)
     mime_type = db.Column(db.String(160), nullable=False, default="application/octet-stream")
     text_excerpt = db.Column(db.Text, nullable=False, default="")
+
+    @property
+    def size_label(self):
+        if self.size_bytes >= 1024 * 1024:
+            return f"{self.size_bytes / (1024 * 1024):.1f} MB"
+        if self.size_bytes >= 1024:
+            return f"{self.size_bytes / 1024:.1f} KB"
+        return f"{self.size_bytes} B"
+
+
+class AIAssistantPreference(TimestampMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, unique=True, index=True)
+    custom_prompt = db.Column(db.Text, nullable=False, default="")
+
+
+class AIKnowledgeBase(TimestampMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    name = db.Column(db.String(160), nullable=False)
+    description = db.Column(db.Text, nullable=False, default="")
+    custom_instructions = db.Column(db.Text, nullable=False, default="")
+    is_enabled = db.Column(db.Boolean, nullable=False, default=True)
+    documents = db.relationship(
+        "AIKnowledgeDocument", backref="knowledge_base", cascade="all, delete-orphan",
+        order_by="AIKnowledgeDocument.created_at",
+    )
+
+
+class AIKnowledgeDocument(TimestampMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    knowledge_base_id = db.Column(
+        db.Integer, db.ForeignKey("ai_knowledge_base.id"), nullable=False, index=True
+    )
+    title = db.Column(db.String(255), nullable=False)
+    original_name = db.Column(db.String(255), nullable=False, default="")
+    stored_path = db.Column(db.String(1000), nullable=False, default="")
+    mime_type = db.Column(db.String(160), nullable=False, default="text/plain")
+    size_bytes = db.Column(db.BigInteger, nullable=False, default=0)
+    text_content = db.Column(db.Text, nullable=False, default="")
 
     @property
     def size_label(self):

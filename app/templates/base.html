@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/assistant.css') }}">
   <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" defer></script>
 </head>
-<body class="{% if not current_user.is_authenticated %}auth-body{% endif %}{% if appearance.background_url %} has-custom-background{% endif %}" data-assistant-page-type="{{ assistant_page.type }}" data-assistant-page-id="{{ assistant_page.id or '' }}"{% if appearance.background_url %} style="--workspace-background-image: url('{{ appearance.background_url }}')"{% endif %}>
+<body class="{% if not current_user.is_authenticated %}auth-body{% endif %}{% if appearance.background_url %} has-custom-background{% endif %}{% if assistant_popup %} assistant-popup-page{% endif %}" data-assistant-popup="{{ '1' if assistant_popup else '0' }}" data-assistant-page-type="{{ assistant_page.type }}" data-assistant-page-id="{{ assistant_page.id or '' }}"{% if appearance.background_url %} style="--workspace-background-image: url('{{ appearance.background_url }}')"{% endif %}>
 {% if current_user.is_authenticated %}
   <aside class="sidebar" id="sidebar">
     <a class="brand" href="{{ url_for('main.dashboard') }}" aria-label="返回首页">
@@ -101,48 +101,93 @@
   </button>
   <section class="ai-dock" id="ai-dock" aria-label="AI 悬浮助手" aria-hidden="true">
     <header class="ai-dock-head">
-      <div><span class="ai-presence"></span><div><b>科研 AI 助手</b><small id="ai-model-label">准备就绪</small></div></div>
+      <div class="ai-dock-identity">
+        <button class="icon-btn" id="ai-sidebar-toggle" type="button" title="显示历史聊天 (Ctrl+Shift+L)" aria-label="显示历史聊天"><i data-lucide="panel-left-open"></i></button>
+        <span class="ai-presence"></span>
+        <div><b id="ai-chat-title">科研 AI 助手</b><small id="ai-model-label">准备就绪</small></div>
+      </div>
       <div class="ai-dock-actions">
-        <button class="icon-btn" id="ai-new-chat" type="button" title="新建对话" aria-label="新建对话"><i data-lucide="square-pen"></i></button>
+        <button class="icon-btn" id="ai-new-chat" type="button" title="新建对话 (Ctrl+N)" aria-label="新建对话"><i data-lucide="square-pen"></i></button>
         <a class="icon-btn" id="ai-create-ppt" href="{{ url_for('main.presentation_report') }}" title="用所选实验制作 PPT" aria-label="制作实验周报 PPT"><i data-lucide="presentation"></i></a>
         <a class="icon-btn disabled" id="ai-export-chat" href="#" title="导出聊天记录" aria-label="导出聊天记录"><i data-lucide="download"></i></a>
-        <a class="icon-btn" href="{{ url_for('main.api_settings') }}" title="API 设置" aria-label="API 设置"><i data-lucide="settings"></i></a>
+        <button class="icon-btn" id="ai-dock-left" type="button" title="停靠左侧" aria-label="停靠左侧"><i data-lucide="panel-left"></i></button>
+        <button class="icon-btn" id="ai-dock-right" type="button" title="停靠右侧" aria-label="停靠右侧"><i data-lucide="panel-right"></i></button>
+        <button class="icon-btn" id="ai-maximize" type="button" title="最大化或恢复" aria-label="最大化或恢复"><i data-lucide="maximize-2"></i></button>
+        <button class="icon-btn" id="ai-popout" type="button" title="在独立窗口打开" aria-label="在独立窗口打开"><i data-lucide="external-link"></i></button>
+        <a class="icon-btn" href="{{ url_for('main.api_settings') }}" title="API 设置" aria-label="API 设置"><i data-lucide="key-round"></i></a>
         <button class="icon-btn" id="ai-close" type="button" title="关闭" aria-label="关闭 AI 助手"><i data-lucide="x"></i></button>
       </div>
     </header>
-    <div class="ai-context-bar" id="ai-context-bar"><i data-lucide="database"></i><span>可检索本人实验、记录、参数与附件说明，并返回来源</span></div>
-    <details class="ai-history-scope" id="ai-history-scope">
-      <summary><span><i data-lucide="list-filter"></i><b>选择实验历史</b></span><small id="ai-history-count">未选择</small></summary>
-      <div class="ai-history-tools"><button type="button" id="ai-select-current">仅当前实验</button><button type="button" id="ai-select-all">全选</button><button type="button" id="ai-clear-selection">清空</button></div>
-      <div class="ai-history-list" id="ai-history-list"><p>打开助手后加载实验列表</p></div>
-    </details>
-    <div class="ai-messages" id="ai-messages" aria-live="polite">
-      <div class="ai-welcome">
-        <i data-lucide="flask-conical"></i>
-        <b>可以开始讨论实验了</b>
-        <p>可以管理当前实验、步骤、参数、记录和附件，也能比较历史或生成周报。所有写入都要经过差异确认。</p>
-      </div>
-    </div>
-    <div class="ai-quick-prompts" id="ai-quick-prompts">
-      <button type="button">根据历史实验生成下一次计划</button>
-      <button type="button">检查并整理当前页面的步骤、参数和记录</button>
-      <button type="button">比较当前实验与历史重复实验</button>
-      <button type="button">生成本周实验周报</button>
-      <button type="button">检索与当前实验相关的记录</button>
-    </div>
-    <form class="ai-composer" id="ai-composer" enctype="multipart/form-data">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <div class="ai-file-list" id="ai-file-list"></div>
-      <textarea name="message" id="ai-message-input" rows="3" placeholder="输入指令，例如：把当前实验补充为 4 个步骤……"></textarea>
-      <div class="ai-composer-tools">
-        <div>
-          <label class="icon-btn ai-file-button" title="上传文件" aria-label="上传文件"><i data-lucide="paperclip"></i><input id="ai-file-input" name="files" type="file" multiple></label>
-          <label class="ai-web-toggle" title="使用官方 OpenAI 网页检索并返回引用"><input id="ai-web-access" name="web_access" type="checkbox" value="1"><i data-lucide="globe-2"></i><span>联网</span></label>
+    <div class="ai-workspace">
+      <aside class="ai-conversation-sidebar" id="ai-conversation-sidebar" aria-label="历史聊天">
+        <div class="ai-conversation-sidebar-head">
+          <div><b>历史聊天</b><small>最多显示最近 100 个会话</small></div>
+          <button class="icon-btn" id="ai-new-chat-side" type="button" title="新建对话" aria-label="新建对话"><i data-lucide="plus"></i></button>
         </div>
-        <button class="ai-send" type="submit" aria-label="发送消息"><i data-lucide="arrow-up"></i></button>
+        <label class="ai-conversation-search"><i data-lucide="search"></i><input id="ai-conversation-search" type="search" placeholder="搜索会话" aria-label="搜索历史聊天"></label>
+        <div class="ai-conversation-list" id="ai-conversation-list"><p>打开助手后加载历史聊天</p></div>
+      </aside>
+      <div class="ai-chat-pane">
+        <div class="ai-context-bar" id="ai-context-bar"><i data-lucide="database"></i><span>可检索本人实验、记录、参数与附件说明，并返回来源</span></div>
+        <details class="ai-config-panel" id="ai-config-panel">
+          <summary><span><i data-lucide="library-big"></i><b>知识库与助手设置</b></span><small id="ai-knowledge-count">未选择知识库</small></summary>
+          <div class="ai-config-scroll">
+            <section class="ai-setting-section">
+              <div class="ai-setting-head"><b>本次对话使用的知识库</b><button type="button" id="ai-refresh-knowledge">刷新</button></div>
+              <div class="ai-knowledge-list" id="ai-knowledge-list"><p>打开助手后加载知识库</p></div>
+              <form class="ai-inline-form" id="ai-knowledge-create-form">
+                <input name="name" maxlength="160" placeholder="新知识库名称" required>
+                <input name="description" placeholder="用途说明（可选）">
+                <textarea name="custom_instructions" rows="2" placeholder="仅对此知识库生效的使用说明（可选）"></textarea>
+                <button class="btn" type="submit"><i data-lucide="plus"></i>创建知识库</button>
+              </form>
+            </section>
+            <section class="ai-setting-section">
+              <div class="ai-setting-head"><b>科研助手提示词</b><small id="ai-prompt-status">使用默认提示词</small></div>
+              <form class="ai-inline-form" id="ai-prompt-form">
+                <textarea id="ai-custom-prompt" name="custom_prompt" rows="5" maxlength="12000" placeholder="补充你的研究领域、回答格式和工作偏好"></textarea>
+                <small>安全规则、人工核验和确认后写入机制不会被自定义提示词覆盖。</small>
+                <div class="ai-inline-actions"><button class="btn primary" type="submit">保存提示词</button><button class="btn" id="ai-prompt-reset" type="button">重置默认</button></div>
+              </form>
+            </section>
+          </div>
+        </details>
+        <details class="ai-history-scope" id="ai-history-scope">
+          <summary><span><i data-lucide="list-filter"></i><b>选择实验历史</b></span><small id="ai-history-count">未选择</small></summary>
+          <div class="ai-history-tools"><button type="button" id="ai-select-current">仅当前实验</button><button type="button" id="ai-select-all">全选</button><button type="button" id="ai-clear-selection">清空</button></div>
+          <div class="ai-history-list" id="ai-history-list"><p>打开助手后加载实验列表</p></div>
+        </details>
+        <div class="ai-messages" id="ai-messages" aria-live="polite">
+          <div class="ai-welcome">
+            <span class="ai-welcome-mark"><i data-lucide="sparkles"></i></span>
+            <b>今天想推进哪项科研工作？</b>
+            <p>整理实验、比较历史、生成计划或检索知识库。页面写入前都会展示差异。</p>
+          </div>
+        </div>
+        <div class="ai-quick-prompts" id="ai-quick-prompts">
+          <button type="button">根据历史实验生成下一次计划</button>
+          <button type="button">检查并整理当前页面</button>
+          <button type="button">比较当前实验与历史重复实验</button>
+          <button type="button">生成本周实验周报</button>
+          <button type="button">检索相关实验记录</button>
+        </div>
+        <form class="ai-composer" id="ai-composer" enctype="multipart/form-data">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="ai-file-list" id="ai-file-list"></div>
+          <textarea name="message" id="ai-message-input" rows="3" placeholder="输入消息，按 Enter 发送"></textarea>
+          <div class="ai-composer-tools">
+            <div>
+              <label class="icon-btn ai-file-button" title="上传文件" aria-label="上传文件"><i data-lucide="paperclip"></i><input id="ai-file-input" name="files" type="file" multiple></label>
+              <label class="ai-web-toggle" title="使用官方 OpenAI 网页检索并返回引用"><input id="ai-web-access" name="web_access" type="checkbox" value="1"><i data-lucide="globe-2"></i><span>联网</span></label>
+            </div>
+            <button class="ai-stop" id="ai-stop" type="button" aria-label="停止生成" title="停止生成" hidden><i data-lucide="square"></i></button>
+            <button class="ai-send" type="submit" aria-label="发送消息"><i data-lucide="arrow-up"></i></button>
+          </div>
+          <div class="ai-task-status" id="ai-task-status" hidden><span></span><time>00:00</time></div>
+          <p class="ai-review-note"><i data-lucide="shield-alert"></i> 剂量、临床解释和统计结论需人工核验</p>
+        </form>
       </div>
-      <p class="ai-review-note"><i data-lucide="shield-alert"></i> 剂量、临床解释和统计结论需人工核验</p>
-    </form>
+    </div>
   </section>
   {% endif %}
   <script src="{{ url_for('static', filename='js/app.js') }}"></script>
