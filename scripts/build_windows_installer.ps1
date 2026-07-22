@@ -40,6 +40,7 @@ try {
         "--hidden-import", "app.admin",
         "--hidden-import", "app.auth",
         "--hidden-import", "app.commands",
+        "--hidden-import", "app.export_service",
         "--hidden-import", "app.main",
         "--hidden-import", "app.models",
         "--hidden-import", "app.presentation_service",

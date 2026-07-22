@@ -8,14 +8,22 @@
     <p class="muted">{{ experiment.code or '未设置编号' }} · {{ experiment.batch_code or '未设置批次' }} · {{ experiment.repeat_kind }} #{{ experiment.repeat_number }}{% if experiment.group_name %} · {{ experiment.group_name }}{% endif %}</p>
   </div>
   <div class="page-head-actions">
-    <a class="btn ghost" href="{{ url_for('main.experiment_export', item_id=experiment.id) }}"><i data-lucide="file-down"></i> Markdown</a>
-    <a class="btn secondary" href="{{ url_for('main.experiment_archive', item_id=experiment.id) }}"><i data-lucide="archive"></i> 完整归档</a>
+    <form class="experiment-export-form" method="get" action="{{ url_for('main.experiment_export', item_id=experiment.id) }}">
+      <label class="experiment-export-picker"><span>导出格式</span><select name="format" aria-label="选择实验导出格式">
+        <option value="markdown">Markdown 报告</option>
+        <option value="docx">Word 文档 (.docx)</option>
+        <option value="xlsx">Excel 工作簿 (.xlsx)</option>
+        <option value="json">JSON 结构化数据</option>
+        <option value="zip">ZIP 完整归档（含附件）</option>
+      </select></label>
+      <button class="btn secondary"><i data-lucide="download"></i> 导出</button>
+    </form>
     <span class="badge large state-{{ experiment.status }}">{{ experiment.status }}</span>
   </div>
 </header>
 <div class="detail-layout">
   <div class="detail-main">
-    <details class="panel feature-disclosure" data-disclosure-key="experiment-{{ experiment.id }}-steps" open>
+    <details class="panel feature-disclosure" id="experiment-steps" data-disclosure-key="experiment-{{ experiment.id }}-steps" open>
       <summary class="feature-summary"><div><p class="eyebrow">PROTOCOL</p><h2>实验步骤</h2></div><span class="feature-summary-meta"><span class="count-label">{{ experiment.steps|selectattr('is_done')|list|length }}/{{ experiment.steps|length }} 完成</span><i data-lucide="chevron-down"></i></span></summary>
       <div class="feature-body">
       <div class="component-template-tools" id="step-templates">
@@ -41,9 +49,30 @@
         <label class="step-description">步骤说明<textarea name="description" rows="2" placeholder="关键参数、操作要点或验收标准"></textarea></label>
         <button class="btn primary"><i data-lucide="plus"></i> 添加步骤</button>
       </form>
+      <form id="step-bulk-form" method="post" action="{{ url_for('main.step_bulk', item_id=experiment.id) }}" class="resource-bulk-form" data-bulk-form data-bulk-label="步骤">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <details class="resource-bulk-panel">
+          <summary><span><i data-lucide="list-checks"></i><b>批量管理步骤</b></span><span data-bulk-selected>已选择 0 个</span></summary>
+          <div class="resource-bulk-body">
+            <div class="bulk-head"><label class="bulk-select-all"><input type="checkbox" data-bulk-select-all> 全选步骤</label><small>未填写的内容不会覆盖原数据</small></div>
+            <div class="bulk-fields bulk-fields-wide">
+              <label>完成状态<select name="status_mode"><option value="keep">保持不变</option><option value="complete">标记全部完成</option><option value="pending">标记全部未完成</option></select></label>
+              <label>执行人操作<select name="operator_mode"><option value="keep">保持不变</option><option value="replace">统一替换</option><option value="clear">清空</option></select></label>
+              <label>执行人<input name="operator" placeholder="新的执行人"></label>
+              <label>日期操作<select name="date_mode"><option value="keep">保持不变</option><option value="set">设为同一天</option><option value="shift">整体顺延/提前</option><option value="clear">清空日期</option></select></label>
+              <label>计划日期<input type="date" name="planned_date"></label>
+              <label>偏移天数<input type="number" name="shift_days" value="0" min="-3650" max="3650" placeholder="负数为提前"></label>
+              <label>说明操作<select name="description_mode"><option value="keep">保持不变</option><option value="append">追加说明</option><option value="replace">统一替换</option><option value="clear">清空</option></select></label>
+              <label class="bulk-grow">步骤说明<textarea name="description" rows="2" placeholder="统一追加或替换的说明"></textarea></label>
+            </div>
+            <div class="bulk-actions"><button class="btn secondary" name="action" value="update" disabled><i data-lucide="save"></i> 批量保存</button><button class="btn danger" name="action" value="delete" disabled><i data-lucide="trash-2"></i> 批量删除</button></div>
+          </div>
+        </details>
+      </form>
       <div class="timeline">
         {% for step in experiment.steps %}
         <div class="timeline-step {{ 'done' if step.is_done }}">
+          <label class="resource-select"><input type="checkbox" name="step_ids" value="{{ step.id }}" form="step-bulk-form" data-bulk-select aria-label="选择步骤 {{ step.title }}"></label>
           <form method="post" action="{{ url_for('main.step_toggle', step_id=step.id) }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button class="step-marker" title="{{ '标记未完成' if step.is_done else '标记完成' }}">{% if step.is_done %}<i data-lucide="check"></i>{% else %}{{ step.position }}{% endif %}</button>
@@ -73,7 +102,7 @@
     </details>
 
     <div class="research-trace-grid">
-      <details class="panel trace-panel feature-disclosure" data-disclosure-key="experiment-{{ experiment.id }}-samples">
+      <details class="panel trace-panel feature-disclosure" id="experiment-samples" data-disclosure-key="experiment-{{ experiment.id }}-samples">
         <summary class="feature-summary"><div><p class="eyebrow">SAMPLES</p><h2>关联样本</h2></div><span class="feature-summary-meta"><span class="count-label">{{ experiment.sample_usages|length }} 个</span><i data-lucide="chevron-down"></i></span></summary>
         <div class="feature-body">
         {% if sample_requirements %}<div class="template-requirement-hint"><i data-lucide="clipboard-list"></i><span><b>模板样本要求</b>{% for requirement in sample_requirements %}<small>{{ requirement.role }} · {{ requirement.amount_used or '用量待定' }}{% if requirement.notes %} · {{ requirement.notes }}{% endif %}</small>{% endfor %}</span></div>{% endif %}
@@ -85,15 +114,27 @@
           <label class="grow">备注<input name="notes" placeholder="处理组、取样时间等"></label>
           <button class="btn secondary"><i data-lucide="link"></i> 关联</button>
         </form>
+        <form id="sample-bulk-form" method="post" action="{{ url_for('main.experiment_sample_bulk', item_id=experiment.id) }}" class="resource-bulk-form compact-resource-bulk" data-bulk-form data-bulk-label="样本">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <details class="resource-bulk-panel"><summary><span><i data-lucide="list-checks"></i><b>批量管理样本</b></span><span data-bulk-selected>已选择 0 个</span></summary><div class="resource-bulk-body">
+            <div class="bulk-head"><label class="bulk-select-all"><input type="checkbox" data-bulk-select-all> 全选</label></div>
+            <div class="bulk-fields">
+              <label>用途操作<select name="role_mode"><option value="keep">保持不变</option><option value="replace">统一替换</option><option value="clear">清空</option></select></label><label>用途<input name="role" placeholder="实验样本 / 对照组"></label>
+              <label>用量操作<select name="amount_mode"><option value="keep">保持不变</option><option value="replace">统一替换</option><option value="clear">清空</option></select></label><label>使用量<input name="amount_used" placeholder="20 μL / 1 管"></label>
+              <label>备注操作<select name="notes_mode"><option value="keep">保持不变</option><option value="append">追加</option><option value="replace">替换</option><option value="clear">清空</option></select></label><label>备注<input name="notes" placeholder="统一备注"></label>
+            </div>
+            <div class="bulk-actions"><button class="btn secondary" name="action" value="update" disabled><i data-lucide="save"></i> 批量保存</button><button class="btn danger" name="action" value="delete" disabled><i data-lucide="unlink"></i> 批量解除</button></div>
+          </div></details>
+        </form>
         <div class="trace-list">
           {% for usage in experiment.sample_usages %}
-          <div class="trace-row"><span><b>{{ usage.sample.sample_code }}</b><small>{{ usage.role }} · {{ usage.amount_used or '用量未填' }}{% if usage.notes %} · {{ usage.notes }}{% endif %}</small></span><form method="post" action="{{ url_for('main.experiment_sample_delete', item_id=usage.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-btn danger" title="解除关联"><i data-lucide="unlink"></i></button></form></div>
+          <div class="trace-row"><label class="resource-select"><input type="checkbox" name="sample_usage_ids" value="{{ usage.id }}" form="sample-bulk-form" data-bulk-select aria-label="选择样本 {{ usage.sample.sample_code }}"></label><span><b>{{ usage.sample.sample_code }}</b><small>{{ usage.role }} · {{ usage.amount_used or '用量未填' }}{% if usage.notes %} · {{ usage.notes }}{% endif %}</small></span><form method="post" action="{{ url_for('main.experiment_sample_delete', item_id=usage.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-btn danger" title="解除关联"><i data-lucide="unlink"></i></button></form></div>
           {% else %}<div class="empty compact-empty"><p>尚未关联样本</p></div>{% endfor %}
         </div>
         </div>
       </details>
 
-      <details class="panel trace-panel feature-disclosure" data-disclosure-key="experiment-{{ experiment.id }}-parameters">
+      <details class="panel trace-panel feature-disclosure" id="plan-parameters" data-disclosure-key="experiment-{{ experiment.id }}-parameters">
         <summary class="feature-summary"><div><p class="eyebrow">VARIABLES</p><h2>计划参数</h2></div><span class="feature-summary-meta"><span class="count-label">{{ experiment.plan_parameters|length }} 项</span><i data-lucide="chevron-down"></i></span></summary>
         <div class="feature-body">
         <form method="post" action="{{ url_for('main.experiment_parameter_add', item_id=experiment.id) }}" class="parameter-form" data-parameter-builder>
@@ -103,9 +144,17 @@
           </div>
           <div class="parameter-actions"><button class="btn ghost" type="button" data-add-parameter><i data-lucide="plus"></i> 添加一行</button><button class="btn secondary"><i data-lucide="save"></i> 保存参数</button></div>
         </form>
+        <form id="parameter-bulk-form" method="post" action="{{ url_for('main.experiment_parameter_bulk', item_id=experiment.id) }}" class="resource-bulk-form compact-resource-bulk" data-bulk-form data-bulk-label="参数">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <details class="resource-bulk-panel"><summary><span><i data-lucide="list-checks"></i><b>批量管理参数</b></span><span data-bulk-selected>已选择 0 个</span></summary><div class="resource-bulk-body">
+            <div class="bulk-head"><label class="bulk-select-all"><input type="checkbox" data-bulk-select-all> 全选</label></div>
+            <div class="bulk-fields"><label>单位操作<select name="unit_mode"><option value="keep">保持不变</option><option value="replace">统一替换</option><option value="clear">清空</option></select></label><label>单位<input name="unit" maxlength="40" placeholder="μM / h"></label><label>说明操作<select name="notes_mode"><option value="keep">保持不变</option><option value="append">追加</option><option value="replace">替换</option><option value="clear">清空</option></select></label><label>说明<input name="notes" maxlength="255" placeholder="统一说明"></label></div>
+            <div class="bulk-actions"><button class="btn secondary" name="action" value="update" disabled><i data-lucide="save"></i> 批量保存</button><button class="btn danger" name="action" value="delete" disabled><i data-lucide="trash-2"></i> 批量删除</button></div>
+          </div></details>
+        </form>
         <div class="parameter-list">
           {% for parameter in experiment.plan_parameters %}
-          <div class="parameter-row"><span><b>{{ parameter.name }}</b><small>{{ parameter.notes or '计划值' }}</small></span><strong>{{ parameter.value or '—' }} {{ parameter.unit }}</strong><form method="post" action="{{ url_for('main.experiment_parameter_delete', item_id=parameter.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-btn danger" title="删除参数"><i data-lucide="trash-2"></i></button></form></div>
+          <div class="parameter-row"><label class="resource-select"><input type="checkbox" name="parameter_ids" value="{{ parameter.id }}" form="parameter-bulk-form" data-bulk-select aria-label="选择参数 {{ parameter.name }}"></label><span><b>{{ parameter.name }}</b><small>{{ parameter.notes or '计划值' }}</small></span><strong>{{ parameter.value or '—' }} {{ parameter.unit }}</strong><form method="post" action="{{ url_for('main.experiment_parameter_delete', item_id=parameter.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-btn danger" title="删除参数"><i data-lucide="trash-2"></i></button></form></div>
           {% else %}<div class="empty compact-empty"><p>尚无结构化参数</p></div>{% endfor %}
         </div>
         </div>
@@ -144,8 +193,10 @@
                 <option>自动分类</option>
                 {% for category in attachment_categories %}<option>{{ category }}</option>{% endfor %}
               </select>
+              <input name="custom_attachment_category" maxlength="20" placeholder="自定义分类（可选）">
             </label>
-            <p>文件会按实验、记录日期和分类管理；原始文件不加密、不限大小。</p>
+            <label>自定义文件夹<input name="attachment_folder" placeholder="例如：2026-07 / WB / 原始图像"></label>
+            <p>填写自定义分类或文件夹后，文件会按实验、日期、分类和文件夹管理；原始文件不加密、不限大小。</p>
           </div>
           <div class="attachment-pickers record-attachment-pickers">
             <label class="attachment-picker"><span><i data-lucide="files"></i><b>添加文件或图片</b></span><input type="file" name="files" multiple><small>支持任意格式，可一次选择多个文件</small></label>
@@ -157,12 +208,21 @@
       </div>
     </details>
 
-    <details class="panel feature-disclosure" data-disclosure-key="experiment-{{ experiment.id }}-history" open>
+    <details class="panel feature-disclosure" id="record-history" data-disclosure-key="experiment-{{ experiment.id }}-history" open>
       <summary class="feature-summary"><div><p class="eyebrow">HISTORY</p><h2>记录时间线</h2></div><span class="feature-summary-meta"><span class="count-label">{{ experiment.records|length }} 条</span><i data-lucide="chevron-down"></i></span></summary>
       <div class="feature-body">
+      <form id="record-bulk-form" method="post" action="{{ url_for('main.record_bulk', item_id=experiment.id) }}" class="resource-bulk-form" data-bulk-form data-bulk-label="记录">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <details class="resource-bulk-panel"><summary><span><i data-lucide="list-checks"></i><b>批量管理记录</b></span><span data-bulk-selected>已选择 0 个</span></summary><div class="resource-bulk-body">
+          <div class="bulk-head"><label class="bulk-select-all"><input type="checkbox" data-bulk-select-all> 全选记录</label><small>删除记录会同步删除其本地附件</small></div>
+          <div class="bulk-fields bulk-fields-wide"><label>实验结果<select name="result"><option value="__keep__">保持不变</option><option>待确认</option><option>成功</option><option>失败</option></select></label><label>人员操作<select name="operator_mode"><option value="keep">保持不变</option><option value="replace">统一替换</option><option value="clear">清空</option></select></label><label>实验人员<input name="operator" placeholder="新的实验人员"></label><label>日期整体偏移<input type="number" name="shift_days" value="0" min="-3650" max="3650"><small>正数顺延，负数提前</small></label><label>备注操作<select name="remark_mode"><option value="keep">保持不变</option><option value="append">追加</option><option value="replace">替换</option><option value="clear">清空</option></select></label><label class="bulk-grow">结论与备注<textarea name="remark" rows="2" placeholder="统一追加或替换的备注"></textarea></label></div>
+          <div class="bulk-actions"><button class="btn secondary" name="action" value="update" disabled><i data-lucide="save"></i> 批量保存</button><button class="btn danger" name="action" value="delete" disabled><i data-lucide="trash-2"></i> 批量删除</button></div>
+        </div></details>
+      </form>
       <div class="record-list">
         {% for record in experiment.records %}
         <article class="record-item">
+          <label class="resource-select"><input type="checkbox" name="record_ids" value="{{ record.id }}" form="record-bulk-form" data-bulk-select aria-label="选择 {{ record.record_date }} 实验记录"></label>
           <div class="record-date"><b>{{ record.record_date.strftime('%m/%d') }}</b><small>{{ record.record_date.strftime('%Y') }}</small></div>
           <div class="record-body">
             <div class="record-head"><span class="badge result-{{ record.result }}">{{ record.result }}</span><span>{{ record.operator or '未填写人员' }}</span>{% if record.attachments %}<span><i data-lucide="paperclip"></i>{{ record.attachments|length }} 个文件</span>{% endif %}</div>

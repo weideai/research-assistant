@@ -565,6 +565,20 @@
   color: var(--yellow);
 }
 
+@media (max-width: 820px) {
+  .ai-fab {
+    top: 8px;
+    right: auto;
+    bottom: auto;
+    left: 112px;
+    width: 42px;
+    height: 42px;
+    padding: 0;
+  }
+
+  .ai-fab span { display: none; }
+}
+
 @media (max-width: 600px) {
   .attachment-head-actions {
     align-items: flex-end;
@@ -574,11 +588,6 @@
   .attachment-storage-note small {
     white-space: normal;
     overflow-wrap: anywhere;
-  }
-
-  .ai-fab {
-    right: 14px;
-    bottom: 14px;
   }
 
   .ai-completion-toast { right: 14px; bottom: 70px; }

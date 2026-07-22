@@ -27,6 +27,7 @@ from .ai_service import (
     organize_note,
     validate_api_url,
 )
+from .export_service import build_docx_export, build_json_export, build_xlsx_export
 from .models import (
     AIChatAttachment, AIConversation, AIMessage, AppearanceSetting, ApiSetting, Experiment,
     ExperimentAttachment, ExperimentParameter, ExperimentRecord, ExperimentSample, ExperimentStep,
@@ -44,24 +45,45 @@ DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".ppt", ".pptx", ".md", ".rtf"}
 ARCHIVE_EXTENSIONS = {".zip", ".rar", ".7z", ".gz", ".tar", ".bz2", ".xz"}
 ATTACHMENT_MANUAL_CATEGORIES = ("原始数据", "结果图片", "分析结果", "实验文档", "其他")
 ATTACHMENT_METADATA_CATEGORIES = ("图片", "数据", "文档", "压缩包", *ATTACHMENT_MANUAL_CATEGORIES)
+ATTACHMENT_CATEGORY_MAX_LENGTH = 20
 REPEAT_KINDS = ("独立实验", "预实验", "生物学重复", "技术重复")
 ASSISTANT_TEXT_EXTENSIONS = {
     ".txt", ".md", ".csv", ".tsv", ".json", ".xml", ".yaml", ".yml", ".log", ".py", ".r", ".html", ".css", ".js",
 }
-EXPERIMENT_AI_FIELDS = {"title", "code", "objective", "owner", "status", "start_date", "end_date"}
+EXPERIMENT_AI_FIELDS = {
+    "title", "code", "objective", "owner", "status", "start_date", "end_date",
+    "batch_code", "repeat_kind", "repeat_number", "group_name",
+    "record_conditions_template", "record_content_template", "record_remark_template",
+}
 RECORD_AI_FIELDS = {"record_date", "operator", "conditions", "content", "result", "remark"}
+STEP_AI_FIELDS = {"title", "description", "operator", "planned_date", "completed_date", "is_done"}
+PARAMETER_AI_FIELDS = {"name", "value", "unit", "notes"}
+SAMPLE_USAGE_AI_FIELDS = {"sample_id", "role", "amount_used", "notes"}
+ATTACHMENT_AI_FIELDS = {"category", "folder", "tags", "description"}
 AI_FIELD_LABELS = {
     "title": "实验名称", "code": "实验编号", "objective": "实验目的", "owner": "负责人",
     "status": "状态", "start_date": "开始日期", "end_date": "结束日期", "record_date": "记录日期",
     "operator": "实验人员", "conditions": "实验条件", "content": "实验过程", "result": "实验结果",
-    "remark": "结论与备注", "steps": "新增实验步骤",
+    "remark": "结论与备注", "steps": "新增实验步骤", "batch_code": "实验批次",
+    "repeat_kind": "重复类型", "repeat_number": "重复序号", "group_name": "实验分组",
+    "record_conditions_template": "记录条件模板", "record_content_template": "记录过程模板",
+    "record_remark_template": "记录备注模板",
 }
-AI_FIELD_LIMITS = {"title": 160, "code": 60, "owner": 80, "status": 20, "operator": 80, "result": 20}
+AI_FIELD_LIMITS = {
+    "title": 160, "code": 60, "owner": 80, "status": 20, "operator": 80, "result": 20,
+    "batch_code": 80, "repeat_kind": 30, "repeat_number": 4, "group_name": 80,
+    "name": 120, "value": 160, "unit": 40, "notes": 255, "role": 80,
+    "amount_used": 80, "category": 20, "folder": 1000, "tags": 255,
+}
 AI_RESEARCH_TERMS = ("历史", "对比", "比较", "周报", "本周", "检索", "查找", "记录", "参数", "结果", "计划", "当前")
 AI_REVIEW_TERMS = (
     "剂量", "浓度", "给药", "临床", "诊断", "治疗", "患者", "统计", "显著", "p值", "p 值",
     "置信区间", "效应量", "生存分析", "毒性", "处方",
 )
+
+
+class AIProposalConflict(ValueError):
+    pass
 
 
 @bp.before_request
@@ -135,17 +157,46 @@ def _attachment_category(original_name, is_image):
     return "其他"
 
 
-def _requested_attachment_category():
-    category = request.form.get("attachment_category", "自动分类").strip()
-    if category == "自动分类":
-        return None
-    if category not in ATTACHMENT_MANUAL_CATEGORIES:
-        abort(400)
+def _validate_attachment_category(category):
+    category = (category or "").strip()
+    if not category:
+        raise ValueError("文件分类名称不能为空。")
+    if len(category) > ATTACHMENT_CATEGORY_MAX_LENGTH:
+        raise ValueError(f"文件分类名称不能超过 {ATTACHMENT_CATEGORY_MAX_LENGTH} 个字符。")
+    if category in {".", ".."} or re.search(r'[\\/\x00-\x1f<>:"|?*]', category):
+        raise ValueError("文件分类名称包含不允许的字符。")
     return category
 
 
-def _save_record_attachment(record, uploaded_file, category=None):
-    relative_path = _clean_upload_relative_path(uploaded_file.filename)
+def _clean_attachment_folder(folder):
+    folder = (folder or "").strip().replace("\\", "/").strip("/")
+    if not folder:
+        return ""
+    cleaned = _clean_upload_relative_path(folder)
+    if len(cleaned.split("/")) > 10:
+        raise ValueError("自定义文件夹不能超过 10 层。")
+    return cleaned
+
+
+def _requested_attachment_category():
+    custom_category = request.form.get("custom_attachment_category", "").strip()
+    if custom_category:
+        try:
+            return _validate_attachment_category(custom_category)
+        except ValueError as exc:
+            abort(400, description=str(exc))
+    category = request.form.get("attachment_category", "自动分类").strip()
+    if category == "自动分类":
+        return None
+    try:
+        return _validate_attachment_category(category)
+    except ValueError as exc:
+        abort(400, description=str(exc))
+
+
+def _save_record_attachment(record, uploaded_file, category=None, folder=""):
+    uploaded_path = _clean_upload_relative_path(uploaded_file.filename)
+    relative_path = _clean_upload_relative_path(f"{folder}/{uploaded_path}" if folder else uploaded_path)
     original_name = relative_path.rsplit("/", 1)[-1]
     relative_parent = relative_path.split("/")[:-1]
     target_dir = _attachment_record_dir(record).joinpath(*relative_parent)
@@ -223,6 +274,51 @@ def _remove_attachment_file(attachment):
         except OSError:
             break
         parent = parent.parent
+
+
+def _attachment_folder(attachment):
+    parts = attachment.relative_path.replace("\\", "/").split("/")
+    return "/".join(parts[:-1])
+
+
+def _move_attachment_to_folder(attachment, folder):
+    folder = _clean_attachment_folder(folder)
+    new_relative_path = _clean_upload_relative_path(
+        f"{folder}/{attachment.original_name}" if folder else attachment.original_name
+    )
+    if new_relative_path == attachment.relative_path:
+        return
+
+    source_path = _attachment_path(attachment)
+    target_dir = _attachment_record_dir(attachment.record)
+    if folder:
+        target_dir = target_dir.joinpath(*folder.split("/"))
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / attachment.original_name
+    counter = 2
+    while target_path.exists() and target_path.resolve() != source_path.resolve():
+        suffix = Path(attachment.original_name).suffix
+        stem = attachment.original_name[:-len(suffix)] if suffix else attachment.original_name
+        target_path = target_dir / f"{stem} ({counter}){suffix}"
+        counter += 1
+    if source_path.is_file() and target_path.resolve() != source_path.resolve():
+        shutil.move(str(source_path), str(target_path))
+        old_parent = source_path.parent
+        record_root = _attachment_record_dir(attachment.record).resolve()
+        while old_parent != record_root and record_root in old_parent.parents:
+            try:
+                old_parent.rmdir()
+            except OSError:
+                break
+            old_parent = old_parent.parent
+        attachment.stored_path = target_path.relative_to(_attachment_storage_root()).as_posix()
+
+    existing_versions = [
+        item.version_number for item in attachment.record.attachments
+        if item.id != attachment.id and item.relative_path == new_relative_path
+    ]
+    attachment.relative_path = new_relative_path
+    attachment.version_number = max(existing_versions, default=0) + 1
 
 
 def _move_record_attachment_files(record, new_date):
@@ -388,6 +484,44 @@ def _selected_experiment_ids(values, limit=20):
     return [item_id for item_id in selected[:limit] if item_id in owned_ids]
 
 
+def _selected_child_items(items, form_key, limit=200):
+    raw_ids = request.form.getlist(form_key)
+    try:
+        selected_ids = {int(value) for value in raw_ids}
+    except (TypeError, ValueError):
+        abort(400)
+    if not selected_ids or len(selected_ids) > limit:
+        return []
+    selected = [item for item in items if item.id in selected_ids]
+    if len(selected) != len(selected_ids):
+        abort(404)
+    return selected
+
+
+def _bulk_text_value(item, field, mode, value):
+    if mode == "keep":
+        return
+    if mode == "clear":
+        setattr(item, field, "")
+        return
+    if mode == "replace":
+        setattr(item, field, value)
+        return
+    if mode == "append":
+        current = str(getattr(item, field) or "").rstrip()
+        setattr(item, field, f"{current}\n{value}".strip())
+        return
+    abort(400)
+
+
+def _renumber_steps(item):
+    steps = ExperimentStep.query.filter_by(experiment_id=item.id).order_by(
+        ExperimentStep.position, ExperimentStep.id,
+    ).all()
+    for position, step in enumerate(steps, 1):
+        step.position = position
+
+
 def _experiment_sample_requirements(item):
     return [
         {
@@ -474,10 +608,33 @@ def _assistant_page_context(page_type, page_id):
             "page_type": "experiment", "page_id": item.id, "fields": fields,
             "steps": [
                 {
-                    "title": step.title, "description": step.description, "operator": step.operator,
-                    "planned_date": _serialize_value(step.planned_date), "is_done": step.is_done,
+                    "id": step.id, "title": step.title, "description": step.description, "operator": step.operator,
+                    "planned_date": _serialize_value(step.planned_date),
+                    "completed_date": _serialize_value(step.completed_date), "is_done": step.is_done,
                 }
-                for step in item.steps
+                for step in item.steps[:100]
+            ],
+            "plan_parameters": [
+                {"id": value.id, "name": value.name, "value": value.value, "unit": value.unit, "notes": value.notes}
+                for value in item.plan_parameters[:100]
+            ],
+            "sample_usages": [
+                {
+                    "id": value.id, "sample_id": value.sample_id, "sample_code": value.sample.sample_code,
+                    "role": value.role, "amount_used": value.amount_used, "notes": value.notes,
+                }
+                for value in item.sample_usages[:100]
+            ],
+            "available_samples": [
+                {"sample_id": value.id, "sample_code": value.sample_code, "sample_type": value.sample_type}
+                for value in Sample.query.filter_by(user_id=current_user.id).order_by(Sample.sample_code).limit(100).all()
+            ],
+            "records": [
+                {
+                    "id": record.id,
+                    **{field: _serialize_value(getattr(record, field)) for field in RECORD_AI_FIELDS},
+                }
+                for record in item.records[:100]
             ],
         }
     if page_type == "record" and page_id:
@@ -486,6 +643,17 @@ def _assistant_page_context(page_type, page_id):
             "page_type": "record", "page_id": item.id, "experiment_id": item.experiment_id,
             "experiment_title": item.experiment.title,
             "fields": {field: _serialize_value(getattr(item, field)) for field in RECORD_AI_FIELDS},
+            "parameters": [
+                {"id": value.id, "name": value.name, "value": value.value, "unit": value.unit, "notes": value.notes}
+                for value in item.parameters[:100]
+            ],
+            "attachments": [
+                {
+                    "id": value.id, "name": value.original_name, "category": value.category,
+                    "folder": _attachment_folder(value), "tags": value.tags, "description": value.description,
+                }
+                for value in item.attachments[:100]
+            ],
         }
     return {"page_type": "", "page_id": None, "fields": {}}
 
@@ -604,10 +772,10 @@ def _assistant_system_prompt(page_context, file_context, research_context):
 始终只输出一个合法 JSON 对象，格式为：
 {{"reply":"给用户的中文回答","proposal":null}}
 proposal 只允许以下格式之一：
-1. 修改当前实验：{{"action":"update_experiment","changes":{{"title":"","code":"","objective":"","owner":"","status":"未开始/进行中/完成/暂停","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"}},"steps":[{{"title":"","description":"","operator":"","planned_date":"YYYY-MM-DD"}}]}}
-2. 修改当前记录：{{"action":"update_record","changes":{{"record_date":"YYYY-MM-DD","operator":"","conditions":"","content":"","result":"待确认/成功/失败","remark":""}}}}
-3. 新建实验计划：{{"action":"create_experiment","changes":{{"title":"","code":"","objective":"","owner":"","status":"未开始/进行中/完成/暂停","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"}},"steps":[{{"title":"","description":"","operator":"","planned_date":"YYYY-MM-DD"}}]}}
-只有用户要求添加、修改或生成可保存实验计划时才返回 proposal；不要返回不在格式中的字段。页面写入前仍需用户确认。
+1. 管理当前实验页面：{{"action":"manage_experiment","changes":{{"title":"","code":"","objective":"","owner":"","status":"未开始/进行中/完成/暂停","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD","batch_code":"","repeat_kind":"独立实验/预实验/生物学重复/技术重复","repeat_number":"1","group_name":"","record_conditions_template":"","record_content_template":"","record_remark_template":""}},"step_operations":[{{"operation":"create/update/delete","id":1,"changes":{{"title":"","description":"","operator":"","planned_date":"YYYY-MM-DD","completed_date":"YYYY-MM-DD","is_done":"true/false"}}}}],"parameter_operations":[{{"operation":"create/update/delete","id":1,"changes":{{"name":"","value":"","unit":"","notes":""}}}}],"sample_operations":[{{"operation":"create/update/delete","id":1,"changes":{{"sample_id":"1","role":"","amount_used":"","notes":""}}}}],"record_operations":[{{"operation":"create/update/delete","id":1,"changes":{{"record_date":"YYYY-MM-DD","operator":"","conditions":"","content":"","result":"待确认/成功/失败","remark":""}}}}]}}
+2. 管理当前记录页面：{{"action":"manage_record","changes":{{"record_date":"YYYY-MM-DD","operator":"","conditions":"","content":"","result":"待确认/成功/失败","remark":""}},"parameter_operations":[{{"operation":"create/update/delete","id":1,"changes":{{"name":"","value":"","unit":"","notes":""}}}}],"attachment_operations":[{{"operation":"update/delete","id":1,"changes":{{"category":"","folder":"","tags":"","description":""}}}}]}}
+3. 新建完整实验：{{"action":"create_experiment","changes":{{"title":"","code":"","objective":"","owner":"","status":"未开始/进行中/完成/暂停","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"}},"steps":[{{"title":"","description":"","operator":"","planned_date":"YYYY-MM-DD"}}]}}
+兼容旧格式 update_experiment 和 update_record，但优先使用复合管理格式。update/delete 必须使用当前页面上下文中真实存在的 id；不得猜测 id。只有用户明确要求添加、修改、删除或整理页面内容时才返回 proposal。删除也只生成提案，页面写入前仍需用户确认。
 当前页面上下文：{json.dumps(page_context, ensure_ascii=False)}
 用户上传文件信息与可读取节选：{json.dumps(file_context, ensure_ascii=False)}
 用户可访问的科研数据与内部引用：{json.dumps(research_context, ensure_ascii=False)}"""
@@ -645,6 +813,65 @@ def _clean_ai_step(raw):
     }
 
 
+def _clean_ai_changes(raw, allowed):
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        key: (
+            str(value if value is not None else "").strip()[:AI_FIELD_LIMITS[key]]
+            if AI_FIELD_LIMITS.get(key) else str(value if value is not None else "").strip()
+        )
+        for key, value in raw.items() if key in allowed
+    }
+
+
+def _normalize_ai_operations(raw_operations, context_rows, allowed_fields, resource_name, required_create=None, allow_create=True):
+    existing = {int(row["id"]): row for row in context_rows if isinstance(row, dict) and row.get("id")}
+    operations = []
+    before = {}
+    diff = []
+    for raw in (raw_operations or [])[:100]:
+        if not isinstance(raw, dict):
+            continue
+        operation = str(raw.get("operation", "")).strip().lower()
+        if operation not in {"create", "update", "delete"} or (operation == "create" and not allow_create):
+            continue
+        changes = _clean_ai_changes(raw.get("changes"), allowed_fields)
+        if operation == "create":
+            if required_create and not changes.get(required_create):
+                continue
+            normalized = {"operation": "create", "changes": changes}
+            operations.append(normalized)
+            diff.append({
+                "field": f"新建{resource_name}", "before": "（新建）",
+                "after": json.dumps(changes, ensure_ascii=False, indent=2),
+            })
+            continue
+        try:
+            item_id = int(raw.get("id"))
+        except (TypeError, ValueError):
+            continue
+        current = existing.get(item_id)
+        if not current:
+            continue
+        if operation == "update":
+            changes = {
+                key: value for key, value in changes.items()
+                if value != _serialize_value(current.get(key))
+            }
+            if not changes:
+                continue
+        snapshot = {key: current.get(key) for key in allowed_fields if key in current}
+        before[f"{resource_name}:{item_id}"] = snapshot
+        operations.append({"operation": operation, "id": item_id, "changes": changes})
+        after = "（删除）" if operation == "delete" else json.dumps({**snapshot, **changes}, ensure_ascii=False, indent=2)
+        diff.append({
+            "field": f"{'删除' if operation == 'delete' else '修改'}{resource_name} #{item_id}",
+            "before": json.dumps(snapshot, ensure_ascii=False, indent=2), "after": after,
+        })
+    return operations, before, diff
+
+
 def _normalize_assistant_proposal(raw, page_context):
     if not isinstance(raw, dict):
         return None, {}
@@ -653,16 +880,16 @@ def _normalize_assistant_proposal(raw, page_context):
         allowed = EXPERIMENT_AI_FIELDS
     elif action == "update_record" and page_context.get("page_type") == "record":
         allowed = RECORD_AI_FIELDS
+    elif action == "manage_experiment" and page_context.get("page_type") == "experiment":
+        allowed = EXPERIMENT_AI_FIELDS
+    elif action == "manage_record" and page_context.get("page_type") == "record":
+        allowed = RECORD_AI_FIELDS
     elif action == "create_experiment":
         allowed = EXPERIMENT_AI_FIELDS
     else:
         return None, {}
 
-    changes = {
-        key: str(value if value is not None else "").strip()[:AI_FIELD_LIMITS.get(key)]
-        if AI_FIELD_LIMITS.get(key) else str(value if value is not None else "").strip()
-        for key, value in (raw.get("changes") or {}).items() if key in allowed
-    }
+    changes = _clean_ai_changes(raw.get("changes"), allowed)
     if action == "create_experiment" and not changes.get("title"):
         return None, {}
     current_fields = page_context.get("fields", {})
@@ -671,16 +898,45 @@ def _normalize_assistant_proposal(raw, page_context):
     steps = []
     if action in {"update_experiment", "create_experiment"}:
         steps = [step for step in (_clean_ai_step(item) for item in (raw.get("steps") or [])[:50]) if step]
-    if not changes and not steps:
+    operation_specs = []
+    if action == "manage_experiment":
+        operation_specs = [
+            ("step_operations", page_context.get("steps", []), STEP_AI_FIELDS, "实验步骤", "title", True),
+            ("parameter_operations", page_context.get("plan_parameters", []), PARAMETER_AI_FIELDS, "计划参数", "name", True),
+            ("sample_operations", page_context.get("sample_usages", []), SAMPLE_USAGE_AI_FIELDS, "样本关联", "sample_id", True),
+            ("record_operations", page_context.get("records", []), RECORD_AI_FIELDS, "实验记录", "content", True),
+        ]
+    elif action == "manage_record":
+        operation_specs = [
+            ("parameter_operations", page_context.get("parameters", []), PARAMETER_AI_FIELDS, "记录参数", "name", True),
+            ("attachment_operations", page_context.get("attachments", []), ATTACHMENT_AI_FIELDS, "附件", None, False),
+        ]
+
+    normalized_operations = {}
+    resource_before = {}
+    operation_diff = []
+    for key, rows, fields, label, required_create, allow_create in operation_specs:
+        values, snapshots, diff_rows = _normalize_ai_operations(
+            raw.get(key), rows, fields, label, required_create, allow_create,
+        )
+        if values:
+            normalized_operations[key] = values
+            resource_before.update(snapshots)
+            operation_diff.extend(diff_rows)
+    if not changes and not steps and not normalized_operations:
         return None, {}
 
     proposal = {
         "action": action, "target_id": page_context.get("page_id"),
-        "changes": changes, "steps": steps,
+        "changes": changes, "steps": steps, **normalized_operations,
     }
-    before = {key: current_fields.get(key, "") for key in changes} if action != "create_experiment" else {}
+    field_before = {key: current_fields.get(key, "") for key in changes} if action != "create_experiment" else {}
+    before = (
+        {"fields": field_before, "resources": resource_before}
+        if action in {"manage_experiment", "manage_record"} else field_before
+    )
     diff = [
-        {"field": AI_FIELD_LABELS.get(key, key), "before": before.get(key, "（新建）"), "after": value}
+        {"field": AI_FIELD_LABELS.get(key, key), "before": field_before.get(key, "（新建）"), "after": value}
         for key, value in changes.items()
     ]
     if steps:
@@ -688,7 +944,7 @@ def _normalize_assistant_proposal(raw, page_context):
             "field": AI_FIELD_LABELS["steps"], "before": "0 条" if action == "create_experiment" else "不删除现有步骤",
             "after": "\n".join(f"{index}. {step['title']}" for index, step in enumerate(steps, 1)),
         })
-    proposal["diff"] = diff
+    proposal["diff"] = [*diff, *operation_diff]
     return proposal, before
 
 
@@ -1191,6 +1447,37 @@ def experiment_parameter_delete(item_id):
     return redirect(url_for("main.experiment_detail", item_id=experiment_id))
 
 
+@bp.post("/experiments/<int:item_id>/parameters/bulk")
+@login_required
+def experiment_parameter_bulk(item_id):
+    item = owned_or_404(Experiment, item_id)
+    selected = _selected_child_items(item.plan_parameters, "parameter_ids")
+    if not selected:
+        flash("请先勾选至少一个计划参数。", "warning")
+        return redirect(url_for("main.experiment_detail", item_id=item.id, _anchor="plan-parameters"))
+    action = request.form.get("action", "update")
+    if action == "delete":
+        for parameter in selected:
+            db.session.delete(parameter)
+        db.session.commit()
+        flash(f"已删除 {len(selected)} 个计划参数。", "success")
+        return redirect(url_for("main.experiment_detail", item_id=item.id, _anchor="plan-parameters"))
+    if action != "update":
+        abort(400)
+    unit_mode = request.form.get("unit_mode", "keep")
+    notes_mode = request.form.get("notes_mode", "keep")
+    if unit_mode not in {"keep", "replace", "clear"} or notes_mode not in {"keep", "replace", "append", "clear"}:
+        abort(400)
+    unit = request.form.get("unit", "").strip()[:40]
+    notes = request.form.get("notes", "").strip()[:255]
+    for parameter in selected:
+        _bulk_text_value(parameter, "unit", unit_mode, unit)
+        _bulk_text_value(parameter, "notes", notes_mode, notes)
+    db.session.commit()
+    flash(f"已批量更新 {len(selected)} 个计划参数。", "success")
+    return redirect(url_for("main.experiment_detail", item_id=item.id, _anchor="plan-parameters"))
+
+
 @bp.post("/experiments/<int:item_id>/samples")
 @login_required
 def experiment_sample_add(item_id):
@@ -1222,6 +1509,40 @@ def experiment_sample_delete(item_id):
     db.session.delete(usage)
     db.session.commit()
     return redirect(url_for("main.experiment_detail", item_id=experiment_id))
+
+
+@bp.post("/experiments/<int:item_id>/samples/bulk")
+@login_required
+def experiment_sample_bulk(item_id):
+    item = owned_or_404(Experiment, item_id)
+    selected = _selected_child_items(item.sample_usages, "sample_usage_ids")
+    if not selected:
+        flash("请先勾选至少一个关联样本。", "warning")
+        return redirect(url_for("main.experiment_detail", item_id=item.id, _anchor="experiment-samples"))
+    action = request.form.get("action", "update")
+    if action == "delete":
+        for usage in selected:
+            db.session.delete(usage)
+        db.session.commit()
+        flash(f"已解除 {len(selected)} 个样本关联。", "success")
+        return redirect(url_for("main.experiment_detail", item_id=item.id, _anchor="experiment-samples"))
+    if action != "update":
+        abort(400)
+    role_mode = request.form.get("role_mode", "keep")
+    amount_mode = request.form.get("amount_mode", "keep")
+    notes_mode = request.form.get("notes_mode", "keep")
+    if role_mode not in {"keep", "replace", "clear"} or amount_mode not in {"keep", "replace", "clear"} or notes_mode not in {"keep", "replace", "append", "clear"}:
+        abort(400)
+    role = request.form.get("role", "").strip()[:80]
+    amount = request.form.get("amount_used", "").strip()[:80]
+    notes = request.form.get("notes", "").strip()[:255]
+    for usage in selected:
+        _bulk_text_value(usage, "role", role_mode, role)
+        _bulk_text_value(usage, "amount_used", amount_mode, amount)
+        _bulk_text_value(usage, "notes", notes_mode, notes)
+    db.session.commit()
+    flash(f"已批量更新 {len(selected)} 个样本关联。", "success")
+    return redirect(url_for("main.experiment_detail", item_id=item.id, _anchor="experiment-samples"))
 
 
 @bp.post("/experiments/<int:item_id>/delete")
@@ -1290,9 +1611,73 @@ def step_toggle(step_id):
 def step_delete(step_id):
     step = experiment_child_or_404(ExperimentStep, step_id)
     experiment_id = step.experiment_id
+    item = step.experiment
     db.session.delete(step)
+    db.session.flush()
+    _renumber_steps(item)
     db.session.commit()
     return redirect(url_for("main.experiment_detail", item_id=experiment_id))
+
+
+@bp.post("/experiments/<int:item_id>/steps/bulk")
+@login_required
+def step_bulk(item_id):
+    item = owned_or_404(Experiment, item_id)
+    selected = _selected_child_items(item.steps, "step_ids")
+    if not selected:
+        flash("请先勾选至少一个实验步骤。", "warning")
+        return redirect(url_for("main.experiment_detail", item_id=item.id, _anchor="experiment-steps"))
+    action = request.form.get("action", "update")
+    if action == "delete":
+        for step in selected:
+            db.session.delete(step)
+        db.session.flush()
+        _renumber_steps(item)
+        db.session.commit()
+        flash(f"已删除 {len(selected)} 个实验步骤。", "success")
+        return redirect(url_for("main.experiment_detail", item_id=item.id, _anchor="experiment-steps"))
+    if action != "update":
+        abort(400)
+
+    status_mode = request.form.get("status_mode", "keep")
+    operator_mode = request.form.get("operator_mode", "keep")
+    date_mode = request.form.get("date_mode", "keep")
+    description_mode = request.form.get("description_mode", "keep")
+    if status_mode not in {"keep", "complete", "pending"}:
+        abort(400)
+    if operator_mode not in {"keep", "replace", "clear"} or description_mode not in {"keep", "replace", "append", "clear"}:
+        abort(400)
+    if date_mode not in {"keep", "set", "clear", "shift"}:
+        abort(400)
+    planned_date = parse_date(request.form.get("planned_date")) if date_mode == "set" else None
+    if date_mode == "set" and not planned_date:
+        return {"error": "批量计划日期格式不合法。"}, 400
+    try:
+        shift_days = int(request.form.get("shift_days", "0")) if date_mode == "shift" else 0
+    except ValueError:
+        abort(400)
+    if abs(shift_days) > 3650:
+        abort(400)
+    operator = request.form.get("operator", "").strip()[:80]
+    description = request.form.get("description", "").strip()
+    for step in selected:
+        if status_mode == "complete":
+            step.is_done = True
+            step.completed_date = step.completed_date or date.today()
+        elif status_mode == "pending":
+            step.is_done = False
+            step.completed_date = None
+        _bulk_text_value(step, "operator", operator_mode, operator)
+        _bulk_text_value(step, "description", description_mode, description)
+        if date_mode == "set":
+            step.planned_date = planned_date
+        elif date_mode == "clear":
+            step.planned_date = None
+        elif date_mode == "shift" and step.planned_date:
+            step.planned_date += timedelta(days=shift_days)
+    db.session.commit()
+    flash(f"已批量更新 {len(selected)} 个实验步骤。", "success")
+    return redirect(url_for("main.experiment_detail", item_id=item.id, _anchor="experiment-steps"))
 
 
 @bp.post("/experiments/<int:item_id>/records")
@@ -1315,11 +1700,16 @@ def record_add(item_id):
 
         files = [uploaded for uploaded in request.files.getlist("files") if uploaded and uploaded.filename]
         category = _requested_attachment_category()
+        try:
+            folder = _clean_attachment_folder(request.form.get("attachment_folder", ""))
+        except ValueError as exc:
+            flash(str(exc), "danger")
+            return redirect(url_for("main.experiment_detail", item_id=item.id))
         saved = 0
         errors = []
         for uploaded_file in files:
             try:
-                _save_record_attachment(record, uploaded_file, category)
+                _save_record_attachment(record, uploaded_file, category, folder)
                 saved += 1
             except ValueError as exc:
                 errors.append(f"{uploaded_file.filename}: {exc}")
@@ -1359,11 +1749,14 @@ def record_detail(record_id):
     attachment_groups = {}
     for attachment in record.attachments:
         attachment_groups.setdefault(attachment.category, []).append(attachment)
+    attachment_categories = tuple(dict.fromkeys(
+        (*ATTACHMENT_MANUAL_CATEGORIES, *(attachment.category for attachment in record.attachments))
+    ))
     return render_template(
         "record_detail.html", record=record, attachment_groups=attachment_groups,
         attachment_storage_path=str(_attachment_record_dir(record).resolve()),
-        attachment_categories=ATTACHMENT_MANUAL_CATEGORIES,
-        attachment_metadata_categories=tuple(dict.fromkeys(ATTACHMENT_METADATA_CATEGORIES)),
+        attachment_categories=attachment_categories,
+        attachment_metadata_categories=tuple(dict.fromkeys((*ATTACHMENT_METADATA_CATEGORIES, *(attachment.category for attachment in record.attachments)))),
         record_templates=RecordTemplate.query.filter_by(user_id=current_user.id).order_by(RecordTemplate.name).all(),
     )
 
@@ -1469,6 +1862,11 @@ def record_template_use(item_id):
 def attachment_upload(record_id):
     record = experiment_child_or_404(ExperimentRecord, record_id)
     category = _requested_attachment_category()
+    try:
+        folder = _clean_attachment_folder(request.form.get("attachment_folder", ""))
+    except ValueError as exc:
+        flash(str(exc), "danger")
+        return redirect(url_for("main.record_detail", record_id=record.id))
     files = [item for item in request.files.getlist("files") if item and item.filename]
     if not files:
         flash("请先选择文件或文件夹。", "danger")
@@ -1478,7 +1876,7 @@ def attachment_upload(record_id):
     errors = []
     for uploaded_file in files:
         try:
-            _save_record_attachment(record, uploaded_file, category)
+            _save_record_attachment(record, uploaded_file, category, folder)
             saved += 1
         except ValueError as exc:
             errors.append(f"{uploaded_file.filename}: {exc}")
@@ -1573,15 +1971,77 @@ def attachment_delete(item_id):
 @login_required
 def attachment_metadata(item_id):
     attachment = attachment_owned_or_404(item_id)
-    category = request.form.get("category", "其他").strip()
-    if category not in ATTACHMENT_METADATA_CATEGORIES:
-        abort(400)
+    try:
+        category = _validate_attachment_category(request.form.get("category", "其他"))
+        folder = _clean_attachment_folder(request.form.get("attachment_folder", _attachment_folder(attachment)))
+    except ValueError as exc:
+        abort(400, description=str(exc))
+    _move_attachment_to_folder(attachment, folder)
     attachment.category = category
     attachment.tags = request.form.get("tags", "").strip()[:255]
     attachment.description = request.form.get("description", "").strip()
     db.session.commit()
     flash("文件说明和标签已保存。", "success")
     return redirect(url_for("main.record_detail", record_id=attachment.record_id))
+
+
+@bp.post("/records/<int:record_id>/attachments/bulk")
+@login_required
+def attachment_bulk_update(record_id):
+    record = experiment_child_or_404(ExperimentRecord, record_id)
+    raw_ids = request.form.getlist("attachment_ids")
+    try:
+        attachment_ids = {int(value) for value in raw_ids}
+    except (TypeError, ValueError):
+        abort(400)
+    if not attachment_ids:
+        flash("请先勾选至少一个文件。", "warning")
+        return redirect(url_for("main.record_detail", record_id=record.id))
+    selected = [attachment for attachment in record.attachments if attachment.id in attachment_ids]
+    if len(selected) != len(attachment_ids):
+        abort(404)
+
+    action = request.form.get("action", "update").strip().lower()
+    if action == "delete":
+        for attachment in selected:
+            _remove_attachment_file(attachment)
+            db.session.delete(attachment)
+        db.session.commit()
+        flash(f"已删除 {len(selected)} 个文件。", "success")
+        return redirect(url_for("main.record_detail", record_id=record.id))
+    if action != "update":
+        abort(400)
+
+    category = request.form.get("category", "__keep__").strip()
+    custom_category = request.form.get("custom_attachment_category", "").strip()
+    if custom_category or category != "__keep__":
+        try:
+            category = _validate_attachment_category(custom_category or category)
+        except ValueError as exc:
+            abort(400, description=str(exc))
+    folder_mode = request.form.get("folder_mode", "keep").strip()
+    if folder_mode not in {"keep", "root", "custom"}:
+        abort(400)
+    try:
+        folder = _clean_attachment_folder(request.form.get("attachment_folder", "")) if folder_mode == "custom" else ""
+    except ValueError as exc:
+        abort(400, description=str(exc))
+    tags_mode = request.form.get("tags_mode", "keep").strip()
+    tags = request.form.get("bulk_tags", "").strip()[:255]
+    if tags_mode not in {"keep", "replace", "append"}:
+        abort(400)
+    for attachment in selected:
+        if category != "__keep__":
+            attachment.category = category
+        if folder_mode != "keep":
+            _move_attachment_to_folder(attachment, folder)
+        if tags_mode == "replace":
+            attachment.tags = tags
+        elif tags_mode == "append" and tags:
+            attachment.tags = ", ".join(filter(None, (attachment.tags, tags)))[:255]
+    db.session.commit()
+    flash(f"已批量更新 {len(selected)} 个文件。", "success")
+    return redirect(url_for("main.record_detail", record_id=record.id))
 
 
 @bp.post("/attachments/<int:item_id>/verify")
@@ -1619,136 +2079,236 @@ def record_delete(record_id):
     return redirect(url_for("main.experiment_detail", item_id=experiment_id))
 
 
+@bp.post("/experiments/<int:item_id>/records/bulk")
+@login_required
+def record_bulk(item_id):
+    item = owned_or_404(Experiment, item_id)
+    selected = _selected_child_items(item.records, "record_ids")
+    if not selected:
+        flash("请先勾选至少一条实验记录。", "warning")
+        return redirect(url_for("main.experiment_detail", item_id=item.id, _anchor="record-history"))
+    action = request.form.get("action", "update")
+    if action == "delete":
+        for record in selected:
+            for attachment in record.attachments:
+                _remove_attachment_file(attachment)
+            db.session.delete(record)
+        db.session.commit()
+        flash(f"已删除 {len(selected)} 条实验记录及其附件。", "success")
+        return redirect(url_for("main.experiment_detail", item_id=item.id, _anchor="record-history"))
+    if action != "update":
+        abort(400)
+    result = request.form.get("result", "__keep__")
+    if result not in {"__keep__", "待确认", "成功", "失败"}:
+        abort(400)
+    operator_mode = request.form.get("operator_mode", "keep")
+    remark_mode = request.form.get("remark_mode", "keep")
+    if operator_mode not in {"keep", "replace", "clear"} or remark_mode not in {"keep", "replace", "append", "clear"}:
+        abort(400)
+    try:
+        shift_days = int(request.form.get("shift_days", "0") or 0)
+    except ValueError:
+        abort(400)
+    if abs(shift_days) > 3650:
+        abort(400)
+    operator = request.form.get("operator", "").strip()[:80]
+    remark = request.form.get("remark", "").strip()
+    for record in selected:
+        if result != "__keep__":
+            record.result = result
+        _bulk_text_value(record, "operator", operator_mode, operator)
+        _bulk_text_value(record, "remark", remark_mode, remark)
+        if shift_days:
+            new_date = record.record_date + timedelta(days=shift_days)
+            _move_record_attachment_files(record, new_date)
+            record.record_date = new_date
+    db.session.commit()
+    flash(f"已批量更新 {len(selected)} 条实验记录。", "success")
+    return redirect(url_for("main.experiment_detail", item_id=item.id, _anchor="record-history"))
+
+
 def _markdown_value(value, fallback="未填写"):
     return str(value).strip() if value not in (None, "") else fallback
 
 
+def _markdown_cell(value, fallback="—"):
+    text = _markdown_value(value, fallback).replace("|", "\\|")
+    return "<br>".join(part.strip() for part in text.splitlines())
+
+
+def _markdown_table(headers, rows, empty="暂无数据。"):
+    if not rows:
+        return [empty]
+    lines = [
+        "| " + " | ".join(headers) + " |",
+        "| " + " | ".join("---" for _ in headers) + " |",
+    ]
+    lines.extend("| " + " | ".join(_markdown_cell(value) for value in row) + " |" for row in rows)
+    return lines
+
+
 def _experiment_markdown(item):
+    export_time = datetime.now().strftime("%Y-%m-%d %H:%M")
     lines = [
         f"# {item.title}",
         "",
-        f"- 实验编号：{_markdown_value(item.code, '未设置')}",
-        f"- 实验批次：{_markdown_value(item.batch_code, '未设置')}",
-        f"- 重复类型：{item.repeat_kind} #{item.repeat_number}",
-        f"- 实验分组：{_markdown_value(item.group_name)}",
-        f"- 状态：{item.status}",
-        f"- 负责人：{_markdown_value(item.owner)}",
-        f"- 计划开始：{_markdown_value(item.start_date, '未安排')}",
-        f"- 计划结束：{_markdown_value(item.end_date, '未安排')}",
-        f"- 导出时间：{datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        "> 实验导出报告 · R/LAB Research Assistant",
+        "> 数据按当前实验快照生成，原始附件请优先使用 ZIP 完整归档保存。",
         "",
-        "## 实验目的",
+        "## 目录",
         "",
-        _markdown_value(item.objective),
+        "1. [实验概览](#实验概览)",
+        "2. [实验目的](#实验目的)",
+        "3. [关联样本与计划参数](#关联样本与计划参数)",
+        "4. [实验步骤](#实验步骤)",
+        "5. [实验记录](#实验记录)",
         "",
-        "## 关联样本",
+        "---",
+        "",
+        "## 实验概览",
         "",
     ]
-    if item.sample_usages:
-        for usage in item.sample_usages:
-            lines.append(
-                f"- {usage.sample.sample_code} · {usage.role} · 用量 {_markdown_value(usage.amount_used)}"
-                f" · {_markdown_value(usage.notes)}"
-            )
-    else:
-        lines.append("暂无关联样本。")
-    lines.extend(["", "## 计划参数", ""])
-    if item.plan_parameters:
-        lines.extend([
-            f"- {parameter.name}：{_markdown_value(parameter.value)} {parameter.unit}".rstrip()
-            + (f"（{parameter.notes}）" if parameter.notes else "")
-            for parameter in item.plan_parameters
-        ])
-    else:
-        lines.append("暂无结构化计划参数。")
-    lines.extend([
-        "",
-        "## 实验步骤",
-        "",
-    ])
-    if item.steps:
-        for step in item.steps:
-            marker = "x" if step.is_done else " "
-            lines.extend([
-                f"{step.position}. [{marker}] {step.title}",
-                f"   - 执行人：{_markdown_value(step.operator)}",
-                f"   - 计划日期：{_markdown_value(step.planned_date, '未安排')}",
-                f"   - 完成日期：{_markdown_value(step.completed_date, '未完成')}",
-                f"   - 步骤说明：{_markdown_value(step.description)}",
-            ])
-    else:
-        lines.append("暂无实验步骤。")
-
+    lines.extend(_markdown_table(("字段", "内容"), [
+        ("实验编号", _markdown_value(item.code, "未设置")),
+        ("实验批次", _markdown_value(item.batch_code, "未设置")),
+        ("重复类型", f"{item.repeat_kind} #{item.repeat_number}"),
+        ("实验分组", _markdown_value(item.group_name)),
+        ("状态", item.status),
+        ("负责人", _markdown_value(item.owner)),
+        ("计划开始", _markdown_value(item.start_date, "未安排")),
+        ("计划结束", _markdown_value(item.end_date, "未安排")),
+        ("导出时间", export_time),
+    ]))
+    lines.extend(["", "## 实验目的", "", "> " + _markdown_value(item.objective).replace("\n", "\n> "), ""])
+    lines.extend(["## 关联样本与计划参数", "", "### 关联样本", ""])
+    lines.extend(_markdown_table(("样本编号", "类型", "用途", "使用量", "位置", "状态", "备注"), [
+        (usage.sample.sample_code, usage.sample.sample_type, usage.role, usage.amount_used,
+         usage.sample.location, usage.sample.status, usage.notes)
+        for usage in item.sample_usages
+    ], "暂无关联样本。"))
+    lines.extend(["", "### 计划参数", ""])
+    lines.extend(_markdown_table(("序号", "参数", "数值", "单位", "说明"), [
+        (parameter.position, parameter.name, parameter.value, parameter.unit, parameter.notes)
+        for parameter in item.plan_parameters
+    ], "暂无结构化计划参数。"))
+    lines.extend(["", "## 实验步骤", ""])
+    lines.extend(_markdown_table(("序号", "状态", "步骤", "执行人", "计划日期", "完成日期", "说明"), [
+        (step.position, "已完成" if step.is_done else "待完成", step.title, step.operator,
+         step.planned_date or "未安排", step.completed_date or "未完成", step.description)
+        for step in item.steps
+    ], "暂无实验步骤。"))
     lines.extend(["", "## 实验记录", ""])
     records = sorted(item.records, key=lambda record: (record.record_date, record.id))
     if records:
         for index, record in enumerate(records, start=1):
             lines.extend([
-                f"### {index}. {record.record_date} · {record.result}",
+                f"### 记录 {index} · {record.record_date} · {record.result}",
                 "",
-                f"- 实验人员：{_markdown_value(record.operator)}",
+                f"**实验人员：** {_markdown_value(record.operator)}",
                 "",
                 "#### 结构化参数",
                 "",
             ])
+            lines.extend(_markdown_table(("参数", "数值", "单位", "说明"), [
+                (parameter.name, parameter.value, parameter.unit, parameter.notes)
+                for parameter in record.parameters
+            ], "暂无结构化记录参数。"))
             if record.parameters:
-                lines.extend([
-                    f"- {parameter.name}：{_markdown_value(parameter.value)} {parameter.unit}".rstrip()
-                    + (f"（{parameter.notes}）" if parameter.notes else "")
+                summary = "；".join(
+                    f"{parameter.name}：{_markdown_value(parameter.value)} {parameter.unit}".rstrip()
                     for parameter in record.parameters
-                ])
-            else:
-                lines.append("暂无结构化记录参数。")
+                )
+                lines.extend(["", f"参数摘要：{summary}"])
             lines.extend([
                 "",
                 "#### 实验条件",
                 "",
-                _markdown_value(record.conditions),
+                "> " + _markdown_value(record.conditions).replace("\n", "\n> "),
                 "",
                 "#### 实验过程",
                 "",
-                record.content,
+                record.content or "未填写",
                 "",
                 "#### 结论与备注",
                 "",
-                _markdown_value(record.remark),
+                "> " + _markdown_value(record.remark),
                 "",
             ])
             if record.attachments:
                 lines.extend(["#### 结果与数据文件", ""])
-                for attachment in sorted(record.attachments, key=lambda item: item.relative_path.lower()):
-                    lines.append(
-                        f"- [{attachment.category}] {attachment.relative_path} · v{attachment.version_number}"
-                        f" · {attachment.size_label} · SHA-256 {attachment.sha256 or '旧文件未计算'}"
-                    )
-                lines.append("")
+                lines.extend(_markdown_table(("分类", "文件夹 / 文件", "版本", "大小", "SHA-256", "标签", "说明"), [
+                    (attachment.category, f"`{attachment.relative_path}`", f"v{attachment.version_number}",
+                     attachment.size_label, attachment.sha256 or "旧文件未计算", attachment.tags,
+                     attachment.description)
+                    for attachment in sorted(record.attachments, key=lambda value: value.relative_path.lower())
+                ]))
+                lines.extend(["", "---", ""])
     else:
         lines.append("暂无实验记录。")
 
+    lines.extend(["", "---", "", "*导出完成。请结合实验室 SOP 对剂量、统计结论和临床相关内容进行人工核验。*"])
     return "\ufeff" + "\n".join(lines).rstrip() + "\n"
 
 
-@bp.get("/experiments/<int:item_id>/export.md")
-@login_required
-def experiment_export(item_id):
-    item = owned_or_404(Experiment, item_id)
-    content = _experiment_markdown(item)
-    display_name = f"{item.code or f'experiment-{item.id}'}-{item.title}.md"
+def _safe_export_basename(item):
+    name = f"{item.code or f'experiment-{item.id}'}-{item.title}"
+    return re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).strip(". ") or f"experiment-{item.id}"
+
+
+def _text_export_response(content, item, extension, mimetype):
+    display_name = f"{_safe_export_basename(item)}.{extension}"
     return Response(
         content,
-        mimetype="text/markdown; charset=utf-8",
+        mimetype=mimetype,
         headers={
             "Content-Disposition": (
-                f"attachment; filename=experiment-{item.id}.md; filename*=UTF-8''{quote(display_name, safe='')}"
+                f"attachment; filename=experiment-{item.id}.{extension}; filename*=UTF-8''{quote(display_name, safe='')}"
             )
         },
     )
 
 
-@bp.get("/experiments/<int:item_id>/archive.zip")
+def _binary_export_response(content, item, extension, mimetype):
+    return send_file(
+        io.BytesIO(content),
+        mimetype=mimetype,
+        as_attachment=True,
+        download_name=f"{_safe_export_basename(item)}.{extension}",
+    )
+
+
+@bp.get("/experiments/<int:item_id>/export")
 @login_required
-def experiment_archive(item_id):
+def experiment_export(item_id):
     item = owned_or_404(Experiment, item_id)
+    export_format = request.args.get("format", "markdown").strip().lower()
+    if export_format in {"markdown", "md"}:
+        return _text_export_response(_experiment_markdown(item), item, "md", "text/markdown; charset=utf-8")
+    if export_format == "json":
+        return _binary_export_response(build_json_export(item), item, "json", "application/json")
+    if export_format == "docx":
+        return _binary_export_response(
+            build_docx_export(item), item, "docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+    if export_format == "xlsx":
+        return _binary_export_response(
+            build_xlsx_export(item), item, "xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    if export_format == "zip":
+        return _experiment_archive_response(item)
+    abort(400, description="不支持的实验导出格式。")
+
+
+@bp.get("/experiments/<int:item_id>/export.md")
+@login_required
+def experiment_export_markdown(item_id):
+    item = owned_or_404(Experiment, item_id)
+    return _text_export_response(_experiment_markdown(item), item, "md", "text/markdown; charset=utf-8")
+
+
+def _experiment_archive_response(item):
     archive = tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024, mode="w+b")
     manifest_output = io.StringIO()
     manifest_writer = csv.writer(manifest_output)
@@ -1758,6 +2318,7 @@ def experiment_archive(item_id):
     ])
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
         bundle.writestr("report.md", _experiment_markdown(item).encode("utf-8"))
+        bundle.writestr("experiment.json", build_json_export(item))
         for record in sorted(item.records, key=lambda value: (value.record_date, value.id)):
             for attachment in sorted(record.attachments, key=lambda value: (value.relative_path, value.version_number)):
                 relative_path = attachment.relative_path.replace("\\", "/")
@@ -1779,8 +2340,19 @@ def experiment_archive(item_id):
                 ])
         bundle.writestr("file-manifest.csv", ("\ufeff" + manifest_output.getvalue()).encode("utf-8"))
     archive.seek(0)
-    display_name = f"{item.code or f'experiment-{item.id}'}-{item.title}-archive.zip"
-    return send_file(archive, mimetype="application/zip", as_attachment=True, download_name=display_name)
+    return send_file(
+        archive,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=f"{_safe_export_basename(item)}-archive.zip",
+    )
+
+
+@bp.get("/experiments/<int:item_id>/archive.zip")
+@login_required
+def experiment_archive(item_id):
+    item = owned_or_404(Experiment, item_id)
+    return _experiment_archive_response(item)
 
 
 @bp.route("/samples", methods=["GET", "POST"])
@@ -2191,13 +2763,226 @@ def assistant_chat():
         }, 502
 
 
-def _set_ai_fields(item, changes, date_fields=()):
+def _set_ai_fields(item, changes, date_fields=(), integer_fields=()):
     for field, value in changes.items():
-        setattr(item, field, parse_date(value) if field in date_fields else value)
+        if field in date_fields:
+            value = parse_date(value) if value else None
+        elif field in integer_fields:
+            value = int(value)
+        setattr(item, field, value)
 
 
 def _invalid_ai_date(changes, fields):
     return next((field for field in fields if field in changes and changes[field] and not parse_date(changes[field])), None)
+
+
+def _ai_bool(value):
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "是", "已完成"}:
+        return True
+    if normalized in {"0", "false", "no", "否", "未完成"}:
+        return False
+    raise ValueError("完成状态必须是 true 或 false。")
+
+
+def _ai_model_snapshot(item, fields):
+    snapshot = {}
+    for field in fields:
+        if field == "folder" and isinstance(item, ExperimentAttachment):
+            value = _attachment_folder(item)
+        else:
+            value = getattr(item, field)
+        if value is None:
+            value = ""
+        elif hasattr(value, "isoformat"):
+            value = value.isoformat()
+        snapshot[field] = value
+    return snapshot
+
+
+def _verify_ai_resource(before, label, item, fields):
+    expected = (before.get("resources") or {}).get(f"{label}:{item.id}")
+    if expected is None or expected != _ai_model_snapshot(item, fields):
+        raise AIProposalConflict(f"{label} #{item.id} 在提案生成后已发生变化，请重新生成修改建议。")
+
+
+def _validate_ai_experiment_changes(changes):
+    if changes.get("status") and changes["status"] not in {"未开始", "进行中", "完成", "暂停"}:
+        raise ValueError("实验状态不合法。")
+    if changes.get("repeat_kind") and changes["repeat_kind"] not in REPEAT_KINDS:
+        raise ValueError("重复类型不合法。")
+    if "repeat_number" in changes:
+        try:
+            repeat_number = int(changes["repeat_number"])
+        except ValueError as exc:
+            raise ValueError("重复序号必须是整数。") from exc
+        if repeat_number < 1 or repeat_number > 999:
+            raise ValueError("重复序号必须在 1 到 999 之间。")
+    invalid_date = _invalid_ai_date(changes, {"start_date", "end_date"})
+    if invalid_date:
+        raise ValueError(f"{AI_FIELD_LABELS[invalid_date]}格式不合法。")
+    if "title" in changes and not changes["title"]:
+        raise ValueError("实验名称不能为空。")
+
+
+def _apply_ai_record_changes(record, changes):
+    if changes.get("result") and changes["result"] not in {"待确认", "成功", "失败"}:
+        raise ValueError("实验结果不合法。")
+    if "record_date" in changes and (not changes["record_date"] or not parse_date(changes["record_date"])):
+        raise ValueError("记录日期格式不合法。")
+    if "content" in changes and not changes["content"]:
+        raise ValueError("实验过程不能为空。")
+    new_date = parse_date(changes.get("record_date")) if "record_date" in changes else record.record_date
+    if new_date and new_date != record.record_date:
+        _move_record_attachment_files(record, new_date)
+    _set_ai_fields(record, changes, {"record_date"})
+    if not record.content:
+        raise ValueError("实验过程不能为空。")
+
+
+def _apply_ai_step_operations(item, operations, before):
+    next_position = max([value.position for value in item.steps], default=0)
+    for operation in operations:
+        changes = operation.get("changes") or {}
+        if operation["operation"] == "create":
+            if not changes.get("title"):
+                raise ValueError("新建步骤必须填写标题。")
+            invalid_date = _invalid_ai_date(changes, {"planned_date", "completed_date"})
+            if invalid_date:
+                raise ValueError("步骤日期格式不合法。")
+            next_position += 1
+            step = ExperimentStep(
+                experiment_id=item.id, position=next_position,
+                title=changes.get("title", ""), description=changes.get("description", ""),
+                operator=changes.get("operator", ""), planned_date=parse_date(changes.get("planned_date")),
+            )
+            if "is_done" in changes:
+                step.is_done = _ai_bool(changes["is_done"])
+            step.completed_date = parse_date(changes.get("completed_date")) if step.is_done else None
+            db.session.add(step)
+            db.session.flush()
+            continue
+        step = db.session.get(ExperimentStep, operation.get("id"))
+        if not step or step.experiment_id != item.id:
+            raise AIProposalConflict("提案中的实验步骤已不存在。")
+        _verify_ai_resource(before, "实验步骤", step, STEP_AI_FIELDS)
+        if operation["operation"] == "delete":
+            db.session.delete(step)
+            continue
+        if "title" in changes and not changes["title"]:
+            raise ValueError("步骤标题不能为空。")
+        invalid_date = _invalid_ai_date(changes, {"planned_date", "completed_date"})
+        if invalid_date:
+            raise ValueError("步骤日期格式不合法。")
+        done = _ai_bool(changes.pop("is_done")) if "is_done" in changes else step.is_done
+        _set_ai_fields(step, changes, {"planned_date", "completed_date"})
+        step.is_done = done
+        if not done:
+            step.completed_date = None
+        elif not step.completed_date:
+            step.completed_date = date.today()
+    db.session.flush()
+    _renumber_steps(item)
+
+
+def _apply_ai_parameter_operations(parent, operations, before, relationship, model, foreign_key, label):
+    items = getattr(parent, relationship)
+    next_position = max([value.position for value in items], default=0)
+    for operation in operations:
+        changes = operation.get("changes") or {}
+        if operation["operation"] == "create":
+            if not changes.get("name"):
+                raise ValueError(f"新建{label}必须填写名称。")
+            next_position += 1
+            db.session.add(model(
+                **{foreign_key: parent.id}, position=next_position,
+                name=changes.get("name", ""), value=changes.get("value", ""),
+                unit=changes.get("unit", ""), notes=changes.get("notes", ""),
+            ))
+            db.session.flush()
+            continue
+        value = db.session.get(model, operation.get("id"))
+        if not value or getattr(value, foreign_key) != parent.id:
+            raise AIProposalConflict(f"提案中的{label}已不存在。")
+        _verify_ai_resource(before, label, value, PARAMETER_AI_FIELDS)
+        if operation["operation"] == "delete":
+            db.session.delete(value)
+        else:
+            if "name" in changes and not changes["name"]:
+                raise ValueError(f"{label}名称不能为空。")
+            _set_ai_fields(value, changes)
+
+
+def _apply_ai_sample_operations(item, operations, before):
+    for operation in operations:
+        changes = operation.get("changes") or {}
+        if operation["operation"] == "create":
+            try:
+                sample_id = int(changes.get("sample_id", ""))
+            except ValueError as exc:
+                raise ValueError("新建样本关联需要有效的 sample_id。") from exc
+            sample = owned_or_404(Sample, sample_id)
+            if ExperimentSample.query.filter_by(experiment_id=item.id, sample_id=sample.id).first():
+                raise ValueError("该样本已经关联到当前实验。")
+            db.session.add(ExperimentSample(
+                experiment_id=item.id, sample_id=sample.id, role=changes.get("role", "实验样本"),
+                amount_used=changes.get("amount_used", ""), notes=changes.get("notes", ""),
+            ))
+            continue
+        usage = db.session.get(ExperimentSample, operation.get("id"))
+        if not usage or usage.experiment_id != item.id:
+            raise AIProposalConflict("提案中的样本关联已不存在。")
+        _verify_ai_resource(before, "样本关联", usage, SAMPLE_USAGE_AI_FIELDS)
+        if operation["operation"] == "delete":
+            db.session.delete(usage)
+        else:
+            changes.pop("sample_id", None)
+            _set_ai_fields(usage, changes)
+
+
+def _apply_ai_record_operations(item, operations, before):
+    for operation in operations:
+        changes = operation.get("changes") or {}
+        if operation["operation"] == "create":
+            if not changes.get("content"):
+                raise ValueError("新建实验记录必须填写实验过程。")
+            record = ExperimentRecord(
+                experiment_id=item.id, record_date=parse_date(changes.get("record_date")) or date.today(),
+                operator=changes.get("operator", ""), conditions=changes.get("conditions", ""),
+                content=changes["content"], result=changes.get("result", "待确认"), remark=changes.get("remark", ""),
+            )
+            if record.result not in {"待确认", "成功", "失败"}:
+                raise ValueError("实验结果不合法。")
+            db.session.add(record)
+            continue
+        record = db.session.get(ExperimentRecord, operation.get("id"))
+        if not record or record.experiment_id != item.id:
+            raise AIProposalConflict("提案中的实验记录已不存在。")
+        _verify_ai_resource(before, "实验记录", record, RECORD_AI_FIELDS)
+        if operation["operation"] == "delete":
+            for attachment in record.attachments:
+                _remove_attachment_file(attachment)
+            db.session.delete(record)
+        else:
+            _apply_ai_record_changes(record, changes)
+
+
+def _apply_ai_attachment_operations(record, operations, before):
+    for operation in operations:
+        attachment = db.session.get(ExperimentAttachment, operation.get("id"))
+        if not attachment or attachment.record_id != record.id:
+            raise AIProposalConflict("提案中的附件已不存在。")
+        _verify_ai_resource(before, "附件", attachment, ATTACHMENT_AI_FIELDS)
+        if operation["operation"] == "delete":
+            _remove_attachment_file(attachment)
+            db.session.delete(attachment)
+            continue
+        changes = operation.get("changes") or {}
+        if "category" in changes:
+            attachment.category = _validate_attachment_category(changes.pop("category"))
+        if "folder" in changes:
+            _move_attachment_to_folder(attachment, _clean_attachment_folder(changes.pop("folder")))
+        _set_ai_fields(attachment, changes)
 
 
 @bp.post("/assistant/proposals/<int:message_id>/apply")
@@ -2217,18 +3002,56 @@ def assistant_apply_proposal(message_id):
     steps = proposal.get("steps") or []
     redirect_url = ""
 
-    if action == "update_experiment":
+    if action == "manage_experiment":
+        item = owned_or_404(Experiment, proposal.get("target_id"))
+        try:
+            field_before = before.get("fields") or {}
+            if any(_serialize_value(getattr(item, field)) != old for field, old in field_before.items()):
+                raise AIProposalConflict("实验基本信息在提案生成后已发生变化，请重新生成修改建议。")
+            _validate_ai_experiment_changes(changes)
+            _set_ai_fields(item, changes, {"start_date", "end_date"}, {"repeat_number"})
+            _apply_ai_step_operations(item, proposal.get("step_operations") or [], before)
+            _apply_ai_parameter_operations(
+                item, proposal.get("parameter_operations") or [], before,
+                "plan_parameters", ExperimentParameter, "experiment_id", "计划参数",
+            )
+            _apply_ai_sample_operations(item, proposal.get("sample_operations") or [], before)
+            _apply_ai_record_operations(item, proposal.get("record_operations") or [], before)
+            redirect_url = url_for("main.experiment_detail", item_id=item.id)
+        except AIProposalConflict as exc:
+            db.session.rollback()
+            return {"error": str(exc)}, 409
+        except ValueError as exc:
+            db.session.rollback()
+            return {"error": str(exc)}, 400
+    elif action == "manage_record":
+        item = experiment_child_or_404(ExperimentRecord, proposal.get("target_id"))
+        try:
+            field_before = before.get("fields") or {}
+            if any(_serialize_value(getattr(item, field)) != old for field, old in field_before.items()):
+                raise AIProposalConflict("实验记录在提案生成后已发生变化，请重新生成修改建议。")
+            _apply_ai_record_changes(item, changes)
+            _apply_ai_parameter_operations(
+                item, proposal.get("parameter_operations") or [], before,
+                "parameters", RecordParameter, "record_id", "记录参数",
+            )
+            _apply_ai_attachment_operations(item, proposal.get("attachment_operations") or [], before)
+            redirect_url = url_for("main.record_detail", record_id=item.id)
+        except AIProposalConflict as exc:
+            db.session.rollback()
+            return {"error": str(exc)}, 409
+        except ValueError as exc:
+            db.session.rollback()
+            return {"error": str(exc)}, 400
+    elif action == "update_experiment":
         item = owned_or_404(Experiment, proposal.get("target_id"))
         if any(_serialize_value(getattr(item, field)) != old for field, old in before.items()):
             return {"error": "页面内容在提案生成后已发生变化，请重新让 AI 生成修改建议。"}, 409
-        if changes.get("status") and changes["status"] not in {"未开始", "进行中", "完成", "暂停"}:
-            return {"error": "实验状态不合法。"}, 400
-        invalid_date = _invalid_ai_date(changes, {"start_date", "end_date"})
-        if invalid_date:
-            return {"error": f"{AI_FIELD_LABELS[invalid_date]}格式不合法。"}, 400
-        if "title" in changes and not changes["title"]:
-            return {"error": "实验名称不能为空。"}, 400
-        _set_ai_fields(item, changes, {"start_date", "end_date"})
+        try:
+            _validate_ai_experiment_changes(changes)
+            _set_ai_fields(item, changes, {"start_date", "end_date"}, {"repeat_number"})
+        except ValueError as exc:
+            return {"error": str(exc)}, 400
         if not item.title:
             return {"error": "实验名称不能为空。"}, 400
         position = max([step.position for step in item.steps], default=0)
@@ -2258,15 +3081,14 @@ def assistant_apply_proposal(message_id):
             return {"error": "实验过程不能为空。"}, 400
         redirect_url = url_for("main.record_detail", record_id=item.id)
     elif action == "create_experiment":
-        if changes.get("status") and changes["status"] not in {"未开始", "进行中", "完成", "暂停"}:
-            return {"error": "实验状态不合法。"}, 400
-        invalid_date = _invalid_ai_date(changes, {"start_date", "end_date"})
-        if invalid_date:
-            return {"error": f"{AI_FIELD_LABELS[invalid_date]}格式不合法。"}, 400
-        item = Experiment(user_id=current_user.id, title=changes.get("title", "").strip())
-        if not item.title:
-            return {"error": "实验名称不能为空。"}, 400
-        _set_ai_fields(item, changes, {"start_date", "end_date"})
+        try:
+            _validate_ai_experiment_changes(changes)
+            item = Experiment(user_id=current_user.id, title=changes.get("title", "").strip())
+            if not item.title:
+                raise ValueError("实验名称不能为空。")
+            _set_ai_fields(item, changes, {"start_date", "end_date"}, {"repeat_number"})
+        except ValueError as exc:
+            return {"error": str(exc)}, 400
         db.session.add(item)
         db.session.flush()
         for position, raw in enumerate(steps, 1):

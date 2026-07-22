@@ -136,3 +136,112 @@ def test_unsafe_paths_and_oversized_files_are_rejected(client, auth, app):
     assert "超过大小限制".encode() in response.data
     with app.app_context():
         assert ExperimentAttachment.query.count() == 0
+
+
+def test_custom_category_and_folder_are_saved_on_upload(client, auth, app):
+    auth.register()
+    _experiment_id, record_id = create_record(client, app)
+    response = client.post(f"/records/{record_id}/attachments", data={
+        "custom_attachment_category": "WB 原始图",
+        "attachment_folder": "结果图 / 第1次重复",
+        "files": (io.BytesIO(b"image-data"), "raw/result.dat"),
+    }, content_type="multipart/form-data")
+    assert response.status_code == 302
+    with app.app_context():
+        attachment = ExperimentAttachment.query.one()
+        assert attachment.category == "WB 原始图"
+        assert attachment.relative_path == "结果图/第1次重复/raw/result.dat"
+        assert (Path(app.config["ATTACHMENT_UPLOAD_DIR"]) / attachment.stored_path).is_file()
+
+
+def test_single_attachment_edit_moves_file_and_updates_metadata(client, auth, app):
+    auth.register()
+    _experiment_id, record_id = create_record(client, app)
+    client.post(f"/records/{record_id}/attachments", data={
+        "files": (io.BytesIO(b"raw-data"), "result.csv")
+    }, content_type="multipart/form-data")
+    with app.app_context():
+        attachment = ExperimentAttachment.query.one()
+        attachment_id = attachment.id
+        old_path = Path(app.config["ATTACHMENT_UPLOAD_DIR"]) / attachment.stored_path
+    response = client.post(f"/attachments/{attachment_id}/metadata", data={
+        "category": "统计结果",
+        "attachment_folder": "分析结果/批次 A",
+        "tags": "Figure 1, 待复核",
+        "description": "主图对应的原始表格",
+    })
+    assert response.status_code == 302
+    with app.app_context():
+        attachment = db.session.get(ExperimentAttachment, attachment_id)
+        new_path = Path(app.config["ATTACHMENT_UPLOAD_DIR"]) / attachment.stored_path
+        assert attachment.category == "统计结果"
+        assert attachment.relative_path == "分析结果/批次 A/result.csv"
+        assert attachment.tags == "Figure 1, 待复核"
+        assert attachment.description == "主图对应的原始表格"
+        assert new_path.is_file()
+        assert not old_path.exists()
+
+
+def test_bulk_attachment_update_and_delete_removes_files(client, auth, app):
+    auth.register()
+    _experiment_id, record_id = create_record(client, app)
+    for name in ("one.csv", "two.csv"):
+        client.post(f"/records/{record_id}/attachments", data={
+            "files": (io.BytesIO(name.encode()), name)
+        }, content_type="multipart/form-data")
+    with app.app_context():
+        attachments = ExperimentAttachment.query.order_by(ExperimentAttachment.id).all()
+        ids = [attachment.id for attachment in attachments]
+        old_paths = [Path(app.config["ATTACHMENT_UPLOAD_DIR"]) / attachment.stored_path for attachment in attachments]
+
+    response = client.post(f"/records/{record_id}/attachments/bulk", data={
+        "attachment_ids": [str(item) for item in ids],
+        "category": "__keep__",
+        "custom_attachment_category": "批量整理",
+        "folder_mode": "custom",
+        "attachment_folder": "批量文件夹",
+        "tags_mode": "replace",
+        "bulk_tags": "待复核",
+        "action": "update",
+    })
+    assert response.status_code == 302
+    with app.app_context():
+        attachments = ExperimentAttachment.query.order_by(ExperimentAttachment.id).all()
+        assert {item.category for item in attachments} == {"批量整理"}
+        assert {item.relative_path for item in attachments} == {"批量文件夹/one.csv", "批量文件夹/two.csv"}
+        assert {item.tags for item in attachments} == {"待复核"}
+        assert all((Path(app.config["ATTACHMENT_UPLOAD_DIR"]) / item.stored_path).is_file() for item in attachments)
+
+    response = client.post(f"/records/{record_id}/attachments/bulk", data={
+        "attachment_ids": [str(item) for item in ids], "action": "delete",
+    })
+    assert response.status_code == 302
+    assert all(not path.exists() for path in old_paths)
+    with app.app_context():
+        assert ExperimentAttachment.query.count() == 0
+
+
+def test_bulk_attachment_update_cannot_cross_record_or_user(client, auth, app):
+    auth.register(email="owner@example.com")
+    _experiment_id, record_id = create_record(client, app)
+    client.post(f"/records/{record_id}/attachments", data={
+        "files": (io.BytesIO(b"private"), "private.bin")
+    }, content_type="multipart/form-data")
+    with app.app_context():
+        attachment_id = ExperimentAttachment.query.one().id
+
+    auth.logout()
+    auth.register(email="other@example.com")
+    assert client.post(f"/records/{record_id}/attachments/bulk", data={
+        "attachment_ids": [str(attachment_id)], "action": "delete",
+    }).status_code == 404
+
+
+def test_custom_category_rejects_path_characters(client, auth, app):
+    auth.register()
+    _experiment_id, record_id = create_record(client, app)
+    response = client.post(f"/records/{record_id}/attachments", data={
+        "custom_attachment_category": "../secret",
+        "files": (io.BytesIO(b"bad"), "bad.bin"),
+    }, content_type="multipart/form-data")
+    assert response.status_code == 400

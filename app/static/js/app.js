@@ -71,6 +71,76 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
+  document.querySelectorAll("[data-attachment-bulk]").forEach((form) => {
+    const checkboxes = [...document.querySelectorAll(`[data-attachment-select][form="${form.id}"]`)];
+    const selectAll = form.querySelector("[data-attachment-select-all]");
+    const selectedLabel = form.querySelector("[data-attachment-selected]");
+    const actionButtons = [...form.querySelectorAll('button[name="action"]')];
+    const updateState = () => {
+      const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
+      if (selectedLabel) selectedLabel.textContent = `已选择 ${selectedCount} 个`;
+      if (selectAll) {
+        selectAll.checked = checkboxes.length > 0 && selectedCount === checkboxes.length;
+        selectAll.indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
+      }
+      actionButtons.forEach((button) => { button.disabled = selectedCount === 0; });
+    };
+    selectAll?.addEventListener("change", () => {
+      checkboxes.forEach((checkbox) => { checkbox.checked = selectAll.checked; });
+      updateState();
+    });
+    checkboxes.forEach((checkbox) => checkbox.addEventListener("change", updateState));
+    form.addEventListener("submit", (event) => {
+      const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
+      if (!selectedCount) {
+        event.preventDefault();
+        window.alert("请先勾选至少一个文件。");
+        return;
+      }
+      if (event.submitter?.value === "delete" &&
+          !window.confirm(`确定永久删除选中的 ${selectedCount} 个文件吗？此操作无法撤销。`)) {
+        event.preventDefault();
+      }
+    });
+    updateState();
+  });
+
+  document.querySelectorAll("[data-bulk-form]").forEach((form) => {
+    const checkboxes = [...document.querySelectorAll(`[data-bulk-select][form="${form.id}"]`)];
+    const selectAll = form.querySelector("[data-bulk-select-all]");
+    const selectedLabel = form.querySelector("[data-bulk-selected]");
+    const actionButtons = [...form.querySelectorAll('button[name="action"]')];
+    const resourceLabel = form.dataset.bulkLabel || "项目";
+    const updateState = () => {
+      const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
+      if (selectedLabel) selectedLabel.textContent = `已选择 ${selectedCount} 个`;
+      if (selectAll) {
+        selectAll.checked = checkboxes.length > 0 && selectedCount === checkboxes.length;
+        selectAll.indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
+      }
+      actionButtons.forEach((button) => { button.disabled = selectedCount === 0; });
+      form.classList.toggle("has-selection", selectedCount > 0);
+    };
+    selectAll?.addEventListener("change", () => {
+      checkboxes.forEach((checkbox) => { checkbox.checked = selectAll.checked; });
+      updateState();
+    });
+    checkboxes.forEach((checkbox) => checkbox.addEventListener("change", updateState));
+    form.addEventListener("submit", (event) => {
+      const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
+      if (!selectedCount) {
+        event.preventDefault();
+        window.alert(`请先勾选至少一个${resourceLabel}。`);
+        return;
+      }
+      if (event.submitter?.value === "delete" &&
+          !window.confirm(`确定批量删除选中的 ${selectedCount} 个${resourceLabel}吗？此操作无法撤销。`)) {
+        event.preventDefault();
+      }
+    });
+    updateState();
+  });
+
   document.querySelectorAll("details[data-disclosure-key]").forEach((details) => {
     const storageKey = `research-assistant-disclosure:${details.dataset.disclosureKey}`;
     try {
@@ -203,7 +273,7 @@ document.addEventListener("DOMContentLoaded", () => {
     aiMessages.innerHTML = "";
     const welcome = makeElement("div", "ai-welcome");
     welcome.append(makeElement("b", "", "可以开始讨论实验了"));
-    welcome.append(makeElement("p", "", "比较历史实验、生成下一次计划或周报，也可以修改当前页面。所有写入都要经过差异确认。"));
+    welcome.append(makeElement("p", "", "管理当前实验、步骤、参数、记录和附件，也可以比较历史或生成周报。所有写入都要经过差异确认。"));
     aiMessages.append(welcome);
   };
 
