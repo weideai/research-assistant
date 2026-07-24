@@ -1,35 +1,103 @@
 {% extends "base.html" %}
-{% block title %}API 设置{% endblock %}
+{% macro capability_icons(descriptor) %}
+  {% set labels = {'vision': ('eye', '视觉输入'), 'reasoning': ('brain-circuit', '推理'), 'web_search': ('globe-2', '联网搜索'), 'tools': ('wrench', '工具调用')} %}
+  <span class="model-capabilities" data-model-capabilities>
+    {% for key, display in labels.items() %}
+      {% set capability = descriptor.capabilities.get(key, {}) if descriptor else {} %}
+      {% set supported = capability.get('supported') %}
+      {% set status = capability.get('status', 'unknown') %}
+      {% set state = 'supported' if supported is sameas true else ('unsupported' if supported is sameas false else 'unknown') %}
+      {% set evidence = '接口声明' if status == 'declared' else ('名称推测' if status == 'inferred' else '尚未确认') %}
+      <i data-lucide="{{ display[0] }}" class="model-capability is-{{ state }} evidence-{{ status }}" title="{{ display[1] }}：{{ '支持' if supported is sameas true else ('不支持' if supported is sameas false else '未知') }}（{{ evidence }}）" aria-label="{{ display[1] }}：{{ '支持' if supported is sameas true else ('不支持' if supported is sameas false else '未知') }}，{{ evidence }}"></i>
+    {% endfor %}
+  </span>
+{% endmacro %}
+{% block title %}API 预设{% endblock %}
 {% block content %}
-<header class="page-head">
-  <div><p class="eyebrow">AI CONNECTION</p><h1>API 设置</h1><p class="muted">为当前账户配置 OpenAI-compatible Chat Completions 服务。</p></div>
-  <span class="badge large {{ 'api-on' if form_values.is_enabled else '' }}"><i data-lucide="{{ 'wifi' if form_values.is_enabled else 'wifi-off' }}"></i>{{ '已启用' if form_values.is_enabled else '未启用' }}</span>
+{% set current_preset = presets|selectattr('is_default')|selectattr('is_enabled')|first %}
+<header class="page-head api-page-head">
+  <div><p class="eyebrow">AI CONNECTIONS</p><h1>API 预设</h1><p class="muted">保存多个 OpenAI-compatible 连接，拉取模型后直接选择当前模型。</p></div>
+  <span class="badge large {{ 'api-on' if current_preset else '' }}"><i data-lucide="{{ 'wifi' if current_preset else 'wifi-off' }}"></i>{{ current_preset.name if current_preset else '尚未选择预设' }}</span>
 </header>
-<div class="settings-layout">
-  <section class="panel settings-form-panel">
-    <div class="panel-head"><div><p class="eyebrow">CONNECTION</p><h2>连接参数</h2></div></div>
-    <form method="post" class="stack-form api-settings-form">
+
+<section class="api-guidance" aria-label="API 配置流程">
+  <span><b>01</b><small>填写 URL 与 Key</small></span><i data-lucide="chevron-right"></i>
+  <span><b>02</b><small>拉取并选择模型</small></span><i data-lucide="chevron-right"></i>
+  <span><b>03</b><small>保存并设为当前</small></span>
+</section>
+
+<section class="panel api-preset-panel" data-model-discovery-url="{{ url_for('main.api_models_discover') }}">
+  <div class="panel-head"><div><p class="eyebrow">PRESETS</p><h2>连接预设</h2></div><span class="count-label">{{ presets|length }} 个</span></div>
+  <div class="api-preset-list">
+    {% for preset in presets %}
+    {% set descriptor = preset_descriptors.get(preset.id) %}
+    {% set is_current = preset.is_default and preset.is_enabled %}
+    <details class="api-preset-row" {{ 'open' if preset.is_default }}>
+      <summary>
+        <span class="api-preset-state"><i data-lucide="{{ 'circle-check-big' if is_current else 'circle' }}"></i></span>
+        <span><b>{{ preset.name }}</b><small>{{ preset.api_url }}</small></span>
+        <span class="api-selected-model"><code>{{ preset.text_model or '未选择模型' }}</code>{{ capability_icons(descriptor) }}</span>
+        <span class="badge {{ 'api-on' if is_current }}">{{ '当前使用' if is_current else ('已启用' if preset.is_enabled else '已停用') }}</span>
+        <i data-lucide="chevron-down"></i>
+      </summary>
+      <form method="post" class="api-preset-form" data-api-preset-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="preset_id" value="{{ preset.id }}">
+        <input type="hidden" name="model_capabilities_json" value="{{ preset.model_capabilities_json }}">
+        <label>预设名称<input name="preset_name" value="{{ preset.name }}" maxlength="120" required></label>
+        <label class="grow">API URL<input type="url" name="preset_api_url" value="{{ preset.api_url }}" required></label>
+        <label class="grow">API Key<div class="secret-field"><input type="password" name="preset_api_key" autocomplete="new-password" placeholder="已加密保存；留空不修改"><button type="button" class="icon-btn reveal-secret" title="显示或隐藏密钥" aria-label="显示或隐藏密钥"><i data-lucide="eye"></i></button></div></label>
+        <div class="api-model-field grow">
+          <label>当前模型<input name="text_model" value="{{ preset.text_model }}" maxlength="160" placeholder="先拉取模型，或手动填写模型 ID" required></label>
+          <button class="btn secondary" type="button" data-fetch-models><i data-lucide="refresh-cw"></i> 拉取模型</button>
+        </div>
+        <div class="api-model-catalog grow" data-model-catalog hidden>
+          <div class="api-model-catalog-head"><span><i data-lucide="boxes"></i><b>可用模型</b></span><input type="search" data-model-filter placeholder="筛选模型" aria-label="筛选可用模型"><small data-model-status>正在读取…</small></div>
+          <div class="api-model-options" data-model-options></div>
+          <p><i data-lucide="info"></i>绿色表示支持，虚线绿色表示名称推测，红色表示接口声明不支持，灰色表示未知。</p>
+        </div>
+        <label class="check-line"><input type="checkbox" name="preset_enabled" value="1" {{ 'checked' if preset.is_enabled }}> 启用预设</label>
+        <label class="check-line"><input type="checkbox" name="sensitive_warning_enabled" value="1" {{ 'checked' if preset.sensitive_warning_enabled }}> 发送敏感数据前提醒</label>
+        {% if preset.encrypted_api_key %}<label class="check-line subtle-check"><input type="checkbox" name="clear_preset_api_key" value="1"> 清除已保存的 Key</label>{% endif %}
+        <div class="api-preset-actions">
+          <button class="btn secondary" name="action" value="preset_save"><i data-lucide="save"></i> 保存</button>
+          {% if not preset.is_default %}<button class="btn primary" name="action" value="preset_activate"><i data-lucide="check"></i> 设为当前</button>{% endif %}
+          <button class="btn danger" name="action" value="preset_delete" data-confirm="删除这个 API 预设？"><i data-lucide="trash-2"></i> 删除</button>
+        </div>
+      </form>
+    </details>
+    {% else %}
+    <div class="empty compact-empty"><i data-lucide="key-round"></i><p>还没有连接预设，请在下方添加第一个 API。</p></div>
+    {% endfor %}
+  </div>
+
+  <details class="api-preset-create" {{ 'open' if not presets }}>
+    <summary><span><i data-lucide="plus"></i><b>添加 API 预设</b><small>URL、Key 与一个当前模型</small></span><i data-lucide="chevron-down"></i></summary>
+    <form method="post" class="api-preset-form" data-api-preset-form>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <label class="toggle-line"><span><b>启用外部 AI</b><small>关闭后使用本地规则整理，任何笔记都不会发送到 API。</small></span><input type="checkbox" name="is_enabled" value="1" {{ 'checked' if form_values.is_enabled }}></label>
-      <label>API URL
-        <input type="url" name="api_url" value="{{ form_values.api_url }}" required placeholder="https://api.openai.com/v1">
-        <small>可填写 API 根地址，或完整的 <code>/chat/completions</code> 地址。</small>
-      </label>
-      <label>API Key
-        <div class="secret-field"><input type="password" name="api_key" autocomplete="new-password" placeholder="{{ '已加密保存；留空则不修改' if setting and setting.encrypted_api_key else 'sk-...；无鉴权的本地服务可留空' }}"><button type="button" class="icon-btn reveal-secret" title="显示或隐藏密钥"><i data-lucide="eye"></i></button></div>
-      </label>
-      {% if setting and setting.encrypted_api_key %}<label class="check-line subtle-check"><input type="checkbox" name="clear_api_key" value="1"> 清除已保存的 API Key</label>{% endif %}
-      <label>模型
-        <input name="model" value="{{ form_values.model }}" required list="available-models" placeholder="gpt-5.6-terra">
-        <datalist id="available-models">{% for model in models %}<option value="{{ model }}">{% endfor %}</datalist>
-        <small>点击“测试并读取模型”后，可从浏览器建议列表中选择。</small>
-      </label>
-      <div class="form-actions split-actions"><button class="btn secondary" name="action" value="test"><i data-lucide="plug-zap"></i> 测试并读取模型</button><button class="btn primary" name="action" value="save"><i data-lucide="save"></i> 保存配置</button></div>
+      <input type="hidden" name="model_capabilities_json" value="{{ preset_form.model_capabilities_json }}">
+      <label>预设名称<input name="preset_name" value="{{ preset_form.name }}" maxlength="120" placeholder="例如：OpenAI 主力连接" required></label>
+      <label class="grow">API URL<input type="url" name="preset_api_url" value="{{ preset_form.api_url }}" required></label>
+      <label class="grow">API Key<div class="secret-field"><input type="password" name="preset_api_key" autocomplete="new-password" placeholder="sk-...；无鉴权的本地服务可留空"><button type="button" class="icon-btn reveal-secret" title="显示或隐藏密钥" aria-label="显示或隐藏密钥"><i data-lucide="eye"></i></button></div></label>
+      <div class="api-model-field grow">
+        <label>当前模型<input name="text_model" value="{{ preset_form.text_model }}" maxlength="160" placeholder="先拉取模型，或手动填写模型 ID" required></label>
+        <button class="btn secondary" type="button" data-fetch-models><i data-lucide="refresh-cw"></i> 拉取模型</button>
+      </div>
+      <div class="api-model-catalog grow" data-model-catalog hidden>
+        <div class="api-model-catalog-head"><span><i data-lucide="boxes"></i><b>可用模型</b></span><input type="search" data-model-filter placeholder="筛选模型" aria-label="筛选可用模型"><small data-model-status>正在读取…</small></div>
+        <div class="api-model-options" data-model-options></div>
+        <p><i data-lucide="info"></i>模型能力来自接口声明或保守推测，请以服务商文档和实际测试为准。</p>
+      </div>
+      <label class="check-line"><input type="checkbox" name="preset_enabled" value="1" checked> 启用预设</label>
+      <label class="check-line"><input type="checkbox" name="sensitive_warning_enabled" value="1" checked> 发送敏感数据前提醒</label>
+      <div class="api-preset-actions"><button class="btn primary" name="action" value="preset_save"><i data-lucide="save"></i> 保存预设</button></div>
     </form>
-  </section>
-  <aside class="settings-side">
-    <section class="panel info-panel"><div class="panel-head"><div><p class="eyebrow">SECURITY</p><h2>密钥与隐私</h2></div></div><div class="info-list"><div><i data-lucide="lock-keyhole"></i><span><b>加密保存</b><small>API Key 使用独立的凭据加密密钥加密后写入数据库。</small></span></div><div><i data-lucide="eye-off"></i><span><b>不会回显</b><small>已保存的密钥不会重新填入页面或出现在日志中。</small></span></div><div><i data-lucide="shield-alert"></i><span><b>科研数据边界</b><small>不要向未获授权的服务发送患者身份信息或敏感原始数据。</small></span></div></div></section>
-    <section class="panel environment-panel"><div class="panel-head"><div><p class="eyebrow">FALLBACK</p><h2>环境变量</h2></div></div><div class="environment-values"><span><small>URL</small><code>{{ environment.api_url }}</code></span><span><small>模型</small><code>{{ environment.model }}</code></span><span><small>API Key</small><b>{{ '已配置' if environment.api_key else '未配置' }}</b></span></div>{% if setting %}<form method="post" data-confirm="删除当前账户配置并恢复使用环境变量？"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn secondary full" name="action" value="use_environment">恢复环境变量配置</button></form>{% endif %}</section>
-  </aside>
-</div>
+  </details>
+</section>
+
+<section class="api-security-note">
+  <i data-lucide="shield-check"></i>
+  <div><b>密钥只加密保存，不会回显</b><p>拉取模型时使用当前表单中的连接；对标准接口无法确认的能力会显示为“未知”，不会自动当作支持。</p></div>
+  <a href="{{ url_for('auth.change_password') }}">账号安全 <i data-lucide="arrow-up-right"></i></a>
+</section>
 {% endblock %}

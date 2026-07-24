@@ -1,0 +1,3 @@
+# Separate experiment plans, executions, and process records
+
+An experiment plan describes reusable intent and expected methods, an experiment execution represents one actual run, and every process record belongs to exactly one execution. Plan steps are definitions only; each execution owns an independent step snapshot and completion state so repeated runs cannot overwrite one another. The product groups screens and exports by this hierarchy; legacy records with missing or invalid execution ownership are repaired into an explicit historical execution instead of being silently omitted. The internal `ExperimentBatch` name remains temporarily for data compatibility, but user-facing language uses “实验执行”.

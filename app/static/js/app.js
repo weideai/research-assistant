@@ -1,6 +1,156 @@
 document.addEventListener("DOMContentLoaded", () => {
   if (window.lucide) window.lucide.createIcons();
 
+  const accountMenu = document.querySelector("#account-menu");
+  document.addEventListener("click", (event) => {
+    if (accountMenu?.open && !accountMenu.contains(event.target)) accountMenu.open = false;
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && accountMenu?.open) accountMenu.open = false;
+  });
+
+  const modelDiscoveryRoot = document.querySelector("[data-model-discovery-url]");
+  if (modelDiscoveryRoot) {
+    const discoveryUrl = modelDiscoveryRoot.dataset.modelDiscoveryUrl;
+    const csrf = document.querySelector('meta[name="csrf-token"]')?.content || "";
+    const capabilitySpec = {
+      vision: ["eye", "视觉输入"],
+      reasoning: ["brain-circuit", "推理"],
+      web_search: ["globe-2", "联网搜索"],
+      tools: ["wrench", "工具调用"],
+    };
+    const capabilityStrip = (descriptor) => {
+      const strip = document.createElement("span");
+      strip.className = "model-capabilities";
+      Object.entries(capabilitySpec).forEach(([key, [iconName, label]]) => {
+        const capability = descriptor?.capabilities?.[key] || {};
+        const state = capability.supported === true ? "supported" : (capability.supported === false ? "unsupported" : "unknown");
+        const evidence = capability.status === "declared" ? "接口声明" : (capability.status === "inferred" ? "名称推测" : "尚未确认");
+        const supportLabel = capability.supported === true ? "支持" : (capability.supported === false ? "不支持" : "未知");
+        const icon = document.createElement("i");
+        icon.dataset.lucide = iconName;
+        icon.className = `model-capability is-${state} evidence-${capability.status || "unknown"}`;
+        icon.title = `${label}：${supportLabel}（${evidence}）`;
+        icon.setAttribute("aria-label", `${label}：${supportLabel}，${evidence}`);
+        strip.append(icon);
+      });
+      return strip;
+    };
+    modelDiscoveryRoot.querySelectorAll("[data-api-preset-form]").forEach((form, formIndex) => {
+      const fetchButton = form.querySelector("[data-fetch-models]");
+      const catalog = form.querySelector("[data-model-catalog]");
+      const options = form.querySelector("[data-model-options]");
+      const status = form.querySelector("[data-model-status]");
+      const filter = form.querySelector("[data-model-filter]");
+      const modelInput = form.querySelector('[name="text_model"]');
+      const apiUrlInput = form.querySelector('[name="preset_api_url"]');
+      const capabilitySnapshotInput = form.querySelector('[name="model_capabilities_json"]');
+      const normalizedApiUrl = () => (apiUrlInput?.value.trim() || "").replace(/\/+$/, "");
+      const applySelectedModel = (model) => {
+        modelInput.value = model.id;
+        capabilitySnapshotInput.value = JSON.stringify({
+          model_id: model.id,
+          api_url: normalizedApiUrl(),
+          capabilities: model.capabilities,
+        });
+        const summary = form.closest("details")?.querySelector(":scope > summary .api-selected-model");
+        const summaryCode = summary?.querySelector("code");
+        if (summaryCode) summaryCode.textContent = model.id;
+        const currentStrip = summary?.querySelector(".model-capabilities");
+        if (currentStrip) currentStrip.replaceWith(capabilityStrip(model));
+        if (window.lucide) window.lucide.createIcons();
+      };
+      modelInput?.addEventListener("input", () => { capabilitySnapshotInput.value = ""; });
+      apiUrlInput?.addEventListener("input", () => { capabilitySnapshotInput.value = ""; });
+      let rows = [];
+      filter?.addEventListener("input", () => {
+        const query = filter.value.trim().toLowerCase();
+        rows.forEach((row) => { row.hidden = Boolean(query) && !row.dataset.modelId.includes(query); });
+      });
+      fetchButton?.addEventListener("click", async () => {
+        const apiUrl = apiUrlInput?.value.trim();
+        const apiKey = form.querySelector('[name="preset_api_key"]')?.value.trim();
+        const presetId = form.querySelector('[name="preset_id"]')?.value || null;
+        if (!apiUrl) {
+          form.querySelector('[name="preset_api_url"]')?.focus();
+          return;
+        }
+        fetchButton.disabled = true;
+        catalog.hidden = false;
+        options.replaceChildren();
+        if (status) status.textContent = "正在连接…";
+        try {
+          const response = await fetch(discoveryUrl, {
+            method: "POST",
+            headers: {"Content-Type": "application/json", "X-CSRFToken": csrf, "Accept": "application/json"},
+            body: JSON.stringify({api_url: apiUrl, api_key: apiKey, preset_id: presetId}),
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || "模型拉取失败");
+          rows = result.models.map((model, index) => {
+            const row = document.createElement("label");
+            row.className = "api-model-option";
+            row.dataset.modelId = model.id.toLowerCase();
+            const radio = document.createElement("input");
+            radio.type = "radio";
+            radio.name = `discovered-model-${formIndex}`;
+            radio.value = model.id;
+            radio.checked = model.id === modelInput.value;
+            const copy = document.createElement("span");
+            const title = document.createElement("b");
+            title.textContent = model.id;
+            const owner = document.createElement("small");
+            owner.textContent = model.owned_by ? `提供方：${model.owned_by}` : "提供方未声明";
+            copy.append(title, owner);
+            row.append(radio, copy, capabilityStrip(model));
+            radio.addEventListener("change", () => applySelectedModel(model));
+            options.append(row);
+            if (radio.checked) applySelectedModel(model);
+            return row;
+          });
+          if (status) status.textContent = `共 ${result.models.length} 个`;
+          if (filter) { filter.value = ""; filter.focus(); }
+          if (window.lucide) window.lucide.createIcons();
+        } catch (error) {
+          if (status) status.textContent = "读取失败";
+          const message = document.createElement("p");
+          message.className = "empty-cell";
+          message.textContent = error.message;
+          options.replaceChildren(message);
+        } finally {
+          fetchButton.disabled = false;
+        }
+      });
+    });
+  }
+
+  const updateCheckUrl = document.body.dataset.updateCheckUrl;
+  const updateBanner = document.querySelector("#update-banner");
+  if (updateCheckUrl && updateBanner) {
+    fetch(updateCheckUrl, {headers: {"Accept": "application/json"}})
+      .then((response) => response.ok ? response.json() : null)
+      .then((result) => {
+        if (!result?.enabled || !result.update_available || !result.latest_version || !result.release_url) return;
+        const dismissKey = `research-assistant-update-dismissed:${result.latest_version}`;
+        try {
+          if (window.localStorage.getItem(dismissKey) === "1") return;
+        } catch (_error) {
+          // The reminder still works when browser storage is unavailable.
+        }
+        const version = document.querySelector("#update-version");
+        const link = document.querySelector("#update-release-link");
+        if (version) version.textContent = `v${result.latest_version}`;
+        if (link) link.href = result.release_url;
+        updateBanner.hidden = false;
+        if (window.lucide) window.lucide.createIcons();
+        document.querySelector("#update-dismiss")?.addEventListener("click", () => {
+          updateBanner.hidden = true;
+          try { window.localStorage.setItem(dismissKey, "1"); } catch (_error) {}
+        }, {once: true});
+      })
+      .catch(() => {});
+  }
+
   const sidebar = document.querySelector("#sidebar");
   document.querySelector("#menu-toggle")?.addEventListener("click", () => sidebar?.classList.toggle("open"));
   document.addEventListener("click", (event) => {
@@ -157,6 +307,118 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
   });
+
+  document.querySelectorAll("[data-template-apply-form]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      const mode = form.querySelector("[name='apply_mode']")?.value;
+      if (mode === "replace" && !window.confirm("替换会删除目标实验当前的全部步骤，再写入模板步骤。确认继续吗？")) {
+        event.preventDefault();
+      } else if (mode === "replace") {
+        let confirmation = form.querySelector("[name='replace_confirmed']");
+        if (!confirmation) {
+          confirmation = document.createElement("input");
+          confirmation.type = "hidden";
+          confirmation.name = "replace_confirmed";
+          form.append(confirmation);
+        }
+        confirmation.value = "1";
+      }
+    });
+  });
+
+  // Keep the experiment page focused on one work area at a time. The panels
+  // remain in the DOM so existing links, form actions and accessibility
+  // fallbacks continue to work when JavaScript is unavailable.
+  const experimentWorkspace = document.querySelector("[data-experiment-workspace]");
+  if (experimentWorkspace) {
+    experimentWorkspace.classList.add("tabs-ready");
+    const tabs = [...document.querySelectorAll("[data-experiment-tab]")];
+    const panels = [...experimentWorkspace.querySelectorAll("[data-experiment-panel]")];
+    const tabForHash = {
+      overview: "overview", protocol: "protocol", batches: "batches",
+      "experiment-batches": "batches", "experiment-steps": "protocol", "step-templates": "protocol",
+      "new-record": "batches", "record-history": "batches", "experiment-record-index": "batches",
+    };
+    const setExperimentTab = (value, updateHash = true) => {
+      const tab = ["overview", "protocol", "batches"].includes(value) ? value : "overview";
+      experimentWorkspace.dataset.activeTab = tab;
+      panels.forEach((panel) => { panel.hidden = panel.dataset.experimentPanel !== tab; });
+      const activePanels = panels.filter((panel) => panel.dataset.experimentPanel === tab);
+      const activeDetails = activePanels.filter((panel) => panel.matches("details"));
+      if (activeDetails.length && activeDetails.every((panel) => !panel.open)) activeDetails[0].open = true;
+      tabs.forEach((link) => {
+        const active = link.dataset.experimentTab === tab;
+        link.classList.toggle("active", active);
+        if (active) link.setAttribute("aria-current", "page");
+        else link.removeAttribute("aria-current");
+      });
+      if (updateHash && window.history?.replaceState) window.history.replaceState(null, "", `#${tab}`);
+    };
+    let initialTab = new URLSearchParams(window.location.search).get("view") || "";
+    const hashName = window.location.hash.replace(/^#/, "");
+    if (!initialTab && hashName) initialTab = tabForHash[hashName] || "";
+    if (new URLSearchParams(window.location.search).has("record_template_id")) initialTab = "batches";
+    setExperimentTab(initialTab || "overview", false);
+    tabs.forEach((link) => link.addEventListener("click", (event) => {
+      event.preventDefault();
+      setExperimentTab(link.dataset.experimentTab);
+    }));
+    document.querySelectorAll("[data-experiment-tab-link]").forEach((link) => {
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        setExperimentTab(link.dataset.experimentTabLink);
+        const target = document.querySelector(link.getAttribute("href"));
+        target?.scrollIntoView({block: "start", behavior: "smooth"});
+      });
+    });
+    window.addEventListener("hashchange", () => {
+      const next = tabForHash[window.location.hash.replace(/^#/, "")];
+      if (next) setExperimentTab(next, false);
+    });
+  }
+
+  const recordWorkspace = document.querySelector("[data-record-workspace]");
+  if (recordWorkspace) {
+    recordWorkspace.classList.add("tabs-ready");
+    const tabs = [...document.querySelectorAll("[data-record-tab]")];
+    const panels = [...recordWorkspace.querySelectorAll("[data-record-panel]")];
+    const tabForHash = {
+      "record-view": "view", "record-files": "files", "record-edit": "edit",
+      "record-history": "history", "record-template-tools": "history",
+    };
+    const setRecordTab = (value, updateHash = true) => {
+      const tab = ["view", "files", "edit", "history"].includes(value) ? value : "view";
+      recordWorkspace.dataset.activeRecordTab = tab;
+      panels.forEach((panel) => { panel.hidden = panel.dataset.recordPanel !== tab; });
+      const activePanels = panels.filter((panel) => panel.dataset.recordPanel === tab);
+      const activeDetails = activePanels.filter((panel) => panel.matches("details"));
+      if (activeDetails.length && activeDetails.every((panel) => !panel.open)) activeDetails[0].open = true;
+      tabs.forEach((link) => {
+        const active = link.dataset.recordTab === tab;
+        link.classList.toggle("active", active);
+        if (active) link.setAttribute("aria-current", "page");
+        else link.removeAttribute("aria-current");
+      });
+      if (updateHash && window.history?.replaceState) window.history.replaceState(null, "", `#${tab === "view" ? "record-view" : `record-${tab}`}`);
+    };
+    const hashName = window.location.hash.replace(/^#/, "");
+    setRecordTab(tabForHash[hashName] || new URLSearchParams(window.location.search).get("view") || "view", false);
+    tabs.forEach((link) => link.addEventListener("click", (event) => {
+      event.preventDefault();
+      setRecordTab(link.dataset.recordTab);
+    }));
+    document.querySelectorAll("[data-record-tab-link]").forEach((link) => {
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        setRecordTab(link.dataset.recordTabLink);
+        document.querySelector(link.getAttribute("href"))?.scrollIntoView({block: "start", behavior: "smooth"});
+      });
+    });
+    window.addEventListener("hashchange", () => {
+      const next = tabForHash[window.location.hash.replace(/^#/, "")];
+      if (next) setRecordTab(next, false);
+    });
+  }
   document.querySelectorAll('a[href^="#"]').forEach((link) => {
     link.addEventListener("click", () => {
       const target = document.querySelector(link.getAttribute("href"));
@@ -240,6 +502,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const aiPromptForm = document.querySelector("#ai-prompt-form");
   const aiCustomPrompt = document.querySelector("#ai-custom-prompt");
   const aiPromptStatus = document.querySelector("#ai-prompt-status");
+  const aiWebAccess = document.querySelector("#ai-web-access");
   const aiStop = document.querySelector("#ai-stop");
   const aiTaskStatus = document.querySelector("#ai-task-status");
   const aiCompletionToast = document.querySelector("#ai-completion-toast");
@@ -247,6 +510,12 @@ document.addEventListener("DOMContentLoaded", () => {
   const aiConversationList = document.querySelector("#ai-conversation-list");
   const aiConversationSearch = document.querySelector("#ai-conversation-search");
   const aiChatTitle = document.querySelector("#ai-chat-title");
+  const aiContextDialog = document.querySelector("#ai-context-dialog");
+  const aiContextProvider = document.querySelector("#ai-context-provider");
+  const aiContextSummary = document.querySelector("#ai-context-summary");
+  const aiContextSources = document.querySelector("#ai-context-sources");
+  const aiContextWarning = document.querySelector("#ai-context-warning");
+  const aiContextConfirm = document.querySelector("#ai-context-confirm");
   const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
   const assistantPage = {
     type: document.body.dataset.assistantPageType || "",
@@ -255,6 +524,9 @@ document.addEventListener("DOMContentLoaded", () => {
   let aiConversationId = window.localStorage.getItem("research-assistant-conversation") || "";
   let aiLoaded = false;
   let aiExperimentOptions = [];
+  let aiBatchOptions = [];
+  let aiPageScope = {};
+  let aiProjectOptions = [];
   let aiKnowledgeOptions = [];
   let aiConversationOptions = [];
   let aiRequestRunning = false;
@@ -264,7 +536,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const baseDocumentTitle = document.title;
   const aiWindowStorageKey = "research-assistant-window-state-v2";
   const aiChannel = "BroadcastChannel" in window ? new BroadcastChannel("research-assistant-ai") : null;
-  const isAiPopup = document.body.dataset.assistantPopup === "1";
+  document.querySelector("[data-open-ai-assistant]")?.addEventListener("click", () => aiFab?.click());
 
   const hideAiNotice = () => {
     if (aiCompletionToast) aiCompletionToast.hidden = true;
@@ -314,7 +586,7 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   const saveAiWindowState = () => {
-    if (!aiDock || isAiPopup || window.innerWidth <= 600) return;
+    if (!aiDock || window.innerWidth <= 600) return;
     const rect = aiDock.getBoundingClientRect();
     window.localStorage.setItem(aiWindowStorageKey, JSON.stringify({
       left: Math.round(rect.left), top: Math.round(rect.top), width: Math.round(rect.width),
@@ -324,7 +596,7 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   const applyAiWindowState = () => {
-    if (!aiDock || isAiPopup || window.innerWidth <= 600) return;
+    if (!aiDock || window.innerWidth <= 600) return;
     const state = readAiWindowState();
     if (state.width) aiDock.style.width = `${Math.min(state.width, window.innerWidth - 24)}px`;
     if (state.height) aiDock.style.height = `${Math.min(state.height, window.innerHeight - 24)}px`;
@@ -484,6 +756,35 @@ document.addEventListener("DOMContentLoaded", () => {
       const heading = makeElement("div", "ai-proposal-head");
       heading.append(makeElement("b", "", "页面修改提案"), makeElement("span", "", message.reverted ? "已撤销" : (message.applied ? "已保存" : "等待确认")));
       proposal.append(heading);
+      if (message.proposal.action === "create_experiment") {
+        const target = makeElement("label", "ai-proposal-target");
+        const targetCopy = makeElement("span", "");
+        targetCopy.append(makeElement("b", "", "所属科研项目"));
+        targetCopy.append(makeElement("small", "", aiProjectOptions.length ? "保存前确认实验计划归属" : "当前没有项目，将保存到未分类项目"));
+        const select = document.createElement("select");
+        select.className = "ai-proposal-project";
+        select.disabled = Boolean(message.applied);
+        const placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = aiProjectOptions.length ? "请选择科研项目" : "未分类项目";
+        select.append(placeholder);
+        aiProjectOptions.forEach((project) => {
+          const option = document.createElement("option");
+          option.value = String(project.id);
+          option.textContent = `${project.code || "未编号"} · ${project.title}`;
+          select.append(option);
+        });
+        const proposedProjectId = String(message.proposal.project_id || "");
+        if (proposedProjectId && !aiProjectOptions.some((project) => String(project.id) === proposedProjectId)) {
+          const unavailable = document.createElement("option");
+          unavailable.value = proposedProjectId;
+          unavailable.textContent = `科研项目 #${proposedProjectId}（当前不可用）`;
+          select.append(unavailable);
+        }
+        select.value = proposedProjectId || (aiProjectOptions.length === 1 ? String(aiProjectOptions[0].id) : "");
+        target.append(targetCopy, select);
+        proposal.append(target);
+      }
       message.proposal.diff?.forEach((change) => {
         const row = makeElement("div", "ai-diff-row");
         const select = makeElement("label", "ai-diff-select");
@@ -570,13 +871,41 @@ document.addEventListener("DOMContentLoaded", () => {
     if (window.lucide) window.lucide.createIcons();
   };
 
-  const selectedExperimentIds = () => Array.from(
-    aiHistoryList?.querySelectorAll('input[type="checkbox"]:checked') || []
+  const selectedBatchIds = () => Array.from(
+    aiHistoryList?.querySelectorAll('input[name="batch_ids"]:checked') || []
   ).map((input) => String(input.value));
 
+  const selectedExperimentIds = () => {
+    const selected = Array.from(
+      aiHistoryList?.querySelectorAll('input[name="experiment_ids"]:checked') || []
+    ).map((input) => String(input.value));
+    selectedBatchIds().forEach((batchId) => {
+      const batch = aiBatchOptions.find((item) => String(item.id) === batchId);
+      if (batch && !selected.includes(String(batch.experiment_id))) selected.push(String(batch.experiment_id));
+    });
+    return selected;
+  };
+
+  const syncExperimentScopeControls = () => {
+    aiHistoryList?.querySelectorAll("[data-history-experiment-group]").forEach((group) => {
+      const parent = group.querySelector("[data-experiment-select-all]");
+      const children = Array.from(group.querySelectorAll('input[name="batch_ids"]'));
+      if (!parent || !children.length) return;
+      const checkedCount = children.filter((input) => input.checked).length;
+      parent.checked = checkedCount === children.length;
+      parent.indeterminate = checkedCount > 0 && checkedCount < children.length;
+    });
+  };
+
   const updateHistoryCount = () => {
-    const count = selectedExperimentIds().length;
-    if (aiHistoryCount) aiHistoryCount.textContent = count ? `已选择 ${count} 个实验` : "未选择实验";
+    syncExperimentScopeControls();
+    const executionCount = selectedBatchIds().length;
+    const planCount = aiHistoryList?.querySelectorAll('input[name="experiment_ids"]:checked').length || 0;
+    if (aiHistoryCount) {
+      aiHistoryCount.textContent = executionCount
+        ? `已选择 ${executionCount} 次执行${planCount ? `、${planCount} 个计划` : ""}`
+        : (planCount ? `已选择 ${planCount} 个计划` : "未选择实验执行");
+    }
     const pptLink = document.querySelector("#ai-create-ppt");
     if (pptLink) {
       const query = selectedExperimentIds().map((id) => `experiment_id=${encodeURIComponent(id)}`).join("&");
@@ -584,32 +913,91 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   };
 
-  const renderExperimentScope = (experiments, selectedIds = []) => {
+  const renderExperimentScope = (experiments, batches, selectedIds = [], selectedExecutionIds = [], pageScope = {}) => {
     if (!aiHistoryList) return;
     aiExperimentOptions = experiments || [];
-    const selected = new Set((selectedIds || []).map(String));
-    if (!selected.size && assistantPage.type === "experiment" && assistantPage.id) selected.add(String(assistantPage.id));
+    aiBatchOptions = batches || [];
+    aiPageScope = pageScope || {};
+    const selectedPlans = new Set((selectedIds || []).map(String));
+    const selectedExecutions = new Set((selectedExecutionIds || []).map(String));
+    // Conversations created before execution-level scope stored only experiment IDs.
+    selectedPlans.forEach((experimentId) => {
+      aiBatchOptions
+        .filter((batch) => String(batch.experiment_id) === experimentId)
+        .forEach((batch) => selectedExecutions.add(String(batch.id)));
+    });
+    if (!selectedPlans.size && !selectedExecutions.size && aiPageScope.batch_id) {
+      selectedExecutions.add(String(aiPageScope.batch_id));
+    } else if (!selectedPlans.size && !selectedExecutions.size && aiPageScope.experiment_id) {
+      const currentBatches = aiBatchOptions.filter(
+        (batch) => String(batch.experiment_id) === String(aiPageScope.experiment_id)
+      );
+      if (currentBatches.length) currentBatches.forEach((batch) => selectedExecutions.add(String(batch.id)));
+      else selectedPlans.add(String(aiPageScope.experiment_id));
+    } else if (!selectedPlans.size && !selectedExecutions.size && aiPageScope.project_id) {
+      aiExperimentOptions
+        .filter((experiment) => String(experiment.project_id || "") === String(aiPageScope.project_id))
+        .forEach((experiment) => {
+          const projectBatches = aiBatchOptions.filter((batch) => String(batch.experiment_id) === String(experiment.id));
+          if (projectBatches.length) projectBatches.forEach((batch) => selectedExecutions.add(String(batch.id)));
+          else selectedPlans.add(String(experiment.id));
+        });
+    }
     aiHistoryList.innerHTML = "";
     aiExperimentOptions.forEach((experiment) => {
-      const label = makeElement("label", "ai-history-option");
+      const group = makeElement("section", "ai-history-experiment-group");
+      group.dataset.historyExperimentGroup = String(experiment.id);
+      const label = makeElement("label", "ai-history-option ai-history-experiment");
       const input = document.createElement("input");
       input.type = "checkbox";
-      input.name = "experiment_ids";
       input.value = String(experiment.id);
-      input.checked = selected.has(String(experiment.id));
+      const experimentBatches = aiBatchOptions.filter(
+        (batch) => String(batch.experiment_id) === String(experiment.id)
+      );
+      if (experimentBatches.length) input.dataset.experimentSelectAll = String(experiment.id);
+      else input.name = "experiment_ids";
+      input.checked = selectedPlans.has(String(experiment.id));
       const copy = makeElement("span", "");
       copy.append(makeElement("b", "", experiment.title));
-      copy.append(makeElement("small", "", `${experiment.code} · ${experiment.status} · ${experiment.updated_at}`));
+      copy.append(makeElement("small", "", `${experiment.code} · ${experiment.status} · ${experimentBatches.length} 次执行`));
       label.append(input, copy);
-      aiHistoryList.append(label);
+      group.append(label);
+      if (experimentBatches.length) {
+        const executionList = makeElement("div", "ai-history-execution-list");
+        experimentBatches.forEach((batch) => {
+          const executionLabel = makeElement("label", "ai-history-option ai-history-execution");
+          const executionInput = document.createElement("input");
+          executionInput.type = "checkbox";
+          executionInput.name = "batch_ids";
+          executionInput.value = String(batch.id);
+          executionInput.dataset.experimentId = String(experiment.id);
+          executionInput.checked = selectedExecutions.has(String(batch.id));
+          const executionCopy = makeElement("span", "");
+          executionCopy.append(makeElement("b", "", batch.code));
+          const repeat = `${batch.repeat_kind} #${batch.repeat_number}`;
+          const dates = [batch.start_date, batch.end_date].filter(Boolean).join(" 至 ") || "未设置日期";
+          executionCopy.append(makeElement(
+            "small", "", [repeat, batch.group_name, batch.status, dates].filter(Boolean).join(" · ")
+          ));
+          executionLabel.append(executionInput, executionCopy);
+          executionList.append(executionLabel);
+        });
+        group.append(executionList);
+      } else {
+        copy.querySelector("small").textContent = `${experiment.code} · ${experiment.status} · 尚无实验执行，仅发送计划信息`;
+      }
+      aiHistoryList.append(group);
     });
-    if (!aiExperimentOptions.length) aiHistoryList.append(makeElement("p", "", "还没有可选择的实验"));
+    if (!aiExperimentOptions.length) aiHistoryList.append(makeElement("p", "", "还没有可选择的实验计划或执行"));
     updateHistoryCount();
   };
 
   const appendExperimentScope = (data) => {
     data.set("experiment_scope_present", "1");
-    selectedExperimentIds().forEach((itemId) => data.append("experiment_ids", itemId));
+    data.set("batch_scope_present", "1");
+    Array.from(aiHistoryList?.querySelectorAll('input[name="experiment_ids"]:checked') || [])
+      .forEach((input) => data.append("experiment_ids", input.value));
+    selectedBatchIds().forEach((itemId) => data.append("batch_ids", itemId));
   };
 
   const selectedKnowledgeBaseIds = () => Array.from(
@@ -736,24 +1124,50 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   const loadAiState = async () => {
-    const query = aiConversationId ? `?conversation_id=${encodeURIComponent(aiConversationId)}` : "";
-    let response = await fetch(`/assistant/state${query}`, {headers: {"Accept": "application/json"}});
+    const query = new URLSearchParams();
+    if (aiConversationId) query.set("conversation_id", aiConversationId);
+    if (assistantPage.type && assistantPage.id) {
+      query.set("page_type", assistantPage.type);
+      query.set("page_id", assistantPage.id);
+    }
+    const stateUrl = () => {
+      const search = query.toString();
+      return `/assistant/state${search ? `?${search}` : ""}`;
+    };
+    let response = await fetch(stateUrl(), {headers: {"Accept": "application/json"}});
     if (response.status === 404 && aiConversationId) {
       aiConversationId = "";
       window.localStorage.removeItem("research-assistant-conversation");
-      response = await fetch("/assistant/state", {headers: {"Accept": "application/json"}});
+      query.delete("conversation_id");
+      response = await fetch(stateUrl(), {headers: {"Accept": "application/json"}});
     }
     if (!response.ok) throw new Error("无法读取 AI 会话");
     const state = await response.json();
     aiConversationOptions = state.conversations || [];
+    aiProjectOptions = state.projects || [];
     setConversation(state.conversation);
-    renderExperimentScope(state.experiments, state.conversation?.selected_experiment_ids || []);
+    renderExperimentScope(
+      state.experiments,
+      state.batches,
+      state.conversation?.selected_experiment_ids || [],
+      state.conversation?.selected_batch_ids || [],
+      state.page_scope || {},
+    );
     renderKnowledgeBases(state.knowledge_bases, state.conversation?.selected_knowledge_base_ids || []);
     if (aiCustomPrompt) aiCustomPrompt.value = state.preference.custom_prompt || "";
     if (aiPromptStatus) aiPromptStatus.textContent = state.preference.using_default ? "使用默认提示词" : "已使用自定义提示词";
     if (aiModelLabel) {
       aiModelLabel.dataset.idleLabel = state.api.enabled ? state.api.model : "未配置 API";
       aiModelLabel.textContent = aiModelLabel.dataset.idleLabel;
+    }
+    if (aiWebAccess) {
+      aiWebAccess.disabled = !state.api.web_capable;
+      if (aiWebAccess.disabled) aiWebAccess.checked = false;
+      const toggle = aiWebAccess.closest(".ai-web-toggle");
+      toggle?.classList.toggle("disabled", aiWebAccess.disabled);
+      if (toggle) toggle.title = state.api.web_capable
+        ? "使用当前 API 的网页搜索能力并返回引用"
+        : "当前 API 或模型未确认支持联网搜索";
     }
     aiLoaded = true;
   };
@@ -767,6 +1181,9 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     aiInput?.focus();
   });
+  if (new URLSearchParams(window.location.search).get("assistant") === "open") {
+    window.setTimeout(() => aiFab?.click(), 0);
+  }
   document.querySelector("#ai-close")?.addEventListener("click", () => {
     aiDock?.classList.remove("open");
     aiDock?.setAttribute("aria-hidden", "true");
@@ -780,13 +1197,9 @@ document.addEventListener("DOMContentLoaded", () => {
     aiDock.classList.toggle("ai-maximized");
     saveAiWindowState();
   });
-  document.querySelector("#ai-popout")?.addEventListener("click", () => {
-    window.open("/assistant/popup", "research-assistant-ai", "popup,width=1100,height=860,resizable=yes,scrollbars=no");
-  });
-
   const aiDockHead = aiDock?.querySelector(".ai-dock-head");
   aiDockHead?.addEventListener("pointerdown", (event) => {
-    if (isAiPopup || window.innerWidth <= 600 || aiDock.classList.contains("ai-maximized") || event.target.closest("button,a")) return;
+    if (window.innerWidth <= 600 || aiDock.classList.contains("ai-maximized") || event.target.closest("button,a")) return;
     const rect = aiDock.getBoundingClientRect();
     const startX = event.clientX;
     const startY = event.clientY;
@@ -817,7 +1230,7 @@ document.addEventListener("DOMContentLoaded", () => {
     aiDockHead.addEventListener("pointercancel", end);
   });
 
-  if (aiDock && "ResizeObserver" in window && !isAiPopup) {
+  if (aiDock && "ResizeObserver" in window) {
     let resizeSaveTimer;
     new ResizeObserver(() => {
       window.clearTimeout(resizeSaveTimer);
@@ -896,16 +1309,47 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  aiHistoryList?.addEventListener("change", updateHistoryCount);
+  aiHistoryList?.addEventListener("change", (event) => {
+    const parent = event.target.closest("[data-experiment-select-all]");
+    if (parent) {
+      const group = parent.closest("[data-history-experiment-group]");
+      group?.querySelectorAll('input[name="batch_ids"]').forEach((input) => {
+        input.checked = parent.checked;
+      });
+    }
+    updateHistoryCount();
+  });
   aiKnowledgeList?.addEventListener("change", updateKnowledgeCount);
   document.querySelector("#ai-select-current")?.addEventListener("click", () => {
-    aiHistoryList?.querySelectorAll('input[type="checkbox"]').forEach((input) => {
-      input.checked = assistantPage.type === "experiment" && String(input.value) === String(assistantPage.id);
-    });
+    aiHistoryList?.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.checked = false; });
+    if (aiPageScope.batch_id) {
+      const current = aiHistoryList?.querySelector(`input[name="batch_ids"][value="${CSS.escape(String(aiPageScope.batch_id))}"]`);
+      if (current) current.checked = true;
+    } else if (aiPageScope.experiment_id) {
+      const group = aiHistoryList?.querySelector(`[data-history-experiment-group="${CSS.escape(String(aiPageScope.experiment_id))}"]`);
+      const executions = group?.querySelectorAll('input[name="batch_ids"]') || [];
+      if (executions.length) executions.forEach((input) => { input.checked = true; });
+      else {
+        const plan = group?.querySelector('input[name="experiment_ids"]');
+        if (plan) plan.checked = true;
+      }
+    } else if (aiPageScope.project_id) {
+      aiExperimentOptions
+        .filter((experiment) => String(experiment.project_id || "") === String(aiPageScope.project_id))
+        .forEach((experiment) => {
+          const group = aiHistoryList?.querySelector(`[data-history-experiment-group="${CSS.escape(String(experiment.id))}"]`);
+          const executions = group?.querySelectorAll('input[name="batch_ids"]') || [];
+          if (executions.length) executions.forEach((input) => { input.checked = true; });
+          else {
+            const plan = group?.querySelector('input[name="experiment_ids"]');
+            if (plan) plan.checked = true;
+          }
+        });
+    }
     updateHistoryCount();
   });
   document.querySelector("#ai-select-all")?.addEventListener("click", () => {
-    aiHistoryList?.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.checked = true; });
+    aiHistoryList?.querySelectorAll('input[name="experiment_ids"], input[name="batch_ids"]').forEach((input) => { input.checked = true; });
     updateHistoryCount();
   });
   document.querySelector("#ai-clear-selection")?.addEventListener("click", () => {
@@ -943,6 +1387,67 @@ document.addEventListener("DOMContentLoaded", () => {
     Array.from(aiFiles.files || []).slice(0, 8).forEach((file) => aiFileList.append(makeElement("span", "", file.name)));
   });
 
+  const confirmAiOutgoingContext = async (data) => {
+    const previewData = new FormData();
+    for (const [key, value] of data.entries()) {
+      if (key !== "files") previewData.append(key, value);
+    }
+    Array.from(aiFiles?.files || []).slice(0, 8).forEach((file) => {
+      previewData.append("file_names", file.name);
+      previewData.append("file_sizes", String(file.size));
+    });
+    const response = await fetch("/assistant/context-preview", {
+      method: "POST", body: previewData, headers: {"X-CSRFToken": csrfToken},
+    });
+    const preview = await response.json();
+    if (!response.ok) throw new Error(preview.error || "无法检查外发上下文");
+    if (!preview.requires_confirmation || !aiContextDialog) return true;
+
+    aiContextProvider.textContent = `${preview.provider.host} · ${preview.provider.model || "未设置模型"}`;
+    aiContextSummary.innerHTML = "";
+    [
+      [preview.message_chars, "提问字符"],
+      [preview.research.experiment_count, "实验计划"],
+      [preview.research.record_count, "过程记录"],
+      [preview.knowledge.document_count, "知识文档"],
+      [preview.files.length, "上传文件"],
+      [preview.web_access ? "开启" : "关闭", "联网检索"],
+    ].forEach(([value, label]) => {
+      const row = makeElement("span", "");
+      row.append(makeElement("b", "", String(value)), makeElement("small", "", label));
+      aiContextSummary.append(row);
+    });
+    aiContextSources.innerHTML = "";
+    const addSourceGroup = (label, rows) => {
+      if (!rows?.length) return;
+      const group = makeElement("section", "ai-context-source-group");
+      group.append(makeElement("b", "", label));
+      const list = document.createElement("ul");
+      rows.forEach((row) => list.append(makeElement("li", "", row)));
+      group.append(list); aiContextSources.append(group);
+    };
+    addSourceGroup("实验与记录", preview.research.sources);
+    addSourceGroup("知识库", preview.knowledge.sources);
+    addSourceGroup("本次文件", preview.files.map((file) => `${file.name} · ${file.size_bytes} B`));
+    const warningText = aiContextWarning?.querySelector("span");
+    if (warningText) warningText.textContent = preview.sensitive_terms?.length
+      ? `检测到可能敏感的医学关键词：${preview.sensitive_terms.join("、")}。请确认内容已去标识化，并核对是否允许发送给该 API。`
+      : "所选实验内容、知识库节选和文件可读文字会发送给外部 API。请先确认不含不应外发的患者身份信息。";
+    if (window.lucide) window.lucide.createIcons();
+    aiContextDialog.showModal();
+    return new Promise((resolve) => {
+      const finish = (accepted) => {
+        if (aiContextDialog.open) aiContextDialog.close();
+        resolve(accepted);
+      };
+      aiContextConfirm.onclick = () => finish(true);
+      aiContextDialog.querySelectorAll("[data-ai-context-cancel]").forEach((button) => {
+        button.onclick = () => finish(false);
+      });
+      aiContextDialog.oncancel = (event) => { event.preventDefault(); finish(false); };
+    });
+  };
+
   aiInput?.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
@@ -954,6 +1459,18 @@ document.addEventListener("DOMContentLoaded", () => {
     event.preventDefault();
     if (aiRequestRunning || (!aiInput.value.trim() && !(aiFiles.files || []).length)) return;
     const sendButton = aiComposer.querySelector(".ai-send");
+    const data = new FormData(aiComposer);
+    data.set("conversation_id", aiConversationId);
+    data.set("page_type", assistantPage.type);
+    data.set("page_id", assistantPage.id);
+    appendExperimentScope(data);
+    appendKnowledgeScope(data);
+    try {
+      if (!await confirmAiOutgoingContext(data)) return;
+    } catch (error) {
+      window.alert(error.message || "无法检查外发上下文，请稍后重试。");
+      return;
+    }
     aiRequestRunning = true;
     aiAbortController = new AbortController();
     aiTaskStartedAt = Date.now();
@@ -965,12 +1482,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const pending = makeElement("div", "ai-thinking", "AI 正在分析…");
     aiMessages.append(pending);
     aiMessages.scrollTop = aiMessages.scrollHeight;
-    const data = new FormData(aiComposer);
-    data.set("conversation_id", aiConversationId);
-    data.set("page_type", assistantPage.type);
-    data.set("page_id", assistantPage.id);
-    appendExperimentScope(data);
-    appendKnowledgeScope(data);
     try {
       const response = await fetch("/assistant/chat", {method: "POST", body: data, signal: aiAbortController.signal});
       const result = await response.json();
@@ -1009,7 +1520,7 @@ document.addEventListener("DOMContentLoaded", () => {
       aiConversationId = String(event.data.id);
       window.localStorage.setItem("research-assistant-conversation", aiConversationId);
     }
-    if (event.data?.type === "completed" && !aiDock?.classList.contains("open")) showAiNotice("独立窗口中的回复已完成");
+    if (event.data?.type === "completed" && !aiDock?.classList.contains("open")) showAiNotice("另一页面中的回复已完成");
     if (!aiRequestRunning && aiDock?.classList.contains("open")) {
       try { await loadAiState(); } catch (_error) { /* keep current view */ }
     }
@@ -1079,9 +1590,28 @@ document.addEventListener("DOMContentLoaded", () => {
       const data = new FormData();
       data.set("csrf_token", csrfToken);
       data.set("selection_present", "1");
-      applyButton.closest(".ai-proposal")?.querySelectorAll(".ai-diff-checkbox:checked").forEach((checkbox) => {
+      const proposalPanel = applyButton.closest(".ai-proposal");
+      const projectSelect = proposalPanel?.querySelector(".ai-proposal-project");
+      if (projectSelect && aiProjectOptions.length > 1 && !projectSelect.value) {
+        applyButton.disabled = false;
+        applyButton.textContent = "请先选择所属科研项目";
+        projectSelect.focus();
+        return;
+      }
+      if (projectSelect?.value) data.set("project_id", projectSelect.value);
+      const selectedChanges = Array.from(proposalPanel?.querySelectorAll(".ai-diff-checkbox:checked") || []);
+      selectedChanges.forEach((checkbox) => {
         data.append("selected_change_ids", checkbox.value);
       });
+      if (selectedChanges.some((checkbox) => checkbox.value.includes(":delete:"))) {
+        const confirmation = window.prompt("此提案包含删除操作。请输入“确认删除”继续：", "");
+        if (confirmation !== "确认删除") {
+          applyButton.disabled = false;
+          applyButton.textContent = "确认并保存到页面";
+          return;
+        }
+        data.set("destructive_confirmation", confirmation);
+      }
       const response = await fetch(`/assistant/proposals/${applyButton.dataset.messageId}/apply`, {method: "POST", body: data});
       const result = await response.json();
       if (!response.ok) {
@@ -1111,7 +1641,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   document.addEventListener("keydown", (event) => {
-    if (!aiDock || (!aiDock.classList.contains("open") && !isAiPopup)) return;
+    if (!aiDock || !aiDock.classList.contains("open")) return;
     const modifier = event.ctrlKey || event.metaKey;
     if (modifier && event.key.toLowerCase() === "n") {
       event.preventDefault();
@@ -1136,9 +1666,4 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  if (isAiPopup) {
-    aiDock?.classList.add("open");
-    aiDock?.setAttribute("aria-hidden", "false");
-    loadAiState().catch(() => aiWelcome());
-  }
 });

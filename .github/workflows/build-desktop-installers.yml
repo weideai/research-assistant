@@ -1,5 +1,8 @@
 name: Build desktop installers
 
+permissions:
+  contents: write
+
 on:
   workflow_dispatch:
   push:
@@ -35,6 +38,32 @@ jobs:
         with:
           name: ResearchAssistant-Linux
           path: |
-            dist/linux/research-assistant_1.0.0_amd64.deb
-            dist/linux/research-assistant_1.0.0_linux_amd64.tar.gz
+            dist/linux/research-assistant_2.0.0_amd64.deb
+            dist/linux/research-assistant_2.0.0_linux_amd64.tar.gz
             dist/linux/ResearchAssistant-Linux-Installer.run
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, linux]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Generate SHA-256 checksums
+        shell: bash
+        run: |
+          cd dist
+          find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/ResearchAssistant-Setup.exe
+            dist/research-assistant_2.0.0_amd64.deb
+            dist/research-assistant_2.0.0_linux_amd64.tar.gz
+            dist/ResearchAssistant-Linux-Installer.run
+            dist/SHA256SUMS.txt

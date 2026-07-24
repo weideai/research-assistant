@@ -1,13 +1,40 @@
 {% extends "base.html" %}
 {% block title %}总览{% endblock %}
 {% block content %}
+{% set next_step = namespace(execution=None) %}
+{% for experiment in experiments %}
+  {% for execution in experiment.batches if not execution.is_deleted and not next_step.execution %}
+    {% set next_step.execution = execution %}
+  {% endfor %}
+{% endfor %}
+{% if next_step.execution %}
+  {% set execution_url = url_for('workspace.batch_detail', item_id=next_step.execution.id) %}
+  {% set record_url = url_for('workspace.batch_detail', item_id=next_step.execution.id, _anchor='new-record') %}
+{% elif experiments %}
+  {% set execution_url = url_for('main.experiment_detail', item_id=experiments[0].id, _anchor='batches') %}
+  {% set record_url = execution_url %}
+{% else %}
+  {% set execution_url = url_for('main.experiments') %}
+  {% set record_url = execution_url %}
+{% endif %}
 <header class="page-head">
   <div><p class="eyebrow">{{ today.strftime('%Y.%m.%d') }}</p><h1>早上好，{{ current_user.name }}</h1><p class="muted">这里是今天的科研进度。</p></div>
-  <a class="btn primary" href="{{ url_for('main.experiments') }}"><i data-lucide="plus"></i> 新建实验</a>
+  <a class="btn primary" href="{{ url_for('workspace.projects') if not onboarding.project_count else url_for('main.experiments') }}"><i data-lucide="{{ 'folder-plus' if not onboarding.project_count else 'plus' }}"></i> {{ '创建第一个科研项目' if not onboarding.project_count else '新建实验计划' }}</a>
 </header>
+{% if onboarding.record_count == 0 %}
+<section class="research-path" aria-label="科研工作路径">
+  <div class="research-path-head"><div><p class="eyebrow">START HERE</p><h2>科研工作路径</h2></div><a class="btn ghost" href="{{ url_for('main.template_center') }}"><i data-lucide="copy"></i> 浏览模板</a></div>
+  <div class="research-path-steps">
+    <a class="research-path-step {{ 'done' if onboarding.project_count else 'current' }}" href="{{ url_for('workspace.projects') }}"><span>01</span><i data-lucide="folder-kanban"></i><b>科研项目</b><small>{{ '已创建' if onboarding.project_count else '先创建项目' }}</small></a>
+    <a class="research-path-step {{ 'done' if onboarding.experiment_count else ('current' if onboarding.project_count else '') }}" href="{{ url_for('main.experiments') }}"><span>02</span><i data-lucide="flask-conical"></i><b>实验计划</b><small>{{ '已创建' if onboarding.experiment_count else '定义目标和方案' }}</small></a>
+    <a class="research-path-step {{ 'done' if onboarding.batch_count else ('current' if onboarding.experiment_count else '') }}" href="{{ execution_url }}"><span>03</span><i data-lucide="layers-3"></i><b>实验执行</b><small>{{ '打开最近执行' if onboarding.batch_count else '新建一次真实执行' }}</small></a>
+    <a class="research-path-step {{ 'done' if onboarding.record_count else ('current' if onboarding.batch_count else '') }}" href="{{ record_url }}"><span>04</span><i data-lucide="notebook-pen"></i><b>过程记录</b><small>{{ '查看最近记录' if onboarding.record_count else ('添加本次过程记录' if onboarding.batch_count else '先创建实验执行') }}</small></a>
+  </div>
+</section>
+{% endif %}
 <section class="metric-grid">
   <div class="metric accent-red"><span>今日待办</span><b>{{ stats.due_today }}</b><small>截止到今天</small></div>
-  <div class="metric accent-blue"><span>进行中实验</span><b>{{ stats.active_experiments }}</b><small>当前计划</small></div>
+  <div class="metric accent-blue"><span>进行中计划</span><b>{{ stats.active_experiments }}</b><small>实验计划状态</small></div>
   <div class="metric accent-green"><span>可用样本</span><b>{{ stats.available_samples }}</b><small>库存状态</small></div>
   <div class="metric accent-yellow"><span>任务完成率</span><b>{{ stats.completion }}%</b><small>全部任务</small></div>
 </section>
@@ -23,19 +50,18 @@
     </div>{% else %}<div class="empty"><i data-lucide="check-circle-2"></i><p>还没有任务</p><a href="{{ url_for('main.tasks') }}">添加第一项任务</a></div>{% endif %}
   </section>
   <section class="panel">
-    <div class="panel-head"><div><p class="eyebrow">ACTIVE</p><h2>实验进度</h2></div><a href="{{ url_for('main.experiments') }}"><i data-lucide="arrow-up-right"></i></a></div>
+    <div class="panel-head"><div><p class="eyebrow">ACTIVE</p><h2>实验计划进度</h2></div><a href="{{ url_for('main.experiments') }}"><i data-lucide="arrow-up-right"></i></a></div>
     {% for exp in experiments %}<a class="experiment-mini" href="{{ url_for('main.experiment_detail', item_id=exp.id) }}">
       <span class="status-dot status-{{ exp.status }}"></span><span><b>{{ exp.title }}</b><small>{{ exp.code or '未设置编号' }} · {{ exp.status }}</small></span><i data-lucide="chevron-right"></i>
     </a>{% else %}<div class="empty compact-empty"><p>暂无实验计划</p></div>{% endfor %}
   </section>
   <section class="panel span-3">
-    <div class="panel-head"><div><p class="eyebrow">RECENT LOG</p><h2>最近实验记录</h2></div></div>
-    <div class="table-wrap"><table><thead><tr><th>日期</th><th>实验</th><th>执行人</th><th>结果</th><th>摘要</th></tr></thead><tbody>
-      {% for record in records %}<tr><td>{{ record.record_date }}</td><td><a href="{{ url_for('main.experiment_detail', item_id=record.experiment_id) }}">{{ record.experiment.title }}</a></td><td>{{ record.operator or '—' }}</td><td><span class="badge result-{{ record.result }}">{{ record.result }}</span></td><td class="truncate">{{ record.content }}</td></tr>
-      {% else %}<tr><td colspan="5" class="empty-cell">尚无实验记录</td></tr>{% endfor %}
+    <div class="panel-head"><div><p class="eyebrow">RECENT LOG</p><h2>最近过程记录</h2></div></div>
+    <div class="table-wrap"><table><thead><tr><th>日期</th><th>实验计划</th><th>实验执行</th><th>执行人</th><th>结果</th><th>摘要</th></tr></thead><tbody>
+      {% for record in records %}<tr><td>{{ record.record_date }}</td><td><a href="{{ url_for('main.experiment_detail', item_id=record.experiment.id) }}">{{ record.experiment.title }}</a></td><td><a href="{{ url_for('workspace.batch_detail', item_id=record.batch.id) }}">{{ record.batch.batch_code or '未编号执行' }}</a></td><td>{{ record.operator or '—' }}</td><td><span class="badge result-{{ record.result }}">{{ record.result }}</span></td><td class="truncate"><a href="{{ url_for('main.record_detail', record_id=record.id) }}">{{ record.content }}</a></td></tr>
+      {% else %}<tr><td colspan="6" class="empty-cell">尚无过程记录</td></tr>{% endfor %}
     </tbody></table></div>
   </section>
 </div>
-{% if not tasks and not experiments %}<form method="post" action="{{ url_for('main.seed_demo') }}" class="demo-bar"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><span><b>第一次使用？</b> 添加一组可随时删除的示例数据。</span><button class="btn secondary">载入示例</button></form>{% endif %}
+{% if not tasks and not experiments %}<form method="post" action="{{ url_for('main.seed_demo') }}" class="demo-bar"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><span><b>想先看完整流程？</b> 添加一组可随时删除的示例项目、实验计划、实验执行和过程记录。</span><button class="btn secondary">载入示例工作流</button></form>{% endif %}
 {% endblock %}
-

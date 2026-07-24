@@ -1,0 +1,60 @@
+{% extends 'base.html' %}
+{% block title %}{{ project.title }}{% endblock %}
+{% block content %}
+<div class="page-head workspace-page-head">
+  <div><div class="breadcrumb"><a href="{{ url_for('workspace.projects') }}">科研项目</a><i data-lucide="chevron-right"></i><span>{{ project.code or '未编号' }}</span></div><h1>{{ project.title }}</h1><p>{{ project.objective or '尚未填写项目目标。' }}</p></div>
+  <div class="page-head-actions"><a class="btn secondary" href="{{ url_for('workspace.project_package_export', item_id=project.id) }}"><i data-lucide="package"></i> 导出完整项目</a><a class="btn primary" href="{{ url_for('main.experiments', project_id=project.id) }}#create-experiment"><i data-lucide="flask-conical"></i> 新建实验计划</a></div>
+</div>
+
+<div class="project-detail-metrics">
+  <span><small>实验计划</small><b>{{ experiments|length }}</b></span>
+  <span><small>实验执行</small><b>{{ execution_count }}</b></span>
+  <span><small>项目任务</small><b>{{ tasks|length }}</b></span>
+  <span><small>当前状态</small><b class="metric-text">{{ project.status }}</b></span>
+</div>
+
+<div class="detail-layout project-workspace-layout">
+  <div class="detail-main">
+    <section class="panel">
+      <div class="panel-head"><div><p class="eyebrow">EXPERIMENT PLANS</p><h2>实验计划与执行</h2></div><span class="count-label">{{ experiments|length }} 个计划</span></div>
+      <div class="project-experiment-list">
+        {% for experiment in experiments %}
+        <article class="project-experiment-row">
+          <div class="project-experiment-index">{{ '%02d'|format(loop.index) }}</div>
+          <div class="project-experiment-main"><div><a href="{{ url_for('main.experiment_detail', item_id=experiment.id) }}">{{ experiment.title }}</a><span class="badge">{{ experiment.status }}</span></div><p>{{ experiment.objective or '未填写实验目的' }}</p><small>{{ experiment.code or '未编号' }} · {{ experiment.owner or '未指定负责人' }}</small></div>
+          <div class="batch-mini-list">
+            {% for batch in experiment.batches if not batch.is_deleted %}<a href="{{ url_for('workspace.batch_detail', item_id=batch.id) }}"><span>{{ batch.batch_code or ('执行 ' ~ loop.index) }}</span><b>{{ batch.status }}</b><small>{{ batch.records|rejectattr('is_deleted')|list|length }} 条过程记录</small></a>{% else %}<span class="muted">尚无实验执行</span>{% endfor %}
+          </div>
+          <form method="post" action="{{ url_for('workspace.batch_create', item_id=experiment.id) }}" class="batch-quick-create">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="operator" value="{{ current_user.name }}"><button class="icon-btn" title="新建实验执行" aria-label="新建实验执行"><i data-lucide="plus"></i></button>
+          </form>
+        </article>
+        {% else %}<div class="empty compact-empty"><i data-lucide="flask-conical"></i><p>该项目还没有实验计划。</p></div>{% endfor %}
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><div><p class="eyebrow">PROJECT TASKS</p><h2>项目任务</h2></div><a href="{{ url_for('main.tasks') }}">管理全部任务</a></div>
+      <div class="trace-list">{% for task in tasks %}<div class="trace-row"><span><b>{{ task.title }}</b><small>{{ task.category }} · {{ task.priority }}优先级 · {{ task.deadline or '无截止日期' }}</small></span><span class="badge">{{ task.status }}</span></div>{% else %}<div class="empty compact-empty"><p>尚无归入该项目的任务。</p></div>{% endfor %}</div>
+    </section>
+  </div>
+
+  <aside class="detail-side">
+    <section class="panel sticky-panel">
+      <div class="panel-head"><div><p class="eyebrow">PROJECT PROFILE</p><h2>项目信息</h2></div></div>
+      <form method="post" class="stack-form compact-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>项目名称<input name="title" value="{{ project.title }}" required></label>
+        <label>项目编号<input name="code" value="{{ project.code or '' }}"></label>
+        <label>状态<select name="status">{% for value in statuses %}<option {{ 'selected' if project.status == value }}>{{ value }}</option>{% endfor %}</select></label>
+        <div class="form-grid"><label>开始<input type="date" name="start_date" value="{{ project.start_date or '' }}"></label><label>结束<input type="date" name="end_date" value="{{ project.end_date or '' }}"></label></div>
+        <label>研究目标<textarea name="objective" rows="6">{{ project.objective or '' }}</textarea></label>
+        <label>项目备注<textarea name="notes" rows="4">{{ project.notes or '' }}</textarea></label>
+        <button class="btn secondary full"><i data-lucide="save"></i> 保存项目信息</button>
+      </form>
+      <hr>
+      <form method="post" action="{{ url_for('workspace.project_delete', item_id=project.id) }}" data-confirm="将项目及其实验计划、实验执行、过程记录移入回收站？文件不会被删除。"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="text-danger"><i data-lucide="trash-2"></i> 移入回收站</button></form>
+    </section>
+  </aside>
+</div>
+{% endblock %}

@@ -1,65 +1,79 @@
 {% extends "base.html" %}
 {% block title %}实验计划{% endblock %}
 {% block content %}
-<header class="page-head">
-  <div><p class="eyebrow">EXPERIMENTS</p><h1>实验计划</h1><p class="muted">复用步骤模板，按批次、重复和分组管理实验。</p></div>
+<header class="page-head page-head-compact">
+  <div>
+    <p class="eyebrow">WORK / EXPERIMENTS</p>
+    <h1>实验计划</h1>
+    <p class="muted">查找实验计划，开始一次执行，或从步骤模板快速建立方案。</p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn ghost" href="{{ url_for('main.template_center', kind='steps') }}"><i data-lucide="copy"></i> 模板中心</a>
+    <a class="btn primary" href="#create-experiment"><i data-lucide="plus"></i> 新建实验计划</a>
+  </div>
 </header>
 
-{% if templates %}
-<section class="panel template-create-panel">
-  <div class="panel-head"><div><p class="eyebrow">STEP TEMPLATES</p><h2>从步骤模板创建实验</h2></div><span class="count-label">{{ templates|length }} 个模板</span></div>
-  <form method="post" action="{{ url_for('main.experiment_from_template') }}" class="template-create-form">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <label>步骤模板<select name="template_id" required>{% for template in templates %}<option value="{{ template.id }}">{{ template.name }} · {{ template.steps|length }} 步</option>{% endfor %}</select></label>
-    <label class="grow">新实验名称<input name="title" placeholder="留空则使用模板名称"></label>
-    <label>实验编号<input name="code" placeholder="EXP-2026-001"></label>
-    <label>批次<input name="batch_code" placeholder="BATCH-01"></label>
-    <label>开始日期<input type="date" name="start_date" value="{{ today }}"></label>
-    <label>负责人<input name="owner" value="{{ current_user.name }}"></label>
-    <label>重复类型<select name="repeat_kind">{% for kind in repeat_kinds %}<option>{{ kind }}</option>{% endfor %}</select></label>
-    <label>重复序号<input type="number" name="repeat_number" min="1" value="1"></label>
-    <label>实验分组<input name="group_name" placeholder="对照组 / 处理组"></label>
-    <button class="btn primary"><i data-lucide="copy-plus"></i> 使用模板</button>
-  </form>
-  <div class="template-list">
-    {% for template in templates %}
-    <div class="template-row"><a class="template-row-main" href="{{ url_for('main.experiment_template_detail', item_id=template.id) }}"><b>{{ template.name }}</b><small>{{ template.description or '未填写说明' }}</small><em>{{ template.steps|length }} 个步骤 · 查看与调用</em></a><form method="post" action="{{ url_for('main.experiment_template_delete', item_id=template.id) }}" data-confirm="删除这个步骤模板？"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-btn danger" title="删除模板"><i data-lucide="trash-2"></i></button></form></div>
-    {% endfor %}
+<section class="workspace-intro" id="create-experiment">
+  <div class="workspace-intro-copy">
+    <span class="intro-index">01</span>
+    <div><h2>新建实验计划</h2><p>先定义目标和方案，再从计划中创建真实执行并逐条记录过程。</p></div>
+  </div>
+  <div class="creation-choice-list">
+    <details class="creation-choice" open>
+      <summary><span><i data-lucide="file-plus-2"></i><b>空白创建</b><small>从研究目的开始</small></span><i data-lucide="chevron-down"></i></summary>
+      <form method="post" class="creation-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-grid three">
+          <label class="field-span-2">实验计划名称<input name="title" required placeholder="例如：药物处理后 WB 验证"></label>
+          <label>所属项目<select name="project_id">{% for project in projects %}<option value="{{ project.id }}" {{ 'selected' if requested_project_id == project.id else '' }}>{{ project.code or '未编号' }} · {{ project.title }}</option>{% else %}<option value="">创建后再归类</option>{% endfor %}</select></label>
+          <label>实验计划编号<input name="code" placeholder="EXP-2026-001"></label>
+          <label>负责人<input name="owner" value="{{ current_user.name }}"></label>
+          <label>状态<select name="status">{% for value in ['未开始','进行中','完成','暂停'] %}<option>{{ value }}</option>{% endfor %}</select></label>
+          <label>开始日期<input type="date" name="start_date"></label>
+          <label>结束日期<input type="date" name="end_date"></label>
+          <label class="field-span-2">实验目的<input name="objective" placeholder="这项实验要验证什么？"></label>
+        </div>
+        <div class="form-actions"><button class="btn primary"><i data-lucide="arrow-right"></i> 创建并进入计划</button></div>
+      </form>
+    </details>
+    <details class="creation-choice">
+      <summary><span><i data-lucide="copy-plus"></i><b>从步骤模板创建</b><small>直接带入标准步骤</small></span><i data-lucide="chevron-down"></i></summary>
+      <form method="post" action="{{ url_for('main.experiment_from_template') }}" class="creation-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-grid three">
+          <label class="field-span-2">步骤模板<select name="template_id" required>{% for template in templates %}<option value="{{ template.id }}">{{ template.name }} · {{ template.steps|length }} 步</option>{% else %}<option value="">暂无步骤模板</option>{% endfor %}</select></label>
+          <label>所属项目<select name="project_id">{% for project in projects %}<option value="{{ project.id }}" {{ 'selected' if requested_project_id == project.id else '' }}>{{ project.code or '未编号' }} · {{ project.title }}</option>{% endfor %}</select></label>
+          <label>实验计划名称<input name="title" placeholder="留空则使用模板名称"></label>
+          <label>开始日期<input type="date" name="start_date" value="{{ today }}"></label>
+          <label>负责人<input name="owner" value="{{ current_user.name }}"></label>
+        </div>
+        <p class="form-hint"><i data-lucide="info"></i> 模板只负责计划步骤；实验执行和过程记录会在创建计划后单独维护。<a href="{{ url_for('main.template_center', kind='steps') }}">查看全部模板</a></p>
+        <div class="form-actions"><button class="btn secondary" {% if not templates %}disabled{% endif %}><i data-lucide="copy-plus"></i> 使用模板创建</button></div>
+      </form>
+    </details>
   </div>
 </section>
-{% endif %}
 
-<section class="panel form-panel">
-  <div class="section-inline-head"><div><p class="eyebrow">NEW</p><h2>创建空白实验</h2></div></div>
-  <form method="post" class="quick-form experiment-create-form">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <label class="grow">实验名称<input name="title" required placeholder="例如：药物处理后 WB 验证"></label>
-    <label>实验编号<input name="code" placeholder="EXP-2026-001"></label>
-    <label>实验批次<input name="batch_code" placeholder="BATCH-01"></label>
-    <label>负责人<input name="owner" value="{{ current_user.name }}"></label>
-    <label>状态<select name="status">{% for value in ['未开始','进行中','完成','暂停'] %}<option>{{ value }}</option>{% endfor %}</select></label>
-    <label>重复类型<select name="repeat_kind">{% for kind in repeat_kinds %}<option>{{ kind }}</option>{% endfor %}</select></label>
-    <label>重复序号<input type="number" name="repeat_number" min="1" value="1"></label>
-    <label>实验分组<input name="group_name" placeholder="对照组 / 处理组"></label>
-    <label>开始日期<input type="date" name="start_date"></label>
-    <label>结束日期<input type="date" name="end_date"></label>
-    <label class="grow">实验目的<input name="objective" placeholder="本实验要验证什么？"></label>
-    <button class="btn primary"><i data-lucide="plus"></i> 创建实验</button>
-  </form>
-</section>
+<div class="list-toolbar">
+  <div><p class="eyebrow">YOUR WORK</p><h2>实验计划</h2></div>
+  <div class="filter-bar">{% for status in ['全部','未开始','进行中','完成','暂停'] %}<a class="chip {{ 'active' if selected_status == status }}" href="{{ url_for('main.experiments', status=status, project_id=requested_project_id) }}">{{ status }}</a>{% endfor %}</div>
+</div>
 
-<div class="filter-bar">{% for status in ['全部','未开始','进行中','完成','暂停'] %}<a class="chip {{ 'active' if selected_status == status }}" href="{{ url_for('main.experiments', status=status) }}">{{ status }}</a>{% endfor %}</div>
-<section class="experiment-grid">
+<section class="experiment-grid clean-experiment-grid">
   {% for experiment in experiments %}
   <article class="experiment-card">
     <div class="experiment-card-top"><span class="badge state-{{ experiment.status }}">{{ experiment.status }}</span><small>{{ experiment.code or 'NO CODE' }}</small></div>
+    <div class="experiment-card-context">{% if experiment.project %}<i data-lucide="folder-kanban"></i>{{ experiment.project.title }}{% else %}<i data-lucide="folder"></i>未归类项目{% endif %}</div>
     <h2><a href="{{ url_for('main.experiment_detail', item_id=experiment.id) }}">{{ experiment.title }}</a></h2>
-    <p>{{ experiment.objective or '暂未填写实验目的。' }}</p>
-    <div class="trace-tags"><span>{{ experiment.batch_code or '未设批次' }}</span><span>{{ experiment.repeat_kind }} #{{ experiment.repeat_number }}</span>{% if experiment.group_name %}<span>{{ experiment.group_name }}</span>{% endif %}</div>
-    <div class="progress-line"><span style="width: {{ (experiment.steps|selectattr('is_done')|list|length / experiment.steps|length * 100) if experiment.steps|length else 0 }}%"></span></div>
-    <div class="experiment-meta"><span><i data-lucide="user"></i>{{ experiment.owner or '未指定' }}</span><span><i data-lucide="list-checks"></i>{{ experiment.steps|selectattr('is_done')|list|length }}/{{ experiment.steps|length }} 步</span><span><i data-lucide="notebook-pen"></i>{{ experiment.records|length }} 条记录</span><span><i data-lucide="test-tubes"></i>{{ experiment.sample_usages|length }} 个样本</span></div>
-    <a class="card-link" href="{{ url_for('main.experiment_detail', item_id=experiment.id) }}">打开实验 <i data-lucide="arrow-right"></i></a>
+    <p>{{ experiment.objective or '尚未填写实验目的。' }}</p>
+    {% set execution_progress = namespace(total=0, done=0) %}{% for execution in experiment.batches if not execution.is_deleted %}{% set execution_progress.total = execution_progress.total + execution.steps|length %}{% set execution_progress.done = execution_progress.done + execution.steps|selectattr('is_done')|list|length %}{% endfor %}
+    <div class="progress-caption"><span>{{ '执行步骤进度' if execution_progress.total else '计划步骤' }}</span><b>{% if execution_progress.total %}{{ execution_progress.done }}/{{ execution_progress.total }}{% else %}{{ experiment.steps|length }} 个{% endif %}</b></div>
+    <div class="progress-line"><span style="width: {{ (execution_progress.done / execution_progress.total * 100) if execution_progress.total else 0 }}%"></span></div>
+    <div class="experiment-meta"><span><i data-lucide="layers-3"></i>{{ experiment.batches|rejectattr('is_deleted')|list|length }} 次执行</span><span><i data-lucide="notebook-pen"></i>{{ experiment.records|rejectattr('is_deleted')|list|length }} 条过程记录</span><span><i data-lucide="calendar-days"></i>{{ experiment.updated_at.strftime('%m/%d') }}</span></div>
+    <a class="card-link" href="{{ url_for('main.experiment_detail', item_id=experiment.id) }}">打开实验计划 <i data-lucide="arrow-right"></i></a>
   </article>
-  {% else %}<div class="panel empty span-full"><i data-lucide="flask-conical"></i><p>还没有实验计划</p></div>{% endfor %}
+  {% else %}
+  <div class="empty span-full"><i data-lucide="flask-conical"></i><h3>还没有实验计划</h3><p>先创建计划和方案，再从计划中开始一次真实实验执行。</p><a class="btn primary" href="#create-experiment">开始创建</a></div>
+  {% endfor %}
 </section>
 {% endblock %}

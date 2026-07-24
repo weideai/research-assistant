@@ -6,6 +6,7 @@
   <form method="post" class="quick-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label class="grow">任务标题<input name="title" required placeholder="例如：完成 PCR 扩增"></label>
+    <label>所属项目<select name="project_id"><option value="">不归入项目</option>{% for project in projects %}<option value="{{ project.id }}">{{ project.title }}</option>{% endfor %}</select></label>
     <label>分类<select name="category"><option>实验</option><option>论文</option><option>学习</option><option>会议</option><option>行政</option></select></label>
     <label>优先级<select name="priority"><option>高</option><option selected>中</option><option>低</option></select></label>
     <label>截止日期<input type="date" name="deadline"></label>
@@ -17,9 +18,8 @@
 <section class="panel table-panel"><div class="table-wrap"><table><thead><tr><th class="check-col"></th><th>任务</th><th>分类</th><th>优先级</th><th>截止日期</th><th>状态</th><th class="actions-col"></th></tr></thead><tbody>
 {% for task in tasks %}<tr class="{{ 'row-done' if task.status == '完成' }}">
   <td><form method="post" action="{{ url_for('main.task_toggle', item_id=task.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="check-btn"><i data-lucide="{{ 'check-square-2' if task.status == '完成' else 'square' }}"></i></button></form></td>
-  <td><b>{{ task.title }}</b>{% if task.notes %}<small class="cell-note">{{ task.notes }}</small>{% endif %}</td><td>{{ task.category }}</td><td><span class="badge priority-{{ task.priority }}">{{ task.priority }}</span></td>
+  <td><b>{{ task.title }}</b>{% if task.project %}<small class="cell-note">{{ task.project.title }}</small>{% endif %}{% if task.notes %}<small class="cell-note">{{ task.notes }}</small>{% endif %}</td><td>{{ task.category }}</td><td><span class="badge priority-{{ task.priority }}">{{ task.priority }}</span></td>
   <td class="{{ 'overdue' if task.deadline and task.deadline < today and task.status != '完成' }}">{{ task.deadline or '—' }}</td><td>{{ task.status }}</td><td><div class="row-actions"><a class="icon-btn" href="{{ url_for('main.task_edit', item_id=task.id) }}" title="编辑"><i data-lucide="pencil"></i></a><form method="post" action="{{ url_for('main.task_delete', item_id=task.id) }}" data-confirm="确定删除这个任务？"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-btn danger" title="删除"><i data-lucide="trash-2"></i></button></form></div></td>
 </tr>{% else %}<tr><td colspan="7" class="empty-cell">当前筛选条件下没有任务</td></tr>{% endfor %}
 </tbody></table></div></section>
 {% endblock %}
-

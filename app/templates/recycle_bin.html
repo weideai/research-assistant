@@ -1,0 +1,20 @@
+{% extends 'base.html' %}
+{% block title %}回收站{% endblock %}
+{% block content %}
+<div class="page-head"><div><p class="eyebrow">RECYCLE BIN</p><h1>回收站</h1><p>删除先进入回收站。恢复不会移动文件，永久删除需要二次确认。</p></div><a class="btn ghost" href="{{ url_for('workspace.projects') }}"><i data-lucide="arrow-left"></i> 返回项目</a></div>
+<div class="recycle-warning"><i data-lucide="shield-check"></i><div><b>外部大文件链接只删除索引</b><p>永久删除也不会删除资源管理器中的外部原始文件；应用托管的副本会在永久删除时清理。</p></div></div>
+
+{% set groups = [('project', '科研项目', projects), ('experiment', '实验计划', experiments), ('record', '过程记录', records), ('attachment', '实验文件', attachments), ('task', '任务', tasks), ('step_template', '步骤模板', step_templates), ('record_template', '记录模板', record_templates), ('presentation_skill', 'PPT Skill', presentation_skills)] %}
+<div class="recycle-groups">
+  {% for kind, label, items in groups %}
+  <details class="panel feature-disclosure" {{ 'open' if items }}>
+    <summary class="feature-summary"><div><p class="eyebrow">{{ kind|upper }}</p><h2>{{ label }}</h2></div><span class="feature-summary-meta"><span class="count-label">{{ items|length }} 项</span><i data-lucide="chevron-down"></i></span></summary>
+    <div class="feature-body recycle-list">
+      {% for item in items %}
+      <article class="recycle-row"><div><i data-lucide="{{ 'folder-kanban' if kind == 'project' else ('flask-conical' if kind == 'experiment' else ('notebook-pen' if kind == 'record' else 'file')) }}"></i><span><b>{{ item.title if item.title is defined else (item.name if item.name is defined else (item.original_name if item.original_name is defined else (item.experiment.title ~ ' · ' ~ item.record_date))) }}</b><small>删除于 {{ item.deleted_at.strftime('%Y-%m-%d %H:%M') if item.deleted_at else '未知时间' }}</small></span></div><div class="row-actions"><form method="post" action="{{ url_for('workspace.recycle_restore', kind=kind, item_id=item.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn secondary"><i data-lucide="rotate-ccw"></i> 恢复</button></form><details class="purge-confirm"><summary class="btn danger"><i data-lucide="trash-2"></i> 永久删除</summary><form method="post" action="{{ url_for('workspace.recycle_purge', kind=kind, item_id=item.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>输入“永久删除”确认<input name="confirmation" autocomplete="off" required></label><button class="btn danger">确认永久删除</button></form></details></div></article>
+      {% else %}<div class="empty compact-empty"><p>没有已删除的{{ label }}。</p></div>{% endfor %}
+    </div>
+  </details>
+  {% endfor %}
+</div>
+{% endblock %}

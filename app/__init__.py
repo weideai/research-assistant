@@ -14,6 +14,8 @@ from flask_wtf.csrf import CSRFProtect
 from sqlalchemy import inspect, text
 from werkzeug.middleware.proxy_fix import ProxyFix
 
+from .version import APP_VERSION, GITHUB_REPOSITORY, UPDATE_CACHE_HOURS
+
 
 db = SQLAlchemy()
 login_manager = LoginManager()
@@ -139,6 +141,10 @@ def create_app(test_config=None):
         ),
         BACKUP_DIR=os.getenv("BACKUP_DIR", str(Path(app.instance_path) / "backups")),
         ALLOW_OPEN_LOCAL_FOLDERS=_env_bool("ALLOW_OPEN_LOCAL_FOLDERS", not production),
+        APP_VERSION=APP_VERSION,
+        UPDATE_CHECK_ENABLED=_env_bool("UPDATE_CHECK_ENABLED", True),
+        UPDATE_REPOSITORY=os.getenv("UPDATE_REPOSITORY", GITHUB_REPOSITORY).strip() or GITHUB_REPOSITORY,
+        UPDATE_CACHE_HOURS=int(os.getenv("UPDATE_CACHE_HOURS", str(UPDATE_CACHE_HOURS))),
     )
     trusted_hosts = [host.strip() for host in os.getenv("TRUSTED_HOSTS", "").split(",") if host.strip()]
     if trusted_hosts:
@@ -174,9 +180,13 @@ def create_app(test_config=None):
     from .admin import bp as admin_bp
     from .auth import bp as auth_bp
     from .main import bp as main_bp
+    from .workspace import bp as workspace_bp
+    from .update_service import bp as updates_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(main_bp)
+    app.register_blueprint(workspace_bp)
+    app.register_blueprint(updates_bp)
     app.register_blueprint(admin_bp)
 
     @app.get("/healthz")

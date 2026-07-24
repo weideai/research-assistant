@@ -107,20 +107,12 @@ def open_browser():
 
 
 def create_linux_app():
-    from flask_migrate import stamp, upgrade
-    from sqlalchemy import inspect
-
     from app import create_app, db
+    from app.migration_service import run_migrations_with_backup
 
     flask_app = create_app()
     migration_dir = resource_root() / "migrations"
-    if migration_dir.is_dir():
-        with flask_app.app_context():
-            tables = set(inspect(db.engine).get_table_names())
-            if "alembic_version" in tables:
-                upgrade(directory=str(migration_dir))
-            else:
-                stamp(directory=str(migration_dir), revision="head")
+    run_migrations_with_backup(flask_app, db, migration_dir)
     return flask_app
 
 

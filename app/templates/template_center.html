@@ -1,0 +1,213 @@
+{% extends "base.html" %}
+{% block title %}模板中心{% endblock %}
+{% block content %}
+<header class="page-head template-center-head">
+  <div>
+    <p class="eyebrow">TEMPLATE LIBRARY</p>
+    <h1>模板中心</h1>
+    <p class="muted">集中管理可复用的实验步骤方案与过程记录结构。</p>
+  </div>
+  <a class="btn ghost" href="{{ url_for('main.experiments') }}">
+    <i data-lucide="flask-conical"></i> 返回实验计划
+  </a>
+</header>
+
+<nav class="template-kind-tabs" aria-label="模板类型">
+  <a href="{{ url_for('main.template_center', kind='steps') }}"
+     class="{{ 'active' if kind == 'steps' }}"
+     {% if kind == 'steps' %}aria-current="page"{% endif %}>
+    <i data-lucide="list-checks"></i>
+    <span><b>步骤模板</b><small>{{ step_templates|length }} 个</small></span>
+  </a>
+  <a href="{{ url_for('main.template_center', kind='records') }}"
+     class="{{ 'active' if kind == 'records' }}"
+     {% if kind == 'records' %}aria-current="page"{% endif %}>
+    <i data-lucide="notebook-tabs"></i>
+    <span><b>记录模板</b><small>{{ record_templates|length }} 个</small></span>
+  </a>
+</nav>
+
+<section class="panel template-blank-create" aria-labelledby="template-create-title">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">NEW {{ 'PROTOCOL' if kind == 'steps' else 'RECORD' }}</p>
+      <h2 id="template-create-title">新建空白{{ '步骤' if kind == 'steps' else '记录' }}模板</h2>
+    </div>
+  </div>
+  <form method="post" action="{{ url_for('main.template_create') }}" class="template-blank-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="kind" value="{{ kind }}">
+    <label>
+      模板名称
+      <input name="name" maxlength="160" required
+             placeholder="{{ '例如：细胞处理与 WB 流程' if kind == 'steps' else '例如：Western Blot 过程记录' }}">
+    </label>
+    <label class="grow">
+      适用说明
+      <input name="description" placeholder="适用实验、关键条件或使用范围">
+    </label>
+    <button class="btn primary">
+      <i data-lucide="plus"></i> 创建并编辑
+    </button>
+  </form>
+</section>
+
+<section class="template-library" aria-labelledby="template-library-title">
+  <div class="template-library-head">
+    <div>
+      <p class="eyebrow">{{ 'PROTOCOLS' if kind == 'steps' else 'RECORD STRUCTURES' }}</p>
+      <h2 id="template-library-title">已保存的{{ '步骤' if kind == 'steps' else '记录' }}模板</h2>
+    </div>
+    <span class="count-label">{{ (step_templates if kind == 'steps' else record_templates)|length }} 个模板</span>
+  </div>
+
+  <div class="template-library-list">
+    {% if kind == 'steps' %}
+      {% for template in step_templates %}
+      <article class="template-library-row">
+        <div class="template-library-summary">
+          <div class="template-library-titleline">
+            <span class="template-type-icon"><i data-lucide="list-checks"></i></span>
+            <div>
+              <h3>{{ template.name }}</h3>
+              <p>{{ template.description or '暂无适用说明' }}</p>
+            </div>
+            <span class="count-label">{{ template.steps|length }} 个步骤</span>
+          </div>
+
+          <ol class="template-content-preview" aria-label="步骤预览">
+            {% for step in template.steps[:3] %}
+            <li>
+              <span class="step-number">{{ '%02d'|format(loop.index) }}</span>
+              <span>
+                <b>{{ step.title }}</b>
+                <small>{{ step.description|truncate(100) if step.description else '未填写步骤说明' }} · 第 {{ step.planned_offset_days }} 天</small>
+              </span>
+            </li>
+            {% else %}
+            <li class="template-preview-empty"><i data-lucide="circle-dashed"></i> 暂无步骤</li>
+            {% endfor %}
+          </ol>
+          {% if template.steps|length > 3 %}<p class="template-preview-more">另有 {{ template.steps|length - 3 }} 个步骤</p>{% endif %}
+        </div>
+
+        <div class="template-library-use">
+          <form method="post" action="{{ url_for('main.experiment_template_apply', item_id=template.id) }}" class="template-use-form" data-template-apply-form>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label>
+              应用到实验
+              <select name="experiment_id" required {{ 'disabled' if not experiments }}>
+                <option value="">{{ '选择目标实验' if experiments else '暂无可用实验' }}</option>
+                {% for experiment in experiments %}
+                <option value="{{ experiment.id }}">{{ experiment.title }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>
+              应用方式
+              <select name="apply_mode">
+                <option value="append">追加现有步骤</option>
+                <option value="replace">替换现有步骤（会删除当前步骤）</option>
+              </select>
+            </label>
+            <button class="btn primary" {{ 'disabled' if not experiments }}>
+              <i data-lucide="list-plus"></i> 应用模板
+            </button>
+          </form>
+
+          <div class="template-library-actions" aria-label="模板操作">
+            <a class="btn ghost" href="{{ url_for('main.experiment_template_detail', item_id=template.id) }}">
+              <i data-lucide="eye"></i> 查看与编辑
+            </a>
+            <form method="post" action="{{ url_for('main.experiment_template_duplicate', item_id=template.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn ghost"><i data-lucide="copy"></i> 复制</button>
+            </form>
+            <form method="post" action="{{ url_for('main.experiment_template_delete', item_id=template.id) }}"
+                  data-confirm="将步骤模板“{{ template.name }}”移入回收站？">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="next" value="{{ url_for('main.template_center', kind='steps') }}">
+              <button class="btn danger"><i data-lucide="trash-2"></i> 删除</button>
+            </form>
+          </div>
+        </div>
+      </article>
+      {% else %}
+      <div class="empty template-library-empty">
+        <i data-lucide="list-checks"></i>
+        <p>还没有步骤模板</p>
+        <small>从上方创建第一个空白步骤模板。</small>
+      </div>
+      {% endfor %}
+    {% else %}
+      {% for template in record_templates %}
+      <article class="template-library-row">
+        <div class="template-library-summary">
+          <div class="template-library-titleline">
+            <span class="template-type-icon"><i data-lucide="notebook-tabs"></i></span>
+            <div>
+              <h3>{{ template.name }}</h3>
+              <p>{{ template.description or '暂无适用说明' }}</p>
+            </div>
+            <span class="count-label">{{ template.parameters|length }} 个参数</span>
+          </div>
+
+          <dl class="template-content-preview record-preview" aria-label="记录内容预览">
+            <div><dt>实验条件</dt><dd>{{ template.conditions|truncate(120) if template.conditions else '未设置' }}</dd></div>
+            <div><dt>记录正文</dt><dd>{{ template.content|truncate(120) if template.content else '未设置' }}</dd></div>
+            <div><dt>结论备注</dt><dd>{{ template.remark|truncate(120) if template.remark else '未设置' }}</dd></div>
+          </dl>
+          {% if template.parameters %}
+          <div class="template-parameter-preview" aria-label="参数预览">
+            {% for parameter in template.parameters[:3] %}
+            <span><b>{{ parameter.name }}</b>{{ parameter.value or '—' }}{% if parameter.unit %} {{ parameter.unit }}{% endif %}</span>
+            {% endfor %}
+            {% if template.parameters|length > 3 %}<span>另有 {{ template.parameters|length - 3 }} 项</span>{% endif %}
+          </div>
+          {% endif %}
+        </div>
+
+        <div class="template-library-use">
+          <form method="get" action="{{ url_for('main.record_template_use', item_id=template.id) }}" class="template-use-form record-template-use-form">
+            <label>
+              目标实验执行
+              <select name="batch_id" required {{ 'disabled' if not batches }}>
+                <option value="">{{ '选择目标实验执行' if batches else '暂无可用实验执行' }}</option>
+                {% for batch in batches %}
+                <option value="{{ batch.id }}">{{ batch.experiment.title }} · {{ batch.batch_code or ('执行 #' ~ batch.id) }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <button class="btn primary" {{ 'disabled' if not batches }}>
+              <i data-lucide="notebook-pen"></i> 用模板新建记录
+            </button>
+          </form>
+
+          <div class="template-library-actions" aria-label="模板操作">
+            <a class="btn ghost" href="{{ url_for('main.record_template_detail', item_id=template.id) }}">
+              <i data-lucide="eye"></i> 查看与编辑
+            </a>
+            <form method="post" action="{{ url_for('main.record_template_duplicate', item_id=template.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn ghost"><i data-lucide="copy"></i> 复制</button>
+            </form>
+            <form method="post" action="{{ url_for('main.record_template_delete', item_id=template.id) }}"
+                  data-confirm="将记录模板“{{ template.name }}”移入回收站？">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="next" value="{{ url_for('main.template_center', kind='records') }}">
+              <button class="btn danger"><i data-lucide="trash-2"></i> 删除</button>
+            </form>
+          </div>
+        </div>
+      </article>
+      {% else %}
+      <div class="empty template-library-empty">
+        <i data-lucide="notebook-tabs"></i>
+        <p>还没有记录模板</p>
+        <small>从上方创建第一个空白记录模板。</small>
+      </div>
+      {% endfor %}
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

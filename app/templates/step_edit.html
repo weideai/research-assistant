@@ -5,16 +5,15 @@
   <div>
     <a class="back-link" href="{{ url_for('main.experiment_detail', item_id=step.experiment_id) }}"><i data-lucide="arrow-left"></i> {{ step.experiment.title }}</a>
     <h1>编辑实验步骤</h1>
-    <p class="muted">第 {{ step.position }} 步 · {{ '已完成' if step.is_done else '未完成' }}</p>
+    <p class="muted">实验计划中的第 {{ step.position }} 步</p>
   </div>
-  <span class="badge large {{ 'state-完成' if step.is_done else 'state-未开始' }}">{{ '已完成' if step.is_done else '未完成' }}</span>
+  <span class="badge large">计划定义</span>
 </header>
 <section class="panel narrow-panel step-edit-panel">
   <form method="post" class="stack-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label>步骤标题<input name="title" value="{{ step.title }}" required></label>
-    <div class="form-grid"><label>执行人<input name="operator" value="{{ step.operator }}"></label><label>计划日期<input type="date" name="planned_date" value="{{ step.planned_date or '' }}"></label></div>
-    {% if step.is_done %}<label>实际完成日期<input type="date" name="completed_date" value="{{ step.completed_date or '' }}"></label>{% endif %}
+    <div class="form-grid"><label>计划执行人<input name="operator" value="{{ step.operator }}"></label><label>计划日期<input type="date" name="planned_date" value="{{ step.planned_date or '' }}"></label></div>
     <label>步骤说明<textarea name="description" rows="7" placeholder="关键参数、操作要点、预期结果或验收标准">{{ step.description }}</textarea></label>
     <div class="form-actions"><button class="btn primary"><i data-lucide="save"></i> 保存步骤</button></div>
   </form>

@@ -3,7 +3,7 @@ import io
 from pathlib import Path
 
 from app import db
-from app.models import Experiment, ExperimentAttachment, ExperimentRecord
+from app.models import Experiment, ExperimentAttachment, ExperimentBatch, ExperimentRecord
 
 
 ONE_PIXEL_PNG = base64.b64decode(
@@ -15,9 +15,14 @@ def create_record(client, app):
     client.post("/experiments", data={"title": "附件实验", "code": "EXP-FILE-001", "status": "进行中"})
     with app.app_context():
         experiment_id = Experiment.query.one().id
+    client.post(f"/experiments/{experiment_id}/batches", data={
+        "batch_code": "BATCH-01", "operator": "研究员", "start_date": "2026-07-21",
+    })
+    with app.app_context():
+        batch_id = ExperimentBatch.query.one().id
     client.post(f"/experiments/{experiment_id}/records", data={
         "record_date": "2026-07-21", "operator": "研究员", "content": "完成数据采集。",
-        "result": "成功",
+        "result": "成功", "batch_id": str(batch_id),
     })
     with app.app_context():
         return experiment_id, ExperimentRecord.query.one().id
@@ -71,8 +76,14 @@ def test_files_can_be_categorized_when_record_is_created(client, auth, app):
     client.post("/experiments", data={"title": "创建时上传", "status": "进行中"})
     with app.app_context():
         experiment_id = Experiment.query.one().id
+    client.post(f"/experiments/{experiment_id}/batches", data={
+        "batch_code": "BATCH-01", "operator": "研究员", "start_date": "2026-07-21",
+    })
+    with app.app_context():
+        batch_id = ExperimentBatch.query.one().id
 
     response = client.post(f"/experiments/{experiment_id}/records", data={
+        "batch_id": str(batch_id),
         "record_date": "2026-07-21",
         "operator": "研究员",
         "content": "完成原始数据采集。",
@@ -116,9 +127,10 @@ def test_attachments_are_private_and_deleted_with_record(client, auth, app):
     auth.logout()
     auth.login(email="file-owner@example.com")
     client.post(f"/records/{record_id}/delete")
-    assert not stored_file.exists()
+    assert stored_file.exists()
     with app.app_context():
-        assert ExperimentAttachment.query.count() == 0
+        attachment = ExperimentAttachment.query.one()
+        assert attachment.is_deleted is True
 
 
 def test_unsafe_paths_and_oversized_files_are_rejected(client, auth, app):
@@ -211,14 +223,18 @@ def test_bulk_attachment_update_and_delete_removes_files(client, auth, app):
         assert {item.relative_path for item in attachments} == {"批量文件夹/one.csv", "批量文件夹/two.csv"}
         assert {item.tags for item in attachments} == {"待复核"}
         assert all((Path(app.config["ATTACHMENT_UPLOAD_DIR"]) / item.stored_path).is_file() for item in attachments)
+        managed_paths = [Path(app.config["ATTACHMENT_UPLOAD_DIR"]) / item.stored_path for item in attachments]
 
     response = client.post(f"/records/{record_id}/attachments/bulk", data={
         "attachment_ids": [str(item) for item in ids], "action": "delete",
     })
     assert response.status_code == 302
     assert all(not path.exists() for path in old_paths)
+    assert all(path.exists() for path in managed_paths)
     with app.app_context():
-        assert ExperimentAttachment.query.count() == 0
+        attachments = ExperimentAttachment.query.all()
+        assert len(attachments) == 2
+        assert all(item.is_deleted for item in attachments)
 
 
 def test_bulk_attachment_update_cannot_cross_record_or_user(client, auth, app):

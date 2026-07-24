@@ -10,11 +10,13 @@ import tempfile
 import winreg
 from pathlib import Path
 
+from version_info import APP_VERSION
+
 
 PRODUCT_NAME = "R/LAB Research Assistant"
 SHORTCUT_NAME = "R-LAB Research Assistant"
 APP_ID = "ResearchAssistant"
-VERSION = "1.0.0"
+VERSION = APP_VERSION
 MB_ICONERROR = 0x10
 MB_ICONQUESTION = 0x20
 MB_ICONINFORMATION = 0x40

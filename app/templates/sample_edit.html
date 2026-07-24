@@ -4,6 +4,23 @@
 <header class="page-head"><div><p class="eyebrow">SAMPLE / TRACE</p><h1>{{ sample.sample_code }}</h1><p class="muted">查看样本信息及全部实验使用记录。</p></div><a class="btn ghost" href="{{ url_for('main.samples') }}"><i data-lucide="arrow-left"></i> 返回</a></header>
 <div class="sample-detail-grid">
   <section class="panel narrow-panel"><form method="post" class="stack-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="form-grid"><label>样本编号<input name="sample_code" value="{{ sample.sample_code }}" required></label><label>类型<input name="sample_type" value="{{ sample.sample_type }}"></label><label>来源<input name="source" value="{{ sample.source }}"></label><label>数量<input name="quantity" value="{{ sample.quantity }}"></label><label>状态<select name="status">{% for value in ['可用','使用中','耗尽','异常'] %}<option {{ 'selected' if sample.status == value }}>{{ value }}</option>{% endfor %}</select></label></div><label>存放位置<input name="location" value="{{ sample.location }}"></label><label>备注<textarea name="notes" rows="5">{{ sample.notes }}</textarea></label><div class="form-actions"><button class="btn primary"><i data-lucide="save"></i> 保存修改</button></div></form></section>
-  <section class="panel sample-usage-panel"><div class="panel-head"><div><p class="eyebrow">TRACEABILITY</p><h2>实验使用记录</h2></div><span class="count-label">{{ sample.experiment_usages|length }} 条</span></div><div class="sample-usage-list">{% for usage in sample.experiment_usages %}<a class="sample-usage-row" href="{{ url_for('main.experiment_detail', item_id=usage.experiment_id) }}"><span><b>{{ usage.experiment.title }}</b><small>{{ usage.experiment.code or '未设置编号' }} · {{ usage.experiment.batch_code or '未设置批次' }}</small></span><span><b>{{ usage.role }}</b><small>{{ usage.amount_used or '用量未填' }}</small></span><i data-lucide="arrow-right"></i></a>{% else %}<div class="empty"><i data-lucide="unlink"></i><p>该样本尚未关联实验</p></div>{% endfor %}</div></section>
+  <section class="panel sample-usage-panel">
+    <div class="panel-head"><div><p class="eyebrow">TRACEABILITY</p><h2>样本使用追溯</h2></div><span class="count-label">{{ (sample.experiment_usages|length) + (sample.batch_usages|length) }} 条</span></div>
+    <div class="sample-usage-list">
+      {% for usage in sample.batch_usages %}
+      <a class="sample-usage-row" href="{{ url_for('workspace.batch_detail', item_id=usage.batch_id) }}">
+        <span><b>{{ usage.batch.experiment.title }}</b><small>实际使用 · {{ usage.batch.batch_code or '未编号执行' }}</small></span>
+        <span><b>{{ usage.role }}</b><small>{{ usage.amount_used or '用量未填' }}</small></span><i data-lucide="arrow-right"></i>
+      </a>
+      {% endfor %}
+      {% for usage in sample.experiment_usages %}
+      <a class="sample-usage-row" href="{{ url_for('main.experiment_detail', item_id=usage.experiment_id) }}#protocol">
+        <span><b>{{ usage.experiment.title }}</b><small>计划用途 · {{ usage.experiment.code or '未设置实验编号' }}</small></span>
+        <span><b>{{ usage.role }}</b><small>{{ usage.amount_used or '用量未填' }}</small></span><i data-lucide="arrow-right"></i>
+      </a>
+      {% endfor %}
+      {% if not sample.batch_usages and not sample.experiment_usages %}<div class="empty"><i data-lucide="unlink"></i><p>该样本尚未关联实验计划或实验执行</p></div>{% endif %}
+    </div>
+  </section>
 </div>
 {% endblock %}

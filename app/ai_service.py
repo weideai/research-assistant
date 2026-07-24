@@ -1,15 +1,11 @@
 from dataclasses import dataclass
 import ipaddress
 import json
-import os
 import re
 import socket
 import urllib.error
 import urllib.request
 from urllib.parse import urlparse
-
-from flask import current_app, has_app_context
-
 
 DEFAULT_API_URL = "https://api.openai.com/v1"
 DEFAULT_MODEL = "gpt-5.6-terra"
@@ -37,32 +33,9 @@ class AIConfig:
     api_key: str = ""
     model: str = DEFAULT_MODEL
     enabled: bool = False
-    source: str = "environment"
+    source: str = "explicit"
     allow_private: bool = False
     allowed_hosts: tuple = ()
-
-
-def _env_bool(name, default=False):
-    value = os.getenv(name)
-    return default if value is None else value.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def config_from_environment():
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    allow_private = current_app.config["ALLOW_PRIVATE_API_URLS"] if has_app_context() else _env_bool("ALLOW_PRIVATE_API_URLS", True)
-    allowed_hosts = current_app.config["AI_ALLOWED_HOSTS"] if has_app_context() else tuple(
-        item.strip().lower() for item in os.getenv("AI_ALLOWED_HOSTS", "").split(",") if item.strip()
-    )
-    return AIConfig(
-        api_url=os.getenv("OPENAI_BASE_URL", DEFAULT_API_URL).strip(),
-        api_key=api_key,
-        model=os.getenv("OPENAI_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL,
-        enabled=bool(api_key),
-        source="environment",
-        allow_private=allow_private,
-        allowed_hosts=allowed_hosts,
-    )
-
 
 def _host_allowed(hostname, allowed_hosts):
     if not allowed_hosts:
@@ -135,18 +108,266 @@ def _read_json(request, timeout):
         raise AIServiceError("API 返回内容不是有效 JSON。") from exc
 
 
-def list_models(config):
+MODEL_CAPABILITIES = ("vision", "reasoning", "web_search", "tools")
+MODEL_CAPABILITY_STATUSES = {"declared", "inferred", "unknown"}
+
+
+def _normalized_capability_label(value):
+    value = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", str(value or "").strip())
+    return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
+
+
+def _capability_from_label(value):
+    label = _normalized_capability_label(value)
+    for prefix in ("supports_", "support_", "has_"):
+        if label.startswith(prefix):
+            label = label[len(prefix):]
+            break
+    aliases = {
+        "vision": {
+            "vision", "image_input", "image_inputs", "input_image", "input_images",
+            "multimodal", "multi_modal",
+        },
+        "reasoning": {
+            "reasoning", "reasoning_effort", "include_reasoning", "reasoner", "thinking", "extended_thinking",
+        },
+        "web_search": {
+            "web_search", "web_search_preview", "internet_search", "browser_search",
+            "search_tool",
+        },
+        "tools": {
+            "tools", "tool", "tool_use", "tool_call", "tool_calls", "tool_calling",
+            "tool_choice", "parallel_tool_calls", "functions", "function_call", "function_calls",
+            "function_calling",
+        },
+    }
+    return next((name for name, values in aliases.items() if label in values), None)
+
+
+def _declared_support(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in {0, 1}:
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "yes", "supported", "enabled", "available"}:
+            return True
+        if normalized in {"false", "no", "unsupported", "disabled", "unavailable"}:
+            return False
+    if isinstance(value, dict):
+        for key in ("supported", "enabled", "available"):
+            if key in value:
+                return _declared_support(value[key])
+    return None
+
+
+def _declared_model_capabilities(item):
+    declared = {}
+
+    def add(label, value=True):
+        capability = _capability_from_label(label)
+        supported = _declared_support(value)
+        if capability and supported is not None and capability not in declared:
+            declared[capability] = supported
+
+    containers = [item]
+    metadata = item.get("metadata")
+    if isinstance(metadata, dict):
+        containers.append(metadata)
+
+    for container in containers:
+        for key, value in container.items():
+            add(key, value)
+        for field in ("capabilities", "features"):
+            values = container.get(field)
+            if isinstance(values, dict):
+                for key, value in values.items():
+                    add(key, value)
+            elif isinstance(values, (list, tuple, set)):
+                for value in values:
+                    add(value)
+        for field in ("supported_features", "supported_parameters"):
+            values = container.get(field)
+            if isinstance(values, (list, tuple, set)):
+                for value in values:
+                    add(value)
+
+    modality_containers = list(containers)
+    for container in containers:
+        architecture = next((
+            value for key, value in container.items()
+            if _normalized_capability_label(key) == "architecture"
+        ), None)
+        if isinstance(architecture, dict):
+            modality_containers.append(architecture)
+    if "vision" not in declared:
+        for container in modality_containers:
+            modalities = next((
+                value for key, value in container.items()
+                if _normalized_capability_label(key) == "input_modalities"
+            ), None)
+            if not isinstance(modalities, (list, tuple, set)) or not modalities:
+                continue
+            normalized = {_normalized_capability_label(value) for value in modalities}
+            declared["vision"] = bool(normalized & {"image", "images", "image_url", "input_image"})
+            break
+    return declared
+
+
+def _model_name_inferences(model_id, official_openai=False):
+    name = model_id.strip().lower()
+    inferred = set()
+    vision_family = re.match(
+        r"^(?:gpt-(?:4o|4\.1|5)(?:[-.]|$)|o(?:3|4)(?:[-.]|$)|"
+        r"claude-(?:3|4)(?:[-.]|$)|gemini-(?:1\.5|2|2\.5|3)(?:[-.]|$))",
+        name,
+    )
+    if vision_family or re.search(r"(?:^|[-_/])(?:vision|vl|llava|pixtral)(?:[-_/]|$)", name):
+        inferred.add("vision")
+
+    reasoning_family = re.match(r"^(?:gpt-5(?:[-.]|$)|o(?:1|3|4)(?:[-.]|$))", name)
+    if reasoning_family or re.search(
+        r"(?:^|[-_/])(?:reasoning|reasoner|thinking|qwq)(?:[-_/]|$)|(?:^|[-_/])deepseek[-_/]?r1(?:[-_/]|$)",
+        name,
+    ):
+        inferred.add("reasoning")
+
+    tool_family = re.match(
+        r"^(?:gpt-(?:4o|4\.1|5)(?:[-.]|$)|claude-(?:3|4)(?:[-.]|$)|"
+        r"gemini-(?:1\.5|2|2\.5|3)(?:[-.]|$))",
+        name,
+    )
+    if tool_family:
+        inferred.add("tools")
+
+    if official_openai and re.match(r"^(?:gpt-(?:4o|4\.1|5)(?:[-.]|$)|o(?:3|4)(?:[-.]|$))", name):
+        inferred.add("web_search")
+    return inferred
+
+
+def describe_model(model_id, raw=None, api_url=""):
+    """Return normalized capability evidence for one saved or discovered model."""
+    item = raw if isinstance(raw, dict) else {}
+    model_id = str(model_id or item.get("id", "")).strip()
+    declared = _declared_model_capabilities(item)
+    official_openai = (urlparse(api_url).hostname or "").lower() == "api.openai.com"
+    inferred = _model_name_inferences(model_id, official_openai=official_openai)
+    capabilities = {}
+    for capability in MODEL_CAPABILITIES:
+        if capability in declared:
+            capabilities[capability] = {"supported": declared[capability], "status": "declared"}
+        elif capability == "web_search" and not official_openai:
+            capabilities[capability] = {"supported": None, "status": "unknown"}
+        elif capability in inferred:
+            capabilities[capability] = {"supported": True, "status": "inferred"}
+        else:
+            capabilities[capability] = {"supported": None, "status": "unknown"}
+    return {
+        "id": model_id,
+        "owned_by": str(item.get("owned_by") or item.get("owner") or "").strip(),
+        "capabilities": capabilities,
+    }
+
+
+def model_capability_snapshot(model_id, descriptor=None, api_url=""):
+    """Return a validated, provider-bound snapshot suitable for persistence."""
+    model_id = str(model_id or "").strip()
+    normalized_api_url = str(api_url or "").strip().rstrip("/")
+    fallback = describe_model(model_id, api_url=normalized_api_url)
+    candidate = descriptor if isinstance(descriptor, dict) else {}
+    candidate_model_id = str(candidate.get("model_id") or candidate.get("id") or "").strip()
+    candidate_api_url = str(candidate.get("api_url") or "").strip().rstrip("/")
+    candidate_capabilities = candidate.get("capabilities")
+    use_candidate = (
+        bool(model_id)
+        and candidate_model_id == model_id
+        and candidate_api_url == normalized_api_url
+        and isinstance(candidate_capabilities, dict)
+    )
+
+    capabilities = {}
+    for name in MODEL_CAPABILITIES:
+        evidence = candidate_capabilities.get(name) if use_candidate else None
+        if not isinstance(evidence, dict):
+            capabilities[name] = fallback["capabilities"][name]
+            continue
+        status = str(evidence.get("status") or "").strip().lower()
+        supported = evidence.get("supported")
+        if status not in MODEL_CAPABILITY_STATUSES or not (
+                supported is None or isinstance(supported, bool)):
+            capabilities[name] = fallback["capabilities"][name]
+        elif status == "unknown" or supported is None or (status == "inferred" and supported is False):
+            capabilities[name] = {"supported": None, "status": "unknown"}
+        else:
+            capabilities[name] = {"supported": supported, "status": status}
+
+    return {
+        "model_id": model_id,
+        "api_url": normalized_api_url,
+        "capabilities": capabilities,
+    }
+
+
+def describe_model_from_snapshot(model_id, snapshot=None, api_url=""):
+    """Build a display descriptor from persisted capability evidence."""
+    if isinstance(snapshot, str):
+        try:
+            snapshot = json.loads(snapshot)
+        except (TypeError, json.JSONDecodeError):
+            snapshot = None
+    normalized = model_capability_snapshot(model_id, snapshot, api_url=api_url)
+    return {
+        "id": normalized["model_id"],
+        "owned_by": "",
+        "capabilities": normalized["capabilities"],
+    }
+
+
+def discover_models(config):
+    """Fetch and normalize the provider's model directory."""
     request = urllib.request.Request(_endpoint(config, "models"), headers=_headers(config.api_key), method="GET")
     body = _read_json(request, timeout=20)
-    data = body.get("data", []) if isinstance(body, dict) else []
-    models = sorted({str(item.get("id", "")).strip() for item in data if isinstance(item, dict) and item.get("id")})
+    if isinstance(body, list):
+        data = body
+    elif isinstance(body, dict):
+        data = body.get("data")
+        if isinstance(data, dict):
+            data = data.get("data") or data.get("models")
+        if not isinstance(data, list):
+            data = body.get("models")
+        if isinstance(data, dict):
+            data = data.get("data") or data.get("models")
+        if not isinstance(data, list):
+            data = []
+    else:
+        data = []
+    models = {}
+    for item in data:
+        if isinstance(item, str):
+            item = {"id": item}
+        if not isinstance(item, dict):
+            continue
+        model_id = next((
+            str(item.get(key, "")).strip() for key in ("id", "name", "model")
+            if str(item.get(key, "")).strip()
+        ), "")
+        if not model_id:
+            continue
+        entry = describe_model(model_id, raw=item, api_url=config.api_url)
+        models.setdefault(entry["id"], entry)
     if not models:
         raise AIServiceError("连接成功，但 /models 没有返回可用模型。你仍可手动填写模型名称。")
-    return models
+    return [models[model_id] for model_id in sorted(models)]
+
+
+def list_models(config):
+    """Return model IDs using the legacy list-based contract."""
+    return [item["id"] for item in discover_models(config)]
 
 
 def organize_note(note, config=None):
-    config = config or config_from_environment()
+    config = config or AIConfig(api_url="", model="", enabled=False, source="none")
     if not config.enabled:
         return local_draft(note), "local"
     model = config.model.strip()
@@ -231,7 +452,7 @@ def _responses_content(body):
 
 
 def chat_with_assistant(messages, system_prompt, config=None, web_access=False):
-    config = config or config_from_environment()
+    config = config or AIConfig(api_url="", model="", enabled=False, source="none")
     if not config.enabled:
         raise AIServiceError("请先在 API 设置中启用 API 并配置 Key。")
     if not config.model.strip():

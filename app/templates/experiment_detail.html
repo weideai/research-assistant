@@ -3,11 +3,12 @@
 {% block content %}
 <header class="page-head">
   <div>
-    <a class="back-link" href="{{ url_for('main.experiments') }}"><i data-lucide="arrow-left"></i> 实验计划</a>
+    {% if experiment.project and not experiment.project.is_deleted %}<a class="back-link" href="{{ url_for('workspace.project_detail', item_id=experiment.project.id) }}"><i data-lucide="arrow-left"></i> 返回 {{ experiment.project.title }}</a>{% else %}<a class="back-link" href="{{ url_for('main.experiments') }}"><i data-lucide="arrow-left"></i> 返回实验计划</a>{% endif %}
     <h1>{{ experiment.title }}</h1>
-    <p class="muted">{{ experiment.code or '未设置编号' }} · {{ experiment.batch_code or '未设置批次' }} · {{ experiment.repeat_kind }} #{{ experiment.repeat_number }}{% if experiment.group_name %} · {{ experiment.group_name }}{% endif %}</p>
+    <p class="muted">{% if experiment.project %}{{ experiment.project.title }} · {% endif %}{{ experiment.code or '未设置编号' }} · {{ batches|length }} 次实验执行</p>
   </div>
   <div class="page-head-actions">
+    <a class="btn primary" href="#batches" data-experiment-tab-link="batches"><i data-lucide="play"></i> {{ '新建实验执行' if not batches else '查看实验执行' }}</a>
     <form class="experiment-export-form" method="get" action="{{ url_for('main.experiment_export', item_id=experiment.id) }}">
       <label class="experiment-export-picker"><span>导出格式</span><select name="format" aria-label="选择实验导出格式">
         <option value="markdown">Markdown 报告</option>
@@ -21,10 +22,41 @@
     <span class="badge large state-{{ experiment.status }}">{{ experiment.status }}</span>
   </div>
 </header>
-<div class="detail-layout">
+<nav class="experiment-workspace-tabs" data-experiment-tabs aria-label="实验工作区">
+  <a href="#overview" data-experiment-tab="overview"><i data-lucide="layout-dashboard"></i><span><b>概览</b><small>目标与基本信息</small></span></a>
+  <a href="#protocol" data-experiment-tab="protocol"><i data-lucide="list-checks"></i><span><b>实验方案</b><small>步骤、参数与样本</small></span></a>
+  <a href="#batches" data-experiment-tab="batches"><i data-lucide="layers-3"></i><span><b>实验执行</b><small>{{ batches|length }} 次执行</small></span></a>
+</nav>
+<div class="detail-layout experiment-tabbed-layout" data-active-tab="overview" data-experiment-workspace>
   <div class="detail-main">
-    <details class="panel feature-disclosure" id="experiment-steps" data-disclosure-key="experiment-{{ experiment.id }}-steps" open>
-      <summary class="feature-summary"><div><p class="eyebrow">PROTOCOL</p><h2>实验步骤</h2></div><span class="feature-summary-meta"><span class="count-label">{{ experiment.steps|selectattr('is_done')|list|length }}/{{ experiment.steps|length }} 完成</span><i data-lucide="chevron-down"></i></span></summary>
+    <details class="panel feature-disclosure batch-overview-panel" id="experiment-batches" data-experiment-panel="batches" open>
+      <summary class="feature-summary"><div><p class="eyebrow">EXECUTIONS</p><h2>实验执行</h2></div><span class="feature-summary-meta"><span class="count-label">{{ batches|length }} 次</span><i data-lucide="chevron-down"></i></span></summary>
+      <div class="feature-body">
+        <div class="experiment-batch-list">{% for batch in batches %}<a href="{{ url_for('workspace.batch_detail', item_id=batch.id) }}"><span class="batch-sequence">{{ '%02d'|format(loop.index) }}</span><span><b>{{ batch.batch_code or ('执行 ' ~ loop.index) }}</b><small>{{ batch.repeat_kind }} #{{ batch.repeat_number }}{% if batch.group_name %} · {{ batch.group_name }}{% endif %}</small></span><span class="badge">{{ batch.status }}</span><span><b>{{ batch.records|rejectattr('is_deleted')|list|length }}</b><small>过程记录</small></span><i data-lucide="chevron-right"></i></a>{% else %}<div class="empty compact-empty"><p>尚未开始实验执行。创建后，所有过程记录都会归入这一次执行。</p></div>{% endfor %}</div>
+        {% if selected_record_template %}
+        <div class="template-applied-note"><i data-lucide="notebook-tabs"></i><span>已填入记录模板 <b>{{ selected_record_template.name }}</b> 的调用入口。请选择一次实验执行后填写并保存。</span></div>
+        <div class="experiment-batch-list">{% for batch in batches %}<a href="{{ url_for('workspace.batch_detail', item_id=batch.id, record_template_id=selected_record_template.id) }}#new-record"><span class="batch-sequence">{{ '%02d'|format(loop.index) }}</span><span><b>{{ batch.batch_code or ('执行 ' ~ loop.index) }}</b><small>在这次执行中调用模板</small></span><span class="badge">{{ batch.status }}</span><span></span><i data-lucide="chevron-right"></i></a>{% else %}<div class="empty compact-empty"><p>请先新建一次实验执行，再调用过程记录模板。</p></div>{% endfor %}</div>
+        {% endif %}
+        <form method="post" action="{{ url_for('workspace.batch_create', item_id=experiment.id) }}" class="batch-create-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input name="batch_code" placeholder="执行编号，如 RUN-02"><select name="repeat_kind">{% for kind in repeat_kinds %}<option>{{ kind }}</option>{% endfor %}</select><input type="number" name="repeat_number" min="1" value="{{ batches|length + 1 }}"><input name="group_name" placeholder="实验分组"><input name="operator" value="{{ experiment.owner or current_user.name }}" placeholder="实验人员"><input type="date" name="start_date" value="{{ today }}"><button class="btn secondary"><i data-lucide="play"></i> 新建实验执行</button></form>
+        {% if active_records %}
+        <details class="resource-bulk-panel" id="experiment-record-index">
+          <summary><span><i data-lucide="notebook-tabs"></i><b>跨执行过程记录索引</b></span><span>{{ active_records|length }} 条</span></summary>
+          <div class="record-list">
+            {% for record in active_records %}
+            <article class="record-item">
+              <span class="resource-select" aria-hidden="true"></span>
+              <div class="record-date"><b>{{ record.record_date.strftime('%m/%d') }}</b><small>{{ record.record_date.strftime('%Y') }}</small></div>
+              <div class="record-body"><div class="record-head"><span class="badge">{{ record.lifecycle_status }}</span><span class="badge result-{{ record.result }}">{{ record.result }}</span><span>{{ record.batch.batch_code if record.batch else '历史未归档' }}</span><span>{{ record.operator or '未填写人员' }}</span></div><div class="record-block"><b>过程</b><p>{{ record.content|truncate(140) }}</p></div></div>
+              <div class="record-actions"><a class="icon-btn" href="{{ url_for('main.record_detail', record_id=record.id) }}" title="查看过程记录"><i data-lucide="arrow-up-right"></i></a></div>
+            </article>
+            {% endfor %}
+          </div>
+        </details>
+        {% endif %}
+      </div>
+    </details>
+    <details class="panel feature-disclosure" id="experiment-steps" data-experiment-panel="protocol" data-disclosure-key="experiment-{{ experiment.id }}-steps" open>
+      <summary class="feature-summary"><div><p class="eyebrow">PROTOCOL</p><h2>实验步骤</h2></div><span class="feature-summary-meta"><span class="count-label">{{ experiment.steps|length }} 个计划步骤</span><i data-lucide="chevron-down"></i></span></summary>
       <div class="feature-body">
       <div class="component-template-tools" id="step-templates">
         <form method="post" action="{{ url_for('main.experiment_save_template', item_id=experiment.id) }}" class="component-template-form">
@@ -33,10 +65,10 @@
           <label class="grow">模板说明<input name="description" placeholder="适用实验或关键注意事项"></label>
           <button class="btn secondary"><i data-lucide="copy-plus"></i> 保存步骤模板</button>
         </form>
-        {% if step_templates %}<form method="post" action="{{ url_for('main.experiment_apply_step_template', item_id=experiment.id) }}" class="component-template-form template-use-form">
+        {% if step_templates %}<form method="post" action="{{ url_for('main.experiment_apply_step_template', item_id=experiment.id) }}" class="component-template-form template-use-form" data-template-apply-form>
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <label>调用步骤模板<select name="template_id" data-template-select required>{% for template in step_templates %}<option value="{{ template.id }}" data-view-url="{{ url_for('main.experiment_template_detail', item_id=template.id) }}">{{ template.name }} · {{ template.steps|length }} 步</option>{% endfor %}</select></label>
-          <label>调用方式<select name="apply_mode"><option value="append">追加步骤</option><option value="replace">替换步骤</option></select></label>
+          <label>调用方式<select name="apply_mode"><option value="append">追加步骤</option><option value="replace">替换步骤（会删除当前步骤）</option></select></label>
           <a class="btn ghost" data-template-view href="{{ url_for('main.experiment_template_detail', item_id=step_templates[0].id) }}"><i data-lucide="eye"></i> 查看</a>
           <button class="btn primary"><i data-lucide="list-plus"></i> 调用</button>
         </form>{% else %}<div class="component-template-empty"><i data-lucide="info"></i><span>还没有步骤模板，保存当前步骤后可在这里调用。</span></div>{% endif %}
@@ -44,7 +76,7 @@
       <form method="post" action="{{ url_for('main.step_add', item_id=experiment.id) }}" class="step-add-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <label class="step-title">步骤标题<input name="title" required placeholder="例如：药物处理 24h"></label>
-        <label>执行人<input name="operator" value="{{ experiment.owner or current_user.name }}"></label>
+        <label>计划执行人<input name="operator" value="{{ experiment.owner or current_user.name }}"></label>
         <label>计划日期<input type="date" name="planned_date"></label>
         <label class="step-description">步骤说明<textarea name="description" rows="2" placeholder="关键参数、操作要点或验收标准"></textarea></label>
         <button class="btn primary"><i data-lucide="plus"></i> 添加步骤</button>
@@ -56,9 +88,8 @@
           <div class="resource-bulk-body">
             <div class="bulk-head"><label class="bulk-select-all"><input type="checkbox" data-bulk-select-all> 全选步骤</label><small>未填写的内容不会覆盖原数据</small></div>
             <div class="bulk-fields bulk-fields-wide">
-              <label>完成状态<select name="status_mode"><option value="keep">保持不变</option><option value="complete">标记全部完成</option><option value="pending">标记全部未完成</option></select></label>
-              <label>执行人操作<select name="operator_mode"><option value="keep">保持不变</option><option value="replace">统一替换</option><option value="clear">清空</option></select></label>
-              <label>执行人<input name="operator" placeholder="新的执行人"></label>
+              <label>计划执行人操作<select name="operator_mode"><option value="keep">保持不变</option><option value="replace">统一替换</option><option value="clear">清空</option></select></label>
+              <label>计划执行人<input name="operator" placeholder="新的计划执行人"></label>
               <label>日期操作<select name="date_mode"><option value="keep">保持不变</option><option value="set">设为同一天</option><option value="shift">整体顺延/提前</option><option value="clear">清空日期</option></select></label>
               <label>计划日期<input type="date" name="planned_date"></label>
               <label>偏移天数<input type="number" name="shift_days" value="0" min="-3650" max="3650" placeholder="负数为提前"></label>
@@ -71,18 +102,14 @@
       </form>
       <div class="timeline">
         {% for step in experiment.steps %}
-        <div class="timeline-step {{ 'done' if step.is_done }}">
+        <div class="timeline-step">
           <label class="resource-select"><input type="checkbox" name="step_ids" value="{{ step.id }}" form="step-bulk-form" data-bulk-select aria-label="选择步骤 {{ step.title }}"></label>
-          <form method="post" action="{{ url_for('main.step_toggle', step_id=step.id) }}">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button class="step-marker" title="{{ '标记未完成' if step.is_done else '标记完成' }}">{% if step.is_done %}<i data-lucide="check"></i>{% else %}{{ step.position }}{% endif %}</button>
-          </form>
+          <span class="step-marker plan-step-marker" aria-hidden="true">{{ step.position }}</span>
           <div class="step-content">
             <b>{{ step.title }}</b>
             <div class="step-meta">
               <span><i data-lucide="calendar"></i>{{ step.planned_date or '未安排日期' }}</span>
-              <span><i data-lucide="user"></i>{{ step.operator or '未指定执行人' }}</span>
-              {% if step.completed_date %}<span><i data-lucide="circle-check"></i>{{ step.completed_date }} 完成</span>{% endif %}
+              <span><i data-lucide="user"></i>{{ step.operator or '未指定计划执行人' }}</span>
             </div>
             {% if step.description %}<p>{{ step.description }}</p>{% endif %}
           </div>
@@ -101,7 +128,7 @@
       </div>
     </details>
 
-    <div class="research-trace-grid">
+    <div class="research-trace-grid" data-experiment-panel="protocol">
       <details class="panel trace-panel feature-disclosure" id="experiment-samples" data-disclosure-key="experiment-{{ experiment.id }}-samples">
         <summary class="feature-summary"><div><p class="eyebrow">SAMPLES</p><h2>关联样本</h2></div><span class="feature-summary-meta"><span class="count-label">{{ experiment.sample_usages|length }} 个</span><i data-lucide="chevron-down"></i></span></summary>
         <div class="feature-body">
@@ -161,113 +188,27 @@
       </details>
     </div>
 
-    <details class="panel feature-disclosure" id="new-record" data-disclosure-key="experiment-{{ experiment.id }}-new-record" open>
-      <summary class="feature-summary"><div><p class="eyebrow">RECORD</p><h2>新增实验记录</h2></div><span class="feature-summary-meta"><span class="summary-hint">记录过程、参数与附件</span><i data-lucide="chevron-down"></i></span></summary>
-      <div class="feature-body">
-      <div class="record-template-picker">
-        {% if record_templates %}<form method="get" action="{{ url_for('main.experiment_detail', item_id=experiment.id) }}" class="component-template-form template-use-form">
-          <label>调用记录模板<select name="record_template_id" data-template-select required>{% for template in record_templates %}<option value="{{ template.id }}" data-view-url="{{ url_for('main.record_template_detail', item_id=template.id) }}" {{ 'selected' if selected_record_template and selected_record_template.id == template.id }}>{{ template.name }} · {{ template.parameters|length }} 参数</option>{% endfor %}</select></label>
-          <a class="btn ghost" data-template-view href="{{ url_for('main.record_template_detail', item_id=(selected_record_template.id if selected_record_template else record_templates[0].id)) }}"><i data-lucide="eye"></i> 查看</a>
-          <button class="btn secondary"><i data-lucide="notebook-tabs"></i> 填入表单</button>
-        </form>{% else %}<div class="component-template-empty"><i data-lucide="info"></i><span>记录模板需要在一条已保存的实验记录详情页中创建。</span></div>{% endif %}
-        {% if selected_record_template %}<div class="template-applied-note"><i data-lucide="circle-check"></i><span>已填入记录模板 <b>{{ selected_record_template.name }}</b>，检查后再保存为新记录。</span></div>{% endif %}
-      </div>
-      <form method="post" action="{{ url_for('main.record_add', item_id=experiment.id) }}" enctype="multipart/form-data" class="stack-form record-form">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <div class="form-grid three"><label>日期<input type="date" name="record_date" value="{{ today }}"></label><label>实验人员<input name="operator" value="{{ current_user.name }}"></label><label>结果<select name="result"><option>待确认</option><option>成功</option><option>失败</option></select></label></div>
-        <label>实验条件<textarea name="conditions" rows="3" placeholder="浓度、时间、温度、批次等关键变量">{{ (selected_record_template.conditions if selected_record_template else experiment.record_conditions_template) or '' }}</textarea></label>
-        <label>实验过程<textarea name="content" rows="6" required placeholder="今天做了什么？观察到了什么？">{{ (selected_record_template.content if selected_record_template else experiment.record_content_template) or '' }}</textarea></label>
-        <label>结论与下次注意<textarea name="remark" rows="3" placeholder="异常原因、改进建议、后续计划">{{ (selected_record_template.remark if selected_record_template else experiment.record_remark_template) or '' }}</textarea></label>
-        <fieldset class="record-attachment-field parameter-field" data-parameter-builder>
-          <legend><i data-lucide="sliders-horizontal"></i> 本次实验参数 <small>可选</small></legend>
-          <div class="parameter-rows" data-parameter-rows>
-            {% if selected_record_template and selected_record_template.parameters %}{% for parameter in selected_record_template.parameters %}<div class="parameter-input-row"><input name="record_parameter_name" value="{{ parameter.name }}" placeholder="参数名，如药物浓度"><input name="record_parameter_value" value="{{ parameter.value or '' }}" placeholder="数值"><input name="record_parameter_unit" value="{{ parameter.unit or '' }}" placeholder="单位"><input name="record_parameter_notes" value="{{ parameter.notes or '' }}" placeholder="批次或说明"><button class="icon-btn" type="button" data-remove-parameter title="移除此行"><i data-lucide="x"></i></button></div>{% endfor %}{% else %}<div class="parameter-input-row"><input name="record_parameter_name" placeholder="参数名，如药物浓度"><input name="record_parameter_value" placeholder="数值"><input name="record_parameter_unit" placeholder="单位"><input name="record_parameter_notes" placeholder="批次或说明"><button class="icon-btn" type="button" data-remove-parameter title="移除此行"><i data-lucide="x"></i></button></div>{% endif %}
-          </div>
-          <button class="btn ghost parameter-add-inline" type="button" data-add-parameter><i data-lucide="plus"></i> 添加参数</button>
-        </fieldset>
-        <fieldset class="record-attachment-field">
-          <legend><i data-lucide="paperclip"></i> 实验结果与数据 <small>可选</small></legend>
-          <div class="record-attachment-controls">
-            <label>文件分类
-              <select name="attachment_category">
-                <option>自动分类</option>
-                {% for category in attachment_categories %}<option>{{ category }}</option>{% endfor %}
-              </select>
-              <input name="custom_attachment_category" maxlength="20" placeholder="自定义分类（可选）">
-            </label>
-            <label>自定义文件夹<input name="attachment_folder" placeholder="例如：2026-07 / WB / 原始图像"></label>
-            <p>填写自定义分类或文件夹后，文件会按实验、日期、分类和文件夹管理；原始文件不加密、不限大小。</p>
-          </div>
-          <div class="attachment-pickers record-attachment-pickers">
-            <label class="attachment-picker"><span><i data-lucide="files"></i><b>添加文件或图片</b></span><input type="file" name="files" multiple><small>支持任意格式，可一次选择多个文件</small></label>
-            <label class="attachment-picker folder-picker"><span><i data-lucide="folder-up"></i><b>添加整个文件夹</b></span><input type="file" name="files" multiple webkitdirectory directory><small>保留文件夹层级和相对路径</small></label>
-          </div>
-        </fieldset>
-        <div class="form-actions"><button class="btn primary"><i data-lucide="save"></i> 保存记录</button></div>
-      </form>
-      </div>
-    </details>
-
-    <details class="panel feature-disclosure" id="record-history" data-disclosure-key="experiment-{{ experiment.id }}-history" open>
-      <summary class="feature-summary"><div><p class="eyebrow">HISTORY</p><h2>记录时间线</h2></div><span class="feature-summary-meta"><span class="count-label">{{ experiment.records|length }} 条</span><i data-lucide="chevron-down"></i></span></summary>
-      <div class="feature-body">
-      <form id="record-bulk-form" method="post" action="{{ url_for('main.record_bulk', item_id=experiment.id) }}" class="resource-bulk-form" data-bulk-form data-bulk-label="记录">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <details class="resource-bulk-panel"><summary><span><i data-lucide="list-checks"></i><b>批量管理记录</b></span><span data-bulk-selected>已选择 0 个</span></summary><div class="resource-bulk-body">
-          <div class="bulk-head"><label class="bulk-select-all"><input type="checkbox" data-bulk-select-all> 全选记录</label><small>删除记录会同步删除其本地附件</small></div>
-          <div class="bulk-fields bulk-fields-wide"><label>实验结果<select name="result"><option value="__keep__">保持不变</option><option>待确认</option><option>成功</option><option>失败</option></select></label><label>人员操作<select name="operator_mode"><option value="keep">保持不变</option><option value="replace">统一替换</option><option value="clear">清空</option></select></label><label>实验人员<input name="operator" placeholder="新的实验人员"></label><label>日期整体偏移<input type="number" name="shift_days" value="0" min="-3650" max="3650"><small>正数顺延，负数提前</small></label><label>备注操作<select name="remark_mode"><option value="keep">保持不变</option><option value="append">追加</option><option value="replace">替换</option><option value="clear">清空</option></select></label><label class="bulk-grow">结论与备注<textarea name="remark" rows="2" placeholder="统一追加或替换的备注"></textarea></label></div>
-          <div class="bulk-actions"><button class="btn secondary" name="action" value="update" disabled><i data-lucide="save"></i> 批量保存</button><button class="btn danger" name="action" value="delete" disabled><i data-lucide="trash-2"></i> 批量删除</button></div>
-        </div></details>
-      </form>
-      <div class="record-list">
-        {% for record in experiment.records %}
-        <article class="record-item">
-          <label class="resource-select"><input type="checkbox" name="record_ids" value="{{ record.id }}" form="record-bulk-form" data-bulk-select aria-label="选择 {{ record.record_date }} 实验记录"></label>
-          <div class="record-date"><b>{{ record.record_date.strftime('%m/%d') }}</b><small>{{ record.record_date.strftime('%Y') }}</small></div>
-          <div class="record-body">
-            <div class="record-head"><span class="badge result-{{ record.result }}">{{ record.result }}</span><span>{{ record.operator or '未填写人员' }}</span>{% if record.attachments %}<span><i data-lucide="paperclip"></i>{{ record.attachments|length }} 个文件</span>{% endif %}</div>
-            {% if record.parameters %}<div class="record-parameter-chips">{% for parameter in record.parameters %}<span>{{ parameter.name }} <b>{{ parameter.value }} {{ parameter.unit }}</b></span>{% endfor %}</div>{% endif %}
-            {% if record.conditions %}<div class="record-block"><b>条件</b><p>{{ record.conditions }}</p></div>{% endif %}
-            <div class="record-block"><b>过程</b><p>{{ record.content }}</p></div>
-            {% if record.remark %}<div class="record-block note"><b>结论与备注</b><p>{{ record.remark }}</p></div>{% endif %}
-          </div>
-          <div class="record-actions">
-            <a class="icon-btn" href="{{ url_for('main.record_detail', record_id=record.id) }}" title="查看并编辑记录"><i data-lucide="square-pen"></i></a>
-            <form method="post" action="{{ url_for('main.record_delete', record_id=record.id) }}" data-confirm="确定删除这条实验记录？">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button class="icon-btn danger" title="删除记录"><i data-lucide="trash-2"></i></button>
-            </form>
-          </div>
-        </article>
-        {% else %}
-        <div class="empty"><i data-lucide="notebook-pen"></i><p>尚无实验记录</p></div>
-        {% endfor %}
-      </div>
-      </div>
-    </details>
   </div>
 
   <aside class="detail-side">
-    <details class="panel sticky-panel feature-disclosure" data-disclosure-key="experiment-{{ experiment.id }}-overview" open>
-      <summary class="feature-summary"><div><p class="eyebrow">OVERVIEW</p><h2>实验信息</h2></div><span class="feature-summary-meta"><span class="count-label">{{ experiment.status }}</span><i data-lucide="chevron-down"></i></span></summary>
+    <details class="panel sticky-panel feature-disclosure" data-experiment-panel="overview" data-disclosure-key="experiment-{{ experiment.id }}-overview" open>
+      <summary class="feature-summary"><div><p class="eyebrow">OVERVIEW</p><h2>计划信息</h2></div><span class="feature-summary-meta"><span class="count-label">{{ experiment.status }}</span><i data-lucide="chevron-down"></i></span></summary>
       <div class="feature-body">
       <form method="post" class="stack-form compact-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <label>实验名称<input name="title" value="{{ experiment.title }}" required></label>
-        <label>实验编号<input name="code" value="{{ experiment.code }}"></label>
-        <label>实验批次<input name="batch_code" value="{{ experiment.batch_code or '' }}" placeholder="BATCH-01"></label>
-        <div class="form-grid"><label>重复类型<select name="repeat_kind">{% for kind in repeat_kinds %}<option {{ 'selected' if experiment.repeat_kind == kind }}>{{ kind }}</option>{% endfor %}</select></label><label>重复序号<input type="number" name="repeat_number" min="1" value="{{ experiment.repeat_number }}"></label></div>
-        <label>实验分组<input name="group_name" value="{{ experiment.group_name or '' }}" placeholder="对照组 / 处理组"></label>
+        <label>所属项目<select name="project_id">{% for project in projects %}<option value="{{ project.id }}" {{ 'selected' if experiment.project_id == project.id }}>{{ project.code or '未编号' }} · {{ project.title }}</option>{% endfor %}</select></label>
+        <label>计划名称<input name="title" value="{{ experiment.title }}" required></label>
+        <label>计划编号<input name="code" value="{{ experiment.code }}"></label>
         <label>负责人<input name="owner" value="{{ experiment.owner }}"></label>
         <label>状态<select name="status">{% for v in ['未开始','进行中','完成','暂停'] %}<option {{ 'selected' if experiment.status == v }}>{{ v }}</option>{% endfor %}</select></label>
         <div class="form-grid"><label>开始<input type="date" name="start_date" value="{{ experiment.start_date or '' }}"></label><label>结束<input type="date" name="end_date" value="{{ experiment.end_date or '' }}"></label></div>
-        <label>实验目的<textarea name="objective" rows="6">{{ experiment.objective }}</textarea></label>
+        <label>计划目的<textarea name="objective" rows="6">{{ experiment.objective }}</textarea></label>
         <button class="btn secondary full"><i data-lucide="save"></i> 保存信息</button>
       </form>
       <hr>
-      <form method="post" action="{{ url_for('main.experiment_delete', item_id=experiment.id) }}" data-confirm="这会同时删除所有步骤和记录，确定继续？">
+      <form method="post" action="{{ url_for('main.experiment_delete', item_id=experiment.id) }}" data-confirm="将实验计划及其所有实验执行、过程记录移入回收站？文件不会被删除。">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button class="text-danger"><i data-lucide="trash-2"></i> 删除整个实验</button>
+        <button class="text-danger"><i data-lucide="trash-2"></i> 移入回收站</button>
       </form>
       </div>
     </details>

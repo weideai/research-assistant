@@ -4,7 +4,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
-$PythonPath = (Resolve-Path (Join-Path $ProjectRoot $Python)).Path
+$ProjectPython = Join-Path $ProjectRoot $Python
+if (Test-Path -LiteralPath $ProjectPython) {
+    $PythonPath = (Resolve-Path -LiteralPath $ProjectPython).Path
+} else {
+    $PythonPath = (Get-Command $Python -ErrorAction Stop).Source
+}
 $BuildRoot = Join-Path $ProjectRoot "build\windows"
 $DistRoot = Join-Path $ProjectRoot "dist\windows"
 $AppDist = Join-Path $DistRoot "app"
@@ -42,8 +47,14 @@ try {
         "--hidden-import", "app.commands",
         "--hidden-import", "app.export_service",
         "--hidden-import", "app.main",
+        "--hidden-import", "app.migration_service",
         "--hidden-import", "app.models",
         "--hidden-import", "app.presentation_service",
+        "--hidden-import", "app.project_package",
+        "--hidden-import", "app.update_service",
+        "--hidden-import", "app.version",
+        "--hidden-import", "app.workspace",
+        "--hidden-import", "version_info",
         "--hidden-import", "logging.config",
         $DesktopLauncher
     )
@@ -57,6 +68,8 @@ try {
         "--workpath", (Join-Path $BuildRoot "installer"),
         "--specpath", (Join-Path $BuildRoot "spec"),
         "--add-data", "$AppBundle;payload\ResearchAssistant",
+        "--paths", $ProjectRoot,
+        "--hidden-import", "version_info",
         $InstallerSource
     )
     & $PythonPath -m PyInstaller @installerArgs

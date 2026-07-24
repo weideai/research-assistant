@@ -6,7 +6,12 @@ const { Presentation, PresentationFile } = await import(process.env.ARTIFACT_TOO
 const report = JSON.parse(await fs.readFile(inputPath, "utf8"));
 const deck = Presentation.create({ slideSize: { width: 1280, height: 720 } });
 
-const C = { ink: "#111827", muted: "#64748B", line: "#D8DEE7", soft: "#F4F7FA", blue: "#2563EB", cyan: "#0891B2", green: "#059669", amber: "#D97706", red: "#DC2626", white: "#FFFFFF" };
+const palettes = {
+  evidence: { ink: "#111827", muted: "#64748B", line: "#D8DEE7", soft: "#F4F7FA", blue: "#2563EB", cyan: "#0891B2", green: "#059669", amber: "#D97706", red: "#DC2626", white: "#FFFFFF" },
+  review: { ink: "#1F2933", muted: "#66737D", line: "#DDD7CF", soft: "#F8F5F0", blue: "#0F766E", cyan: "#0891B2", green: "#15803D", amber: "#C56A16", red: "#C2413B", white: "#FFFFFF" },
+  paper: { ink: "#111111", muted: "#666666", line: "#D2D2D2", soft: "#F5F5F5", blue: "#1D4ED8", cyan: "#555555", green: "#08775B", amber: "#8A5B08", red: "#B4232A", white: "#FFFFFF" },
+};
+const C = palettes[report.skill?.theme] || palettes.evidence;
 const FONT = "Microsoft YaHei";
 const safe = (value, fallback = "-") => String(value ?? "").trim() || fallback;
 const clamp = (value, max) => safe(value).length > max ? `${safe(value).slice(0, max - 1)}…` : safe(value);
@@ -46,7 +51,7 @@ function metric(slide, label, value, left, top, accent) {
   const slide = deck.slides.add();
   slide.background.fill = C.white;
   box(slide, 0, 0, 18, 720, C.blue, C.blue);
-  text(slide, "R/LAB · WEEKLY REVIEW", 64, 62, 420, 26, 14, C.blue, true);
+  text(slide, `R/LAB · ${safe(report.skill?.name, "RESEARCH REPORT").toUpperCase()}`, 64, 62, 720, 26, 14, C.blue, true);
   text(slide, report.title, 64, 148, 820, 164, 52, C.ink, true);
   text(slide, `${report.period.start} - ${report.period.end}`, 66, 335, 420, 34, 22, C.muted);
   box(slide, 64, 438, 1110, 1, C.line, C.line);

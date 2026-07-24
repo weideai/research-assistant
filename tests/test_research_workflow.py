@@ -4,24 +4,41 @@ import zipfile
 
 from app import create_app, db
 from app.models import (
-    Experiment, ExperimentAttachment, ExperimentParameter, ExperimentSample,
+    Experiment, ExperimentAttachment, ExperimentBatch, ExperimentParameter, ExperimentSample,
     ExperimentTemplate, ExperimentTemplateParameter, RecordParameter,
     RecordTemplate, RecordTemplateParameter, Sample, User,
 )
+
+
+def _start_execution(client, app, experiment_id, batch_code="BATCH-01"):
+    response = client.post(f"/experiments/{experiment_id}/batches", data={
+        "batch_code": batch_code,
+    })
+    assert response.status_code == 302
+    with app.app_context():
+        return ExperimentBatch.query.filter_by(
+            experiment_id=experiment_id, batch_code=batch_code,
+        ).one().id
 
 
 def test_step_template_only_reuses_experiment_steps(client, auth, app):
     auth.register()
     client.post("/samples", data={"sample_code": "S-001", "sample_type": "细胞", "status": "可用"})
     client.post("/experiments", data={
-        "title": "WB 模板来源", "code": "EXP-001", "batch_code": "B-01",
-        "repeat_kind": "生物学重复", "repeat_number": "2", "group_name": "处理组",
+        "title": "WB 模板来源", "code": "EXP-001",
         "owner": "研究员", "status": "进行中", "start_date": "2026-07-21",
     })
     with app.app_context():
         experiment = Experiment.query.one()
         sample = Sample.query.one()
         experiment_id, sample_id = experiment.id, sample.id
+        assert experiment.batches == []
+
+    response = client.post(f"/experiments/{experiment_id}/batches", data={
+        "batch_code": "B-01", "repeat_kind": "生物学重复",
+        "repeat_number": "2", "group_name": "处理组", "start_date": "2026-07-21",
+    })
+    assert response.status_code == 302
 
     client.post(f"/experiments/{experiment_id}/steps", data={
         "title": "加药", "description": "处理 24h", "planned_date": "2026-07-22",
@@ -44,10 +61,11 @@ def test_step_template_only_reuses_experiment_steps(client, auth, app):
 
     with app.app_context():
         item = db.session.get(Experiment, experiment_id)
-        assert item.batch_code == "B-01"
-        assert item.repeat_kind == "生物学重复"
-        assert item.repeat_number == 2
-        assert item.group_name == "处理组"
+        batch = ExperimentBatch.query.filter_by(experiment_id=experiment_id).one()
+        assert batch.batch_code == "B-01"
+        assert batch.repeat_kind == "生物学重复"
+        assert batch.repeat_number == 2
+        assert batch.group_name == "处理组"
         assert ExperimentParameter.query.count() == 2
         assert ExperimentSample.query.one().sample.sample_code == "S-001"
         template = ExperimentTemplate.query.one()
@@ -83,8 +101,10 @@ def test_record_template_saves_views_and_prefills_new_record(client, auth, app):
     client.post("/experiments", data={"title": "记录模板来源", "code": "REC-TPL-01"})
     with app.app_context():
         experiment_id = Experiment.query.one().id
+    batch_id = _start_execution(client, app, experiment_id)
 
-    client.post(f"/experiments/{experiment_id}/records", data={
+    client.post(f"/batches/{batch_id}/records", data={
+        "batch_id": batch_id,
         "record_date": "2026-07-21", "operator": "研究员", "result": "成功",
         "conditions": "药物浓度 5 μM", "content": "孵育 24 小时后完成检测",
         "remark": "下次降低细胞密度",
@@ -118,14 +138,12 @@ def test_record_template_saves_views_and_prefills_new_record(client, auth, app):
     assert "药物浓度 5 μM".encode() in detail.data
     assert "药物浓度".encode() in detail.data
 
-    use_response = client.get(
-        f"/record-templates/{template_id}/use?experiment_id={experiment_id}",
-        follow_redirects=True,
-    )
+    use_response = client.get(f"/batches/{batch_id}?record_template_id={template_id}")
     assert use_response.status_code == 200
     assert "已填入记录模板".encode() in use_response.data
     assert 'value="5"'.encode() in use_response.data
     assert "孵育 24 小时后完成检测".encode() in use_response.data
+    assert f'name="batch_id" value="{batch_id}"'.encode() in use_response.data
 
 
 def test_weekly_presentation_download_uses_selected_experiments(client, auth, app, monkeypatch):
@@ -133,7 +151,9 @@ def test_weekly_presentation_download_uses_selected_experiments(client, auth, ap
     client.post("/experiments", data={"title": "周报实验", "code": "WEEK-01"})
     with app.app_context():
         experiment_id = Experiment.query.one().id
-    client.post(f"/experiments/{experiment_id}/records", data={
+    batch_id = _start_execution(client, app, experiment_id)
+    client.post(f"/batches/{batch_id}/records", data={
+        "batch_id": batch_id,
         "record_date": "2026-07-21", "content": "完成检测", "result": "成功",
     })
     captured = {}
@@ -159,7 +179,9 @@ def test_record_parameters_attachment_metadata_and_archive(client, auth, app):
     client.post("/experiments", data={"title": "归档实验", "code": "ARCH-01"})
     with app.app_context():
         experiment_id = Experiment.query.one().id
-    response = client.post(f"/experiments/{experiment_id}/records", data={
+    batch_id = _start_execution(client, app, experiment_id)
+    response = client.post(f"/batches/{batch_id}/records", data={
+        "batch_id": batch_id,
         "record_date": "2026-07-21", "operator": "研究员", "content": "完成检测。",
         "record_parameter_name": ["浓度"], "record_parameter_value": ["5"],
         "record_parameter_unit": ["μM"], "record_parameter_notes": ["终浓度"],
@@ -198,7 +220,9 @@ def test_legacy_attachment_gets_hash_baseline(client, auth, app):
     client.post("/experiments", data={"title": "旧附件实验"})
     with app.app_context():
         experiment_id = Experiment.query.one().id
-    client.post(f"/experiments/{experiment_id}/records", data={
+    batch_id = _start_execution(client, app, experiment_id)
+    client.post(f"/batches/{batch_id}/records", data={
+        "batch_id": batch_id,
         "content": "旧记录", "files": (io.BytesIO(b"legacy"), "legacy.bin"),
     }, content_type="multipart/form-data")
     with app.app_context():

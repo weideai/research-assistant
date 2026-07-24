@@ -3,7 +3,7 @@
 {% block content %}
 <header class="page-head">
   <div><p class="eyebrow">STEP TEMPLATE</p><h1>{{ template.name }}</h1><p class="muted">独立管理实验步骤、说明和相对计划日期。</p></div>
-  <a class="btn ghost" href="{{ url_for('main.experiments') }}"><i data-lucide="arrow-left"></i> 返回实验</a>
+  <div class="page-head-actions"><a class="btn ghost" href="{{ url_for('main.template_center', kind='steps') }}"><i data-lucide="arrow-left"></i> 返回模板中心</a><form method="post" action="{{ url_for('main.experiment_template_duplicate', item_id=template.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn secondary"><i data-lucide="copy"></i> 复制模板</button></form></div>
 </header>
 <div class="template-detail-layout">
   <main class="detail-main">
@@ -26,17 +26,17 @@
         <button class="btn secondary"><i data-lucide="plus"></i> 添加步骤</button>
       </form>
       <div class="template-step-list">
-        {% for step in template.steps %}<div class="template-step-row"><span class="step-number">{{ '%02d'|format(loop.index) }}</span><span><b>{{ step.title }}</b><small>{{ step.description or '未填写说明' }} · 开始后第 {{ step.planned_offset_days }} 天</small></span><form method="post" action="{{ url_for('main.experiment_template_step_delete', item_id=step.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-btn danger" title="删除步骤"><i data-lucide="trash-2"></i></button></form></div>{% else %}<div class="empty compact-empty"><p>还没有模板步骤</p></div>{% endfor %}
+        {% for step in template.steps %}<div class="template-step-row"><span class="step-number">{{ '%02d'|format(loop.index) }}</span><span><b>{{ step.title }}</b><small>{{ step.description or '未填写说明' }} · 开始后第 {{ step.planned_offset_days }} 天</small></span><details class="template-step-edit"><summary class="icon-btn" title="编辑步骤"><i data-lucide="pencil"></i></summary><form method="post" action="{{ url_for('main.experiment_template_step_edit', item_id=step.id) }}" class="template-step-edit-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>标题<input name="title" value="{{ step.title }}" required></label><label>开始后第几天<input type="number" name="planned_offset_days" min="0" value="{{ step.planned_offset_days }}"></label><label>说明<textarea name="description" rows="2">{{ step.description or '' }}</textarea></label><button class="btn secondary"><i data-lucide="save"></i> 保存步骤</button></form></details><form method="post" action="{{ url_for('main.experiment_template_step_delete', item_id=step.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-btn danger" title="删除步骤"><i data-lucide="trash-2"></i></button></form></div>{% else %}<div class="empty compact-empty"><p>还没有模板步骤</p></div>{% endfor %}
       </div>
     </section>
   </main>
   <aside class="detail-side">
     <section class="panel template-apply-panel">
       <div class="panel-head"><div><p class="eyebrow">USE TEMPLATE</p><h2>调用步骤模板</h2></div></div>
-      <form method="post" action="{{ url_for('main.experiment_template_apply', item_id=template.id) }}" class="stack-form compact-form">
+      <form method="post" action="{{ url_for('main.experiment_template_apply', item_id=template.id) }}" class="stack-form compact-form" data-template-apply-form>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <label>目标实验<select name="experiment_id" required><option value="">请选择实验</option>{% for experiment in experiments %}<option value="{{ experiment.id }}">{{ experiment.title }} · {{ experiment.status }}</option>{% endfor %}</select></label>
-        <label>调用方式<select name="apply_mode"><option value="append">追加到现有步骤</option><option value="replace">替换现有步骤</option></select></label>
+        <label>调用方式<select name="apply_mode"><option value="append">追加到现有步骤</option><option value="replace">替换现有步骤（会删除当前步骤）</option></select></label>
         <p class="muted small-text">只处理实验步骤，不会修改实验信息、参数、样本或记录。</p>
         <button class="btn primary full"><i data-lucide="list-plus"></i> 调用此模板</button>
       </form>

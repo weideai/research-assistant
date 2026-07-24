@@ -1,18 +1,29 @@
 {% extends "base.html" %}
-{% block title %}实验记录 · {{ record.experiment.title }}{% endblock %}
+{% block title %}过程记录 · {{ record.experiment.title }}{% endblock %}
 {% block content %}
 <header class="page-head">
   <div>
-    <a class="back-link" href="{{ url_for('main.experiment_detail', item_id=record.experiment_id) }}"><i data-lucide="arrow-left"></i> {{ record.experiment.title }}</a>
-    <h1>{{ record.record_date }} 实验记录</h1>
-    <p class="muted">创建于 {{ record.created_at.strftime('%Y-%m-%d %H:%M') }} · 更新于 {{ record.updated_at.strftime('%Y-%m-%d %H:%M') }}</p>
+    <div class="breadcrumb">
+      {% if record.experiment.project %}<a href="{{ url_for('workspace.project_detail', item_id=record.experiment.project.id) }}">{{ record.experiment.project.title }}</a><i data-lucide="chevron-right"></i>{% endif %}
+      <a href="{{ url_for('main.experiment_detail', item_id=record.experiment_id) }}#batches">{{ record.experiment.title }}</a><i data-lucide="chevron-right"></i>
+      {% if record.batch %}<a href="{{ url_for('workspace.batch_detail', item_id=record.batch.id) }}#batch-records">{{ record.batch.batch_code or '未编号执行' }}</a><i data-lucide="chevron-right"></i>{% endif %}<span>{{ record.record_date }}</span>
+    </div>
+    <a class="back-link" href="{{ url_for('workspace.batch_detail', item_id=record.batch.id) if record.batch else url_for('main.experiment_detail', item_id=record.experiment_id) }}"><i data-lucide="arrow-left"></i> {{ ('返回 ' ~ (record.batch.batch_code or '实验执行')) if record.batch else ('返回 ' ~ record.experiment.title) }}</a>
+    <h1>{{ record.record_date }} 过程记录</h1>
+    <p class="muted">{{ record.batch.batch_code if record.batch else '历史未归档' }} · 创建于 {{ record.created_at.strftime('%Y-%m-%d %H:%M') }} · 更新于 {{ record.updated_at.strftime('%Y-%m-%d %H:%M') }}</p>
   </div>
-  <div class="page-head-actions"><a class="btn primary" href="#record-template-tools"><i data-lucide="copy-plus"></i> 保存为记录模板</a><span class="badge large result-{{ record.result }}">{{ record.result }}</span></div>
+  <div class="page-head-actions"><a class="btn primary" href="#record-edit" data-record-tab-link="edit"><i data-lucide="pencil"></i> 编辑记录</a><span class="badge large lifecycle-{{ record.lifecycle_status }}">{{ record.lifecycle_status }}</span><span class="badge large result-{{ record.result }}">{{ record.result }}</span></div>
 </header>
-<div class="detail-layout record-detail-layout">
+<nav class="record-workspace-tabs" data-record-tabs aria-label="记录工作区">
+  <a href="#record-view" data-record-tab="view"><i data-lucide="book-open"></i><span><b>阅读</b><small>查看已记录内容</small></span></a>
+  <a href="#record-files" data-record-tab="files"><i data-lucide="folder-open"></i><span><b>文件与数据</b><small>{{ record.attachments|rejectattr('is_deleted')|list|length }} 个文件</small></span></a>
+  <a href="#record-edit" data-record-tab="edit"><i data-lucide="square-pen"></i><span><b>编辑</b><small>修改记录内容</small></span></a>
+  <a href="#record-history" data-record-tab="history"><i data-lucide="history"></i><span><b>模板与修订</b><small>{{ record.revisions|length }} 次修订</small></span></a>
+</nav>
+<div class="detail-layout record-detail-layout record-tabbed-layout" data-active-record-tab="view" data-record-workspace>
   <div class="detail-main">
-    <section class="panel record-sheet">
-      <div class="panel-head"><div><p class="eyebrow">RECORD</p><h2>记录内容</h2></div></div>
+    <section class="panel record-sheet" id="record-view" data-record-panel="view">
+      <div class="panel-head"><div><p class="eyebrow">RECORD</p><h2>记录内容</h2></div>{% if record.lifecycle_status == '草稿' %}<form method="post" action="{{ url_for('main.record_finalize', record_id=record.id) }}" data-confirm="定稿后每次修改都必须填写原因并保留修订历史。确认定稿？"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn secondary"><i data-lucide="badge-check"></i> 定稿</button></form>{% else %}<span class="record-finalized-note"><i data-lucide="lock-keyhole"></i>{{ record.finalized_at.strftime('%Y-%m-%d %H:%M') if record.finalized_at else '已锁定修订流程' }}</span>{% endif %}</div>
       <div class="record-view">
         <div class="record-facts"><span><small>实验人员</small><b>{{ record.operator or '未填写' }}</b></span><span><small>记录日期</small><b>{{ record.record_date }}</b></span><span><small>实验结果</small><b>{{ record.result }}</b></span></div>
         <div class="record-parameters-section">
@@ -34,11 +45,13 @@
       </div>
     </section>
 
-    <section class="panel attachment-panel">
+    <details class="panel feature-disclosure" id="record-history" data-record-panel="history" open><summary class="feature-summary"><div><p class="eyebrow">AUDIT TRAIL</p><h2>修订历史</h2></div><span class="feature-summary-meta"><span class="count-label">{{ record.revisions|length }} 次</span><i data-lucide="chevron-down"></i></span></summary><div class="feature-body revision-list">{% for revision in record.revisions %}<details><summary><span><b>修订 {{ record.revisions|length - loop.index0 }}</b><small>{{ revision.created_at.strftime('%Y-%m-%d %H:%M') }} · {{ revision.reason }}</small></span><i data-lucide="chevron-down"></i></summary><div class="revision-diff"><div><small>修改前</small><pre>{{ revision.before_json }}</pre></div><div><small>修改后</small><pre>{{ revision.after_json }}</pre></div></div></details>{% else %}<div class="empty compact-empty"><i data-lucide="history"></i><p>暂无修订记录</p><small>记录定稿后再次修改时，这里会保留修改原因和前后差异。</small></div>{% endfor %}</div></details>
+
+    <section class="panel attachment-panel" id="record-files" data-record-panel="files">
       <div class="panel-head">
         <div><p class="eyebrow">RESULTS & DATA</p><h2>实验结果与数据</h2></div>
         <div class="attachment-head-actions">
-          <span class="count-label">{{ record.attachments|length }} 个文件</span>
+          <span class="count-label">{{ record.attachments|rejectattr('is_deleted')|list|length }} 个文件</span>
           {% if config.ALLOW_OPEN_LOCAL_FOLDERS %}
           <form method="post" action="{{ url_for('main.attachment_open_folder', record_id=record.id) }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -64,6 +77,7 @@
         </div>
         <div class="attachment-upload-actions"><button class="btn primary"><i data-lucide="upload"></i> 导入所选内容</button></div>
       </form>
+      {% if config.ALLOW_OPEN_LOCAL_FOLDERS %}<details class="external-link-panel"><summary><span><i data-lucide="folder-symlink"></i><b>链接外部大文件或文件夹</b></span><small>不复制、不限大小</small></summary><form method="post" action="{{ url_for('main.attachment_external_link', record_id=record.id) }}" class="external-link-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label class="grow">本地完整路径<input name="external_path" placeholder="例如：D:\实验数据\WB\2026-07-23" required><small>可以是文件或文件夹；应用只保存路径索引，不移动或删除原始内容。</small></label><label>逻辑分类<select name="attachment_category"><option>自动分类</option>{% for category in attachment_categories %}<option>{{ category }}</option>{% endfor %}</select></label><label>记录内文件夹<input name="attachment_folder" placeholder="例如：原始数据 / 第三次重复"></label><button class="btn secondary"><i data-lucide="link-2"></i> 添加外部链接</button></form></details>{% endif %}
       <div class="attachment-storage-note"><i data-lucide="hard-drive"></i><span><b>本地原始文件，不加密、不限大小</b><small title="{{ attachment_storage_path }}">{{ attachment_storage_path }}</small></span></div>
       <form id="attachment-bulk-form" class="attachment-bulk-form" method="post" action="{{ url_for('main.attachment_bulk_update', record_id=record.id) }}" data-attachment-bulk>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -94,12 +108,12 @@
               <div class="attachment-meta">
                 <b>{{ attachment.original_name }}</b>
                 <small class="attachment-path">{{ attachment.relative_path }}</small>
-                <small>{{ attachment.size_label }} · {{ attachment.mime_type }} · v{{ attachment.version_number }}</small>
-                <small class="attachment-hash" title="{{ attachment.sha256 }}">SHA-256 {{ attachment.sha256[:12] if attachment.sha256 else '旧文件未计算' }}{% if attachment.sha256 %}…{% endif %}</small>
+                <small>{{ attachment.size_label }} · {{ attachment.mime_type }} · v{{ attachment.version_number }}{% if attachment.storage_mode == 'external' %} · <b class="external-mode">外部链接</b>{% endif %}</small>
+                {% if attachment.storage_mode == 'external' %}<small class="attachment-hash" title="{{ attachment.external_path }}">{{ attachment.external_path }} · {{ '可用' if attachment.link_status == 'available' else '路径丢失' }}</small>{% else %}<small class="attachment-hash" title="{{ attachment.sha256 }}">SHA-256 {{ attachment.sha256[:12] if attachment.sha256 else '旧文件未计算' }}{% if attachment.sha256 %}…{% endif %}</small>{% endif %}
                 {% if attachment.tags %}<small class="attachment-tags">{{ attachment.tags }}</small>{% endif %}
               </div>
               <div class="row-actions">
-                <a class="icon-btn" href="{{ url_for('main.attachment_download', item_id=attachment.id) }}" title="下载文件"><i data-lucide="download"></i></a>
+                {% if attachment.storage_mode == 'external' %}<form method="post" action="{{ url_for('main.attachment_open_external', item_id=attachment.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-btn" title="在资源管理器打开"><i data-lucide="external-link"></i></button></form>{% elif attachment.mime_type != 'inode/directory' %}<a class="icon-btn" href="{{ url_for('main.attachment_download', item_id=attachment.id) }}" title="下载文件"><i data-lucide="download"></i></a>{% endif %}
                 <form method="post" action="{{ url_for('main.attachment_verify', item_id=attachment.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-btn" title="校验文件完整性"><i data-lucide="shield-check"></i></button></form>
                 <form method="post" action="{{ url_for('main.attachment_delete', item_id=attachment.id) }}" data-confirm="确定删除这个文件？">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -120,7 +134,7 @@
   </div>
 
   <aside class="detail-side">
-    <details class="panel template-save-panel feature-disclosure" id="record-template-tools" data-disclosure-key="record-{{ record.id }}-template" open>
+    <details class="panel template-save-panel feature-disclosure" id="record-template-tools" data-record-panel="history" data-disclosure-key="record-{{ record.id }}-template" open>
       <summary class="feature-summary"><div><p class="eyebrow">REUSE</p><h2>记录模板</h2></div><span class="feature-summary-meta"><span class="template-ready-label">{{ record.parameters|length }} 个参数</span><i data-lucide="chevron-down"></i></span></summary>
       <div class="feature-body">
         <form method="post" action="{{ url_for('main.record_template_save', record_id=record.id) }}" class="stack-form compact-form">
@@ -133,17 +147,20 @@
         {% if record_templates %}<div class="saved-template-list"><small>已保存记录模板</small>{% for template in record_templates %}<a href="{{ url_for('main.record_template_detail', item_id=template.id) }}"><span><b>{{ template.name }}</b><small>{{ template.parameters|length }} 个参数</small></span><i data-lucide="arrow-right"></i></a>{% endfor %}</div>{% endif %}
       </div>
     </details>
-    <section class="panel sticky-panel record-edit-panel">
+    <section class="panel sticky-panel record-edit-panel" id="record-edit" data-record-panel="edit">
       <div class="panel-head"><div><p class="eyebrow">EDIT</p><h2>编辑记录</h2></div></div>
       <form method="post" class="stack-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <div class="form-grid"><label>日期<input type="date" name="record_date" value="{{ record.record_date }}"></label><label>实验人员<input name="operator" value="{{ record.operator }}"></label></div>
+        <div class="form-grid"><label>日期<input type="date" name="record_date" value="{{ record.record_date }}" {% if record.batch and record.batch.start_date %}min="{{ record.batch.start_date }}"{% endif %} {% if record.batch and record.batch.end_date %}max="{{ record.batch.end_date }}"{% endif %}><small>日期必须处于所属实验执行区间内</small></label><label>实验人员<input name="operator" value="{{ record.operator }}"></label></div>
         <label>结果<select name="result">{% for value in ['待确认','成功','失败'] %}<option {{ 'selected' if record.result == value }}>{{ value }}</option>{% endfor %}</select></label>
         <label>实验条件<textarea name="conditions" rows="4">{{ record.conditions or '' }}</textarea></label>
         <label>实验过程<textarea name="content" rows="8" required>{{ record.content }}</textarea></label>
         <label>结论与备注<textarea name="remark" rows="4">{{ record.remark or '' }}</textarea></label>
+        {% if record.lifecycle_status in ['已定稿', '修订'] %}<label class="revision-reason">修订原因<textarea name="revision_reason" rows="3" placeholder="说明为什么修改已定稿记录" required></textarea><small>系统会同时保存修改前后内容，不能静默覆盖。</small></label>{% endif %}
         <button class="btn primary full"><i data-lucide="save"></i> 保存修改</button>
       </form>
+      <hr>
+      {% if record.lifecycle_status == '草稿' %}<form method="post" action="{{ url_for('workspace.record_move_batch', item_id=record.id) }}" class="stack-form compact-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>所属实验执行<select name="batch_id">{% for batch in record.experiment.batches if not batch.is_deleted %}<option value="{{ batch.id }}" {{ 'selected' if record.batch_id == batch.id }}>{{ batch.batch_code or ('执行 ' ~ loop.index) }}</option>{% endfor %}</select></label><button class="btn ghost full"><i data-lucide="move-right"></i> 调整执行归属</button></form>{% else %}<div class="notice inline-notice"><i data-lucide="lock-keyhole"></i><span>记录定稿后执行归属锁定；如需更正，请在上方编辑并填写修订原因。</span></div>{% endif %}
     </section>
   </aside>
 </div>
