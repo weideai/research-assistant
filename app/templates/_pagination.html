@@ -1,0 +1,7 @@
+{% if pagination and pagination.pages > 1 %}
+<nav class="list-pagination" aria-label="{{ pagination_label|default('列表翻页') }}">
+  <a class="btn ghost {{ 'is-disabled' if not pagination.has_prev }}" href="{{ page_url(pagination.prev_num or 1, page_param|default('page')) }}" aria-disabled="{{ 'true' if not pagination.has_prev else 'false' }}"><i data-lucide="chevron-left"></i> 上一页</a>
+  <span><b>第 {{ pagination.page }} / {{ pagination.pages }} 页</b><small>共 {{ pagination.total }} {{ page_item_label|default('项') }}，本页 {{ pagination.items|length }} {{ page_item_label|default('项') }}</small></span>
+  <a class="btn ghost {{ 'is-disabled' if not pagination.has_next }}" href="{{ page_url(pagination.next_num or pagination.pages, page_param|default('page')) }}" aria-disabled="{{ 'true' if not pagination.has_next else 'false' }}">下一页 <i data-lucide="chevron-right"></i></a>
+</nav>
+{% endif %}

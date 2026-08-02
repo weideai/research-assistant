@@ -112,11 +112,13 @@ def test_security_headers_and_health_check(client):
     assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
     health = client.get("/healthz")
     assert health.status_code == 200
-    assert health.json == {"status": "ok"}
+    assert health.json["status"] == "ok"
+    assert health.json["pdf_export"] in {"ok", "font-missing"}
 
 
 def test_production_requires_explicit_distinct_keys(monkeypatch):
     monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("LOCAL_MODE", "0")
     monkeypatch.delenv("SECRET_KEY", raising=False)
     monkeypatch.delenv("CREDENTIAL_ENCRYPTION_KEY", raising=False)
 

@@ -96,7 +96,7 @@ def test_json_and_markdown_export_separate_plan_definitions_from_execution_statu
 
         markdown = build_markdown_export(experiment)
         assert "## 计划步骤定义" in markdown
-        assert "#### 执行步骤" in markdown
+        assert "#### 批次步骤" in markdown
         assert "执行快照 A" in markdown
         assert "已完成" in markdown
         assert "执行快照 B" in markdown
@@ -111,15 +111,15 @@ def test_word_excel_and_zip_exports_include_execution_scoped_steps(auth, app):
         with zipfile.ZipFile(io.BytesIO(build_docx_export(experiment))) as document:
             document_xml = document.read("word/document.xml").decode("utf-8")
         assert "计划步骤定义" in document_xml
-        assert "执行步骤" in document_xml
+        assert "批次步骤" in document_xml
         assert "执行快照 A" in document_xml
         assert "已完成" in document_xml
 
         workbook = load_workbook(io.BytesIO(build_xlsx_export(experiment)), read_only=True, data_only=True)
         try:
-            assert "执行步骤" in workbook.sheetnames
+            assert "批次步骤" in workbook.sheetnames
             plan_rows = list(workbook["实验步骤"].iter_rows(values_only=True))
-            execution_rows = list(workbook["执行步骤"].iter_rows(values_only=True))
+            execution_rows = list(workbook["批次步骤"].iter_rows(values_only=True))
         finally:
             workbook.close()
         assert plan_rows[0] == ("序号", "步骤", "计划执行人", "计划日期", "说明")

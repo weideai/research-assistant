@@ -4,7 +4,7 @@
 <div class="auth-layout">
   <section class="auth-intro">
     <a class="brand brand-light" href="#"><span class="brand-mark">R/</span><span><b>LAB</b><small>Research Assistant</small></span></a>
-    <div class="auth-copy"><p class="eyebrow">MEDICAL RESEARCH WORKSPACE</p><h1>从实验计划到论文返修，<br>让研究进度清晰可见。</h1><div class="signal-row"><span>实验</span><i></i><span>样本</span><i></i><span>记录</span><i></i><span>论文</span></div></div>
+    <div class="auth-copy"><p class="eyebrow">MEDICAL RESEARCH WORKSPACE</p><h1>从实验计划到原始资料，<br>让研究记录清晰可追溯。</h1><div class="signal-row"><span>实验</span><i></i><span>样本</span><i></i><span>记录</span><i></i><span>文件</span></div></div>
     <p class="auth-foot">PRIVATE · AUDITABLE · RESEARCH READY</p>
   </section>
   <section class="auth-panel">
@@ -15,7 +15,7 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% if token %}<input type="hidden" name="token" value="{{ token }}">{% endif %}
       <p class="eyebrow">{{ 'ACCEPT INVITATION' if invitation else ('GET STARTED' if mode == 'register' else 'WELCOME BACK') }}</p>
       <h2>{{ '创建科研工作台' if mode == 'register' else '登录科研工作台' }}</h2>
-      <p class="muted">{{ ('你将以“' ~ invitation.email ~ '”加入工作台。') if invitation else ('创建本地账户。' if mode == 'register' else '继续管理你的实验、样本与论文。') }}</p>
+      <p class="muted">{{ ('你将以“' ~ invitation.email ~ '”加入工作台。') if invitation else ('创建本地账户。' if mode == 'register' else '继续管理你的实验、样本与实验资料。') }}</p>
       {% if mode == 'register' %}<label>姓名<input name="name" autocomplete="name" required placeholder="你的姓名"></label>{% endif %}
       <label>邮箱<input type="email" name="email" autocomplete="email" required value="{{ invitation.email if invitation else '' }}" {{ 'readonly' if invitation }} placeholder="name@example.com"></label>
       <label>密码<input type="password" name="password" autocomplete="{{ 'new-password' if mode == 'register' else 'current-password' }}" minlength="12" required placeholder="至少 12 位，含大小写字母和数字"></label>
@@ -27,4 +27,3 @@
   </section>
 </div>
 {% endblock %}
-

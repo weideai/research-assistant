@@ -1,35 +1,52 @@
 {% extends 'base.html' %}
 {% block title %}科研项目{% endblock %}
 {% block content %}
-<div class="page-head workspace-page-head">
-  <div><p class="eyebrow">RESEARCH WORKSPACE</p><h1>科研项目</h1><p>从课题组织实验计划、实验执行、过程记录和结果证据。</p></div>
-  <a class="btn ghost" href="{{ url_for('workspace.recycle_bin') }}"><i data-lucide="trash-2"></i> 回收站</a>
-</div>
+<header class="page-head workspace-page-head">
+  <div><p class="eyebrow">RESEARCH WORKSPACE</p><h1>科研项目</h1><p>从课题组织实验计划、实验批次、过程记录和结果证据。</p></div>
+  <div class="page-head-actions">
+    <button class="btn secondary" type="button" data-dialog-open="project-import-dialog"><i data-lucide="package-open"></i> 导入项目包</button>
+    <button class="btn primary" type="button" data-dialog-open="project-create-dialog"><i data-lucide="folder-plus"></i> 新建项目</button>
+  </div>
+</header>
+
+<nav class="section-tabs" aria-label="实验台视图">
+  <a class="active" href="{{ url_for('workspace.projects') }}" aria-current="page"><i data-lucide="folder-kanban"></i><span><b>科研项目</b><small>{{ workspace_metrics.projects }} 个项目</small></span></a>
+  <a href="{{ url_for('main.experiments') }}"><i data-lucide="flask-conical"></i><span><b>全部计划</b><small>跨项目查看</small></span></a>
+</nav>
 
 <section class="workspace-overview">
-  <div class="workspace-overview-copy"><b>项目是科研工作的最高层级</b><span>实验计划描述“准备怎么做”，实验执行记录“这一次实际怎么做”，过程记录承载每次操作、观察和结果。</span></div>
-  <div class="workspace-overview-metrics"><span><b>{{ project_cards|length }}</b><small>项目</small></span><span><b>{{ project_cards|sum(attribute='experiments') }}</b><small>实验计划</small></span><span><b>{{ project_cards|sum(attribute='records') }}</b><small>过程记录</small></span></div>
+  <div class="workspace-overview-copy"><b>项目是科研工作的最高层级</b><span>实验计划描述“准备怎么做”，实验批次代表“实际做的一次”，过程记录承载每次操作、观察和结果。</span></div>
+  <div class="workspace-overview-metrics"><span><b>{{ workspace_metrics.projects }}</b><small>项目</small></span><span><b>{{ workspace_metrics.experiments }}</b><small>实验计划</small></span><span><b>{{ workspace_metrics.records }}</b><small>过程记录</small></span></div>
 </section>
 
-<details class="project-import-bar"><summary><span><i data-lucide="package-open"></i><b>导入完整项目包</b></span><small>.ralab · 自动校验清单与 SHA-256</small></summary><form method="post" action="{{ url_for('workspace.project_package_import') }}" enctype="multipart/form-data"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label><input type="file" name="project_package" accept=".ralab,.zip,application/zip" required><span>选择项目包</span></label><button class="btn secondary"><i data-lucide="upload"></i> 校验并导入</button><p>API 密钥不会包含在项目包中；外部大文件只导入路径索引。</p></form></details>
+<div class="file-center-toolbar list-index-toolbar">
+  <form method="get" class="file-center-filter">
+    <label class="file-center-search"><span>查找项目</span><input name="q" value="{{ search }}" placeholder="项目名称、编号或研究目标"></label>
+    <label><span>项目状态</span><select name="status"><option>全部</option>{% for value in statuses %}<option {{ 'selected' if selected_status == value }}>{{ value }}</option>{% endfor %}</select></label>
+    <label><span>每页数量</span><select name="per_page">{% for value in page_sizes %}<option value="{{ value }}" {{ 'selected' if page_size == value }}>{{ value }} 个</option>{% endfor %}</select></label>
+    <button class="btn primary"><i data-lucide="search"></i> 筛选</button>
+    {% if search or selected_status != '全部' %}<a class="btn ghost" href="{{ url_for('workspace.projects') }}"><i data-lucide="x"></i> 清除</a>{% endif %}
+  </form>
+  <span class="muted">找到 {{ pagination.total }} 个项目</span>
+</div>
 
-<div class="workspace-layout">
-  <section class="project-grid">
+<section class="project-grid project-grid-wide">
     {% for card in project_cards %}
     <a class="project-card" href="{{ url_for('workspace.project_detail', item_id=card.project.id) }}">
-      <div class="project-card-head"><span class="project-code">{{ card.project.code or 'PROJECT' }}</span><span class="status-dot status-{{ card.project.status }}">{{ card.project.status }}</span></div>
+      <div class="project-card-head"><span class="project-code">{{ card.project.code or 'PROJECT' }}</span><span class="status-dot" data-state="{{ card.project.status | state_tone }}">{{ card.project.status }}</span></div>
       <h2>{{ card.project.title }}</h2>
       <p>{{ card.project.objective or '尚未填写项目目标。' }}</p>
-      <div class="project-card-stats"><span><b>{{ card.experiments }}</b><small>计划</small></span><span><b>{{ card.batches }}</b><small>执行</small></span><span><b>{{ card.records }}</b><small>过程记录</small></span><span><b>{{ card.finalized }}</b><small>定稿</small></span></div>
+      <div class="project-card-stats"><span><b>{{ card.experiments }}</b><small>计划</small></span><span><b>{{ card.batches }}</b><small>批次</small></span><span><b>{{ card.records }}</b><small>过程记录</small></span><span><b>{{ card.finalized }}</b><small>定稿</small></span></div>
       <div class="project-card-foot"><span>{{ card.project.start_date or '未设开始日期' }}{% if card.project.end_date %} - {{ card.project.end_date }}{% endif %}</span><i data-lucide="arrow-up-right"></i></div>
     </a>
     {% else %}
-    <div class="empty project-empty"><i data-lucide="folder-kanban"></i><h2>从第一个科研项目开始</h2><p>把同一课题下的实验计划、每次实验执行和过程记录放在一起。</p></div>
+    <div class="empty project-empty"><i data-lucide="folder-kanban"></i><h2>从第一个科研项目开始</h2><p>把同一课题下的实验计划、实验批次和过程记录放在一起。</p><button class="btn primary" type="button" data-dialog-open="project-create-dialog"><i data-lucide="folder-plus"></i> 新建项目</button></div>
     {% endfor %}
-  </section>
+</section>
+{% set pagination_label = '科研项目翻页' %}{% set page_item_label = '个项目' %}{% include '_pagination.html' %}
 
-  <aside class="panel project-create-panel">
-    <div class="panel-head"><div><p class="eyebrow">NEW PROJECT</p><h2>新建项目</h2></div></div>
+<dialog class="workspace-dialog" id="project-create-dialog" data-workspace-dialog aria-labelledby="project-create-title">
+  <header class="workspace-dialog-head"><div><p class="eyebrow">NEW PROJECT</p><h2 id="project-create-title">新建科研项目</h2><p class="muted">创建课题容器，之后再添加实验计划、实验批次与过程记录。</p></div><button class="icon-btn" type="button" data-dialog-close aria-label="关闭新建项目"><i data-lucide="x"></i></button></header>
     <form method="post" class="stack-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label>项目名称<input name="title" maxlength="180" placeholder="例如：耐药机制与联合治疗研究" required></label>
@@ -39,6 +56,15 @@
       <div class="form-grid"><label>开始日期<input type="date" name="start_date" value="{{ today }}"></label><label>预计结束<input type="date" name="end_date"></label></div>
       <button class="btn primary full"><i data-lucide="folder-plus"></i> 创建科研项目</button>
     </form>
-  </aside>
-</div>
+  </dialog>
+
+<dialog class="workspace-dialog" id="project-import-dialog" data-workspace-dialog aria-labelledby="project-import-title">
+  <header class="workspace-dialog-head"><div><p class="eyebrow">IMPORT PROJECT</p><h2 id="project-import-title">导入完整项目包</h2><p class="muted">支持 .ralab 或 ZIP，并在写入前校验清单与 SHA-256。</p></div><button class="icon-btn" type="button" data-dialog-close aria-label="关闭导入项目"><i data-lucide="x"></i></button></header>
+  <form method="post" action="{{ url_for('workspace.project_package_import') }}" enctype="multipart/form-data" class="stack-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>项目包<input type="file" name="project_package" accept=".ralab,.zip,application/zip" required></label>
+    <p class="form-hint"><i data-lucide="shield-check"></i> API 密钥不会包含在项目包中；外部大文件只导入路径索引。</p>
+    <div class="form-actions"><button class="btn primary"><i data-lucide="upload"></i> 校验并导入</button></div>
+  </form>
+</dialog>
 {% endblock %}

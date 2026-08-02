@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}文件中心{% endblock %}
+{% block content %}
+<header class="page-head file-center-head">
+  <div><p class="eyebrow">RESEARCH EVIDENCE</p><h1>报告与文件</h1><p class="muted">集中检索、整理和下载实验原始数据、结果图片与分析文件。</p></div>
+  <div class="page-head-actions"><a class="btn ghost" href="{{ url_for('main.experiments') }}"><i data-lucide="flask-conical"></i> 实验台</a></div>
+</header>
+
+<nav class="section-tabs" aria-label="报告与文件视图">
+  <a href="{{ url_for('main.experiment_report_index', project_id=selected_project_id, experiment_id=selected_experiment_id, batch_id=selected_batch_id) }}"><i data-lucide="notebook-tabs"></i><span><b>实验报告</b><small>结论与阅读</small></span></a>
+  <a class="active" href="{{ url_for('main.file_center', q=search, category=selected_category, per_page=page_size, project_id=selected_project_id, experiment_id=selected_experiment_id, batch_id=selected_batch_id) }}" aria-current="page"><i data-lucide="folder-open"></i><span><b>文件中心</b><small>{{ pagination.total }} 个文件</small></span></a>
+</nav>
+
+<div class="evidence-browser">
+  {% include '_evidence_directory.html' %}
+  <div class="evidence-browser-content">
+<section class="file-center-toolbar">
+  <form method="get" class="file-center-filter">
+    {% if selected_project_id %}<input type="hidden" name="project_id" value="{{ selected_project_id }}">{% endif %}
+    {% if selected_experiment_id %}<input type="hidden" name="experiment_id" value="{{ selected_experiment_id }}">{% endif %}
+    {% if selected_batch_id %}<input type="hidden" name="batch_id" value="{{ selected_batch_id }}">{% endif %}
+    <label class="file-center-search"><i data-lucide="search"></i><input name="q" value="{{ search }}" placeholder="文件名、路径、实验或标签" aria-label="搜索文件"></label>
+    <select name="category" aria-label="文件分类"><option>全部</option>{% for value in categories %}<option value="{{ value }}" {{ 'selected' if selected_category == value }}>{{ value }}</option>{% endfor %}</select>
+    <select name="per_page" aria-label="每页文件数量">{% for value in page_sizes %}<option value="{{ value }}" {{ 'selected' if page_size == value }}>每页 {{ value }} 个</option>{% endfor %}</select>
+    <button class="btn primary"><i data-lucide="search"></i> 搜索</button>
+  </form>
+</section>
+
+<form method="post" action="{{ url_for('main.file_center_bulk_download') }}" class="panel file-center-panel" data-attachment-bulk data-total="{{ pagination.total }}" id="file-center-bulk">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="index_view" value="file_center">
+  {% if selected_project_id %}<input type="hidden" name="project_id" value="{{ selected_project_id }}">{% endif %}
+  {% if selected_experiment_id %}<input type="hidden" name="experiment_id" value="{{ selected_experiment_id }}">{% endif %}
+  {% if selected_batch_id %}<input type="hidden" name="batch_id" value="{{ selected_batch_id }}">{% endif %}
+  <input type="hidden" name="q" value="{{ search }}">
+  <input type="hidden" name="category" value="{{ selected_category }}">
+  <input type="hidden" name="page" value="{{ pagination.page }}">
+  <input type="hidden" name="per_page" value="{{ page_size }}">
+  <input type="hidden" name="selection_scope" value="page" data-attachment-selection-scope>
+  <div class="panel-head file-center-panel-head">
+    <div><p class="eyebrow">LOCAL EVIDENCE INDEX</p><h2>实验资料</h2><span class="muted">{{ pagination.total }} 个匹配文件 · 当前第 {{ pagination.page }} / {{ pagination.pages or 1 }} 页</span></div>
+    <div class="file-center-bulk-actions">
+      <label class="select-all-control"><input type="checkbox" data-attachment-select-page><span>全选本页</span></label>
+      <button class="btn ghost select-all-matches" type="button" data-attachment-select-all-matches {{ 'disabled' if not pagination.total }}><i data-lucide="list-checks"></i> 全选全部 {{ pagination.total }} 个匹配文件</button>
+      <span class="bulk-selection-count" data-attachment-selected>已选择本页 0 个</span>
+      <button class="btn secondary" name="action" value="download" type="submit"><i data-lucide="download"></i> 批量下载</button>
+      <button class="btn danger" name="action" value="delete" type="submit"><i data-lucide="trash-2"></i> 批量删除</button>
+    </div>
+  </div>
+
+  <details class="file-bulk-editor">
+    <summary><i data-lucide="square-pen"></i> 批量编辑所选文件</summary>
+    <div class="file-bulk-editor-fields">
+      <label>文件分类<select name="bulk_category"><option value="__keep__">保持不变</option>{% for value in categories %}<option value="{{ value }}">{{ value }}</option>{% endfor %}</select></label>
+      <label>标签处理<select name="tags_mode"><option value="keep">保持不变</option><option value="append">追加标签</option><option value="replace">替换标签</option></select></label>
+      <label>标签<input name="bulk_tags" maxlength="255" placeholder="例如：原始、需复核"></label>
+      <label>说明处理<select name="description_mode"><option value="keep">保持不变</option><option value="append">追加说明</option><option value="replace">替换说明</option></select></label>
+      <label class="grow">说明<input name="bulk_description" maxlength="10000" placeholder="批量补充文件说明"></label>
+      <button class="btn primary" name="action" value="update" type="submit"><i data-lucide="save"></i> 保存批量修改</button>
+    </div>
+  </details>
+
+  <div class="file-center-list">
+    {% for attachment in attachments %}
+    <article class="file-center-row">
+      <label class="file-center-check"><input type="checkbox" name="attachment_ids" value="{{ attachment.id }}" data-attachment-select form="file-center-bulk" aria-label="选择 {{ attachment.original_name }}"><span></span></label>
+      <span class="file-center-icon"><i data-lucide="{{ 'image' if attachment.is_previewable_image else ('table-2' if attachment.category == '数据' else 'file') }}"></i></span>
+      <div class="file-index-main"><div class="file-index-title"><b>{{ attachment.original_name }}</b><span class="badge">{{ attachment.category }}</span></div><small>{{ attachment.experiment.title }} · {{ attachment.relative_path }}</small><small>{{ attachment.size_label }} · v{{ attachment.version_number }} · 最近修改 <span class="edited-at" title="最后编辑 {{ attachment.updated_at|edited_at_title }}">{{ attachment.updated_at|edited_at }}</span></small>{% if attachment.tags %}<p>标签：{{ attachment.tags }}</p>{% endif %}</div>
+      <div class="file-center-row-actions">{% if attachment.is_previewable_image %}<a class="icon-btn" href="{{ url_for('main.attachment_preview', item_id=attachment.id) }}" target="_blank" title="预览" aria-label="预览"><i data-lucide="eye"></i></a>{% endif %}<a class="icon-btn" href="{{ url_for('main.attachment_download', item_id=attachment.id) }}" title="下载" aria-label="下载"><i data-lucide="download"></i></a><a class="icon-btn" href="{{ url_for('main.experiment_files', item_id=attachment.experiment_id, record_id=attachment.record_id) }}" title="打开所在实验文件夹" aria-label="打开所在实验文件夹"><i data-lucide="folder-open"></i></a></div>
+    </article>
+    {% else %}
+    <div class="empty file-center-empty"><i data-lucide="folder-search"></i><h3>没有匹配的文件</h3><p>从实验记录上传原始数据或结果图片后，它们会自动汇总到这里。</p></div>
+    {% endfor %}
+  </div>
+
+  {% if pagination.pages > 1 %}
+  <nav class="list-pagination" aria-label="文件列表翻页">
+    <a class="btn ghost {{ 'is-disabled' if not pagination.has_prev }}" href="{{ url_for('main.file_center', q=search, category=selected_category, per_page=page_size, page=pagination.prev_num or 1, project_id=selected_project_id, experiment_id=selected_experiment_id, batch_id=selected_batch_id) }}" aria-disabled="{{ 'true' if not pagination.has_prev else 'false' }}"><i data-lucide="chevron-left"></i> 上一页</a>
+    <span><b>第 {{ pagination.page }} / {{ pagination.pages }} 页</b><small>共 {{ pagination.total }} 个文件，本页 {{ attachments|length }} 个</small></span>
+    <a class="btn ghost {{ 'is-disabled' if not pagination.has_next }}" href="{{ url_for('main.file_center', q=search, category=selected_category, per_page=page_size, page=pagination.next_num or pagination.pages, project_id=selected_project_id, experiment_id=selected_experiment_id, batch_id=selected_batch_id) }}" aria-disabled="{{ 'true' if not pagination.has_next else 'false' }}">下一页 <i data-lucide="chevron-right"></i></a>
+  </nav>
+  {% endif %}
+</form>
+  </div>
+</div>
+{% endblock %}

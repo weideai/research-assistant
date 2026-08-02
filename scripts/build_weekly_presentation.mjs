@@ -9,7 +9,6 @@ const deck = Presentation.create({ slideSize: { width: 1280, height: 720 } });
 const palettes = {
   evidence: { ink: "#111827", muted: "#64748B", line: "#D8DEE7", soft: "#F4F7FA", blue: "#2563EB", cyan: "#0891B2", green: "#059669", amber: "#D97706", red: "#DC2626", white: "#FFFFFF" },
   review: { ink: "#1F2933", muted: "#66737D", line: "#DDD7CF", soft: "#F8F5F0", blue: "#0F766E", cyan: "#0891B2", green: "#15803D", amber: "#C56A16", red: "#C2413B", white: "#FFFFFF" },
-  paper: { ink: "#111111", muted: "#666666", line: "#D2D2D2", soft: "#F5F5F5", blue: "#1D4ED8", cyan: "#555555", green: "#08775B", amber: "#8A5B08", red: "#B4232A", white: "#FFFFFF" },
 };
 const C = palettes[report.skill?.theme] || palettes.evidence;
 const FONT = "Microsoft YaHei";

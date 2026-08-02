@@ -1,0 +1,9 @@
+  22|details |panel feature-disclosure                |h2=本次执行步骤|eb=EXECUTION STEPS
+  28|details |resource-bulk-panel                     |h2=-|eb=-
+  65|details |panel feature-disclosure                |h2=添加过程记录|eb=NEW TIMELINE ENTRY
+ 111|details |panel feature-disclosure                |h2=过程记录时间线|eb=TIMELINE
+ 116|details |resource-bulk-panel                     |h2=-|eb=-
+ 141|details |panel feature-disclosure                |h2=本次实际参数|eb=ACTUAL PARAMETERS
+ 149|details |panel feature-disclosure                |h2=本次实际使用样本|eb=ACTUAL SAMPLES
+ 159|section |panel sticky-panel                      |h2=执行信息|eb=EXECUTION PROFILE
+ 160|div     |panel-head                              |h2=执行信息|eb=EXECUTION PROFILE

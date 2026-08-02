@@ -2,13 +2,14 @@
 <html lang="zh-CN" data-theme="{{ appearance.theme }}" data-mode="{{ appearance.color_mode }}">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=1180">
   <meta name="theme-color" content="#f3f5f7">
   <meta name="csrf-token" content="{{ csrf_token() }}">
   <title>{% block title %}科研助手{% endblock %} · R/LAB</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/themes.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/assistant.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/tokens.css', v=config.APP_VERSION) }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v=config.APP_VERSION) }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/themes.css', v=config.APP_VERSION) }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/assistant.css', v=config.APP_VERSION) }}">
   <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" defer></script>
 </head>
 <body class="{% if not current_user.is_authenticated %}auth-body{% endif %}{% if appearance.background_url %} has-custom-background{% endif %}" data-assistant-page-type="{{ assistant_page.type }}" data-assistant-page-id="{{ assistant_page.id or '' }}"{% if current_user.is_authenticated %} data-update-check-url="{{ url_for('updates.check') }}"{% endif %}{% if appearance.background_url %} style="--workspace-background-image: url('{{ appearance.background_url }}')"{% endif %}>
@@ -21,52 +22,36 @@
       <div class="nav-group">
         <small class="nav-group-label">工作</small>
         <a href="{{ url_for('main.dashboard') }}" class="{{ 'active' if request.endpoint == 'main.dashboard' }}"><i data-lucide="layout-dashboard"></i><span>总览</span></a>
+        <a href="{{ url_for('workspace.projects') }}" class="{{ 'active' if request.endpoint in ['workspace.projects', 'workspace.project_detail', 'main.experiments', 'main.experiment_detail', 'main.record_detail', 'main.step_edit', 'workspace.batch_detail'] }}"><i data-lucide="panels-top-left"></i><span>实验台</span></a>
         <a href="{{ url_for('main.tasks') }}" class="{{ 'active' if request.endpoint in ['main.tasks', 'main.task_edit'] }}"><i data-lucide="check-square-2"></i><span>任务</span></a>
-        <a href="{{ url_for('workspace.projects') }}" class="{{ 'active' if request.endpoint in ['workspace.projects', 'workspace.project_detail'] }}"><i data-lucide="folder-kanban"></i><span>科研项目</span></a>
-        <a href="{{ url_for('main.experiments') }}" class="{{ 'active' if request.endpoint in ['main.experiments', 'main.experiment_detail', 'main.record_detail', 'main.step_edit', 'workspace.batch_detail'] }}"><i data-lucide="flask-conical"></i><span>实验计划</span></a>
       </div>
       <div class="nav-group">
-        <small class="nav-group-label">资源</small>
+        <small class="nav-group-label">资料</small>
+        <a href="{{ url_for('main.experiment_report_index') }}" class="{{ 'active' if request.endpoint in ['main.experiment_report_index', 'main.experiment_reports', 'main.file_center', 'main.experiment_files'] }}"><i data-lucide="library-big"></i><span>报告与文件</span></a>
+        <a href="{{ url_for('main.presentation_report') }}" class="{{ 'active' if request.endpoint in ['main.presentation_report', 'main.weekly_report_upload', 'main.weekly_report_update', 'main.weekly_report_update_add'] }}"><i data-lucide="calendar-days"></i><span>周报</span></a>
+      </div>
+      <div class="nav-group">
+        <small class="nav-group-label">复用</small>
         <a href="{{ url_for('main.template_center') }}" class="{{ 'active' if request.endpoint in ['main.template_center', 'main.experiment_template_detail', 'main.record_template_detail'] }}"><i data-lucide="copy"></i><span>模板中心</span></a>
-        <a href="{{ url_for('main.samples') }}" class="{{ 'active' if request.endpoint in ['main.samples', 'main.sample_edit'] }}"><i data-lucide="archive"></i><span>样本</span></a>
-        <a href="{{ url_for('main.papers') }}" class="{{ 'active' if request.endpoint in ['main.papers', 'main.paper_detail'] }}"><i data-lucide="file-text"></i><span>论文</span></a>
+        <a href="{{ url_for('main.samples') }}" class="{{ 'active' if request.endpoint in ['main.samples', 'main.sample_edit'] }}"><i data-lucide="archive"></i><span>物品管理</span></a>
       </div>
       <div class="nav-group">
-        <small class="nav-group-label">输出</small>
-        <a href="{{ url_for('main.statistics') }}" class="{{ 'active' if request.endpoint == 'main.statistics' }}"><i data-lucide="chart-no-axes-combined"></i><span>统计</span></a>
-        <a href="{{ url_for('main.presentation_report') }}" class="{{ 'active' if request.endpoint == 'main.presentation_report' }}"><i data-lucide="presentation"></i><span>汇报</span></a>
+        <small class="nav-group-label">系统</small>
+        <a href="{{ url_for('workspace.recycle_bin') }}" class="{{ 'active' if request.endpoint in ['workspace.recycle_bin', 'workspace.recycle_restore', 'workspace.recycle_purge'] }}"><i data-lucide="trash-2"></i><span>回收站</span></a>
       </div>
     </nav>
     <div class="sidebar-foot">
-      <details class="account-menu" id="account-menu">
-        <summary aria-label="打开个人账号菜单">
-          <span class="avatar">{{ current_user.name[:1]|upper }}</span>
-          <span class="user-meta"><b>{{ current_user.name }}</b><small>{{ current_user.email }}</small></span>
-          <i data-lucide="chevrons-up-down"></i>
-        </summary>
-        <div class="account-menu-popover">
-          <div class="account-menu-profile"><span class="avatar">{{ current_user.name[:1]|upper }}</span><span><b>{{ current_user.name }}</b><small>{{ current_user.email }}</small><em>{{ '系统管理员' if current_user.is_admin else '科研用户' }}</em></span></div>
-          <nav aria-label="账号与系统设置">
-            {% if not config.AI_SETTINGS_ADMIN_ONLY or current_user.is_admin %}<a href="{{ url_for('main.api_settings') }}"><i data-lucide="key-round"></i><span><b>API 预设</b><small>模型与连接</small></span></a>{% endif %}
-            <a href="{{ url_for('auth.change_password') }}"><i data-lucide="shield-check"></i><span><b>账号安全</b><small>修改登录密码</small></span></a>
-            {% if current_user.is_admin %}<a href="{{ url_for('admin.dashboard') }}"><i data-lucide="settings-2"></i><span><b>系统管理</b><small>成员与安全审计</small></span></a>{% endif %}
-          </nav>
-          <form method="post" action="{{ url_for('auth.logout') }}">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit"><i data-lucide="log-out"></i><span>退出登录</span></button>
-          </form>
-        </div>
-      </details>
+      <div class="local-workspace-state">
+        <span class="local-workspace-icon"><i data-lucide="hard-drive"></i></span>
+        <span><b>本地工作区</b><small>数据保存在此设备</small></span>
+        <a class="icon-btn" href="{{ url_for('main.api_settings') }}" title="API 设置" aria-label="打开 API 设置"><i data-lucide="key-round"></i></a>
+      </div>
     </div>
     <div class="project-credit" aria-label="项目作者信息">
       <span><b>作者：面壁者</b><small>R/LAB · v{{ config.APP_VERSION }}</small></span>
       <a href="https://github.com/weideai/research-assistant" target="_blank" rel="noopener noreferrer" title="打开项目 GitHub 仓库" aria-label="打开项目 GitHub 仓库"><i data-lucide="github"></i></a>
     </div>
   </aside>
-  <div class="mobile-bar">
-    <button class="icon-btn" id="menu-toggle" aria-label="打开导航"><i data-lucide="menu"></i></button>
-    <a class="brand compact" href="{{ url_for('main.dashboard') }}"><span class="brand-mark">R/</span><b>LAB</b></a>
-  </div>
   <button class="appearance-launch icon-btn" id="appearance-toggle" type="button" title="外观设置" aria-label="打开外观设置"><i data-lucide="palette"></i></button>
   <dialog class="appearance-dialog" id="appearance-dialog" aria-labelledby="appearance-title">
     <div class="appearance-dialog-head">
@@ -107,6 +92,24 @@
 {% else %}
   <main>
 {% endif %}
+    {% if current_user.is_authenticated %}
+    {% set workspace_page_label = '科研工作区' %}
+    {% if request.endpoint == 'main.dashboard' %}{% set workspace_page_label = '首页' %}
+    {% elif request.endpoint in ['workspace.projects', 'workspace.project_detail', 'main.experiments', 'main.experiment_detail', 'workspace.batch_detail', 'main.record_detail', 'main.step_edit'] %}{% set workspace_page_label = '实验台' %}
+    {% elif request.endpoint in ['main.tasks', 'main.task_edit'] %}{% set workspace_page_label = '任务' %}
+    {% elif request.endpoint in ['main.experiment_report_index', 'main.experiment_reports', 'main.file_center', 'main.experiment_files'] %}{% set workspace_page_label = '报告与文件' %}
+    {% elif request.endpoint == 'main.presentation_report' %}{% set workspace_page_label = '周报' %}
+    {% elif request.endpoint in ['main.template_center', 'main.experiment_template_detail', 'main.record_template_detail'] %}{% set workspace_page_label = '模板中心' %}
+    {% elif request.endpoint in ['main.samples', 'main.sample_edit'] %}{% set workspace_page_label = '物品管理' %}
+    {% elif request.endpoint == 'main.api_settings' %}{% set workspace_page_label = 'API 设置' %}
+    {% elif request.endpoint in ['workspace.recycle_bin', 'workspace.recycle_restore', 'workspace.recycle_purge'] %}{% set workspace_page_label = '回收站' %}
+    {% endif %}
+    <header class="workspace-topbar">
+      <div class="topbar-breadcrumb"><span>科研助手</span><i data-lucide="chevron-right"></i><b>{{ workspace_page_label }}</b></div>
+      <a class="topbar-search" href="{{ url_for('main.experiment_report_index') }}"><i data-lucide="search"></i><span>搜索实验、报告和文件</span><kbd>Ctrl K</kbd></a>
+      <button class="topbar-ai" type="button" data-open-ai-assistant><span class="topbar-ai-icon"><i data-lucide="sparkles"></i></span><span><b>实验分析专家</b><small>打开 AI 助手</small></span><i data-lucide="arrow-up-right"></i></button>
+    </header>
+    {% endif %}
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}<div class="flash-stack">
         {% for category, message in messages %}<div class="flash {{ category }}">{{ message }}<button class="icon-btn flash-close" aria-label="关闭"><i data-lucide="x"></i></button></div>{% endfor %}
@@ -123,9 +126,6 @@
     {% block content %}{% endblock %}
   </main>
   {% if current_user.is_authenticated %}
-  <button class="ai-fab" id="ai-fab" type="button" aria-label="打开 AI 悬浮助手" title="AI 悬浮助手">
-    <i data-lucide="sparkles"></i><span>AI</span>
-  </button>
   <button class="ai-completion-toast" id="ai-completion-toast" type="button" hidden aria-live="polite">
     <i data-lucide="circle-check"></i><span><b>AI 已完成</b><small>点击查看结果</small></span>
   </button>
@@ -134,14 +134,13 @@
       <div class="ai-dock-identity">
         <button class="icon-btn" id="ai-sidebar-toggle" type="button" title="显示历史聊天 (Ctrl+Shift+L)" aria-label="显示历史聊天"><i data-lucide="panel-left-open"></i></button>
         <span class="ai-presence"></span>
-        <div><b id="ai-chat-title">科研 AI 助手</b><small id="ai-model-label">准备就绪</small></div>
+        <div class="ai-dock-title"><b id="ai-chat-title">科研 AI 助手</b><small id="ai-model-label">准备就绪</small></div>
       </div>
       <div class="ai-dock-actions">
         <button class="icon-btn" id="ai-new-chat" type="button" title="新建对话 (Ctrl+N)" aria-label="新建对话"><i data-lucide="square-pen"></i></button>
+        {% if not config.AI_SETTINGS_ADMIN_ONLY or current_user.is_admin %}<a class="icon-btn" id="ai-api-settings" href="{{ url_for('main.api_settings') }}" title="打开 API 设置" aria-label="打开 API 设置"><i data-lucide="key-round"></i></a>{% endif %}
         <a class="icon-btn" id="ai-create-ppt" href="{{ url_for('main.presentation_report') }}" title="用所选实验制作 PPT" aria-label="制作实验周报 PPT"><i data-lucide="presentation"></i></a>
         <a class="icon-btn disabled" id="ai-export-chat" href="#" title="导出聊天记录" aria-label="导出聊天记录"><i data-lucide="download"></i></a>
-        <button class="icon-btn" id="ai-dock-left" type="button" title="停靠左侧" aria-label="停靠左侧"><i data-lucide="panel-left"></i></button>
-        <button class="icon-btn" id="ai-dock-right" type="button" title="停靠右侧" aria-label="停靠右侧"><i data-lucide="panel-right"></i></button>
         <button class="icon-btn" id="ai-maximize" type="button" title="最大化或恢复" aria-label="最大化或恢复"><i data-lucide="maximize-2"></i></button>
         <button class="icon-btn" id="ai-close" type="button" title="关闭" aria-label="关闭 AI 助手"><i data-lucide="x"></i></button>
       </div>
@@ -156,7 +155,7 @@
         <div class="ai-conversation-list" id="ai-conversation-list"><p>打开助手后加载历史聊天</p></div>
       </aside>
       <div class="ai-chat-pane">
-        <div class="ai-context-bar" id="ai-context-bar"><i data-lucide="database"></i><span>可检索本人项目、实验执行、过程记录与附件说明，并返回来源</span></div>
+        <div class="ai-context-bar" id="ai-context-bar"><span class="ai-context-copy"><i data-lucide="database"></i><span id="ai-context-label">可检索本地项目、实验批次、过程记录与附件说明</span></span><span class="ai-context-state" id="ai-context-state">当前页面</span></div>
         <details class="ai-config-panel" id="ai-config-panel">
           <summary><span><i data-lucide="library-big"></i><b>知识库与助手设置</b></span><small id="ai-knowledge-count">未选择知识库</small></summary>
           <div class="ai-config-scroll">
@@ -181,29 +180,32 @@
           </div>
         </details>
         <details class="ai-history-scope" id="ai-history-scope">
-          <summary><span><i data-lucide="list-filter"></i><b>选择实验计划与执行</b></span><small id="ai-history-count">未选择</small></summary>
+          <summary><span><i data-lucide="list-filter"></i><b>选择实验计划与批次</b></span><small id="ai-history-count">未选择</small></summary>
           <div class="ai-history-tools"><button type="button" id="ai-select-current">仅当前范围</button><button type="button" id="ai-select-all">全选</button><button type="button" id="ai-clear-selection">清空</button></div>
-          <div class="ai-history-list" id="ai-history-list"><p>打开助手后加载实验计划与执行</p></div>
+          <div class="ai-history-list" id="ai-history-list"><p>打开助手后加载实验计划与批次</p></div>
         </details>
         <div class="ai-messages" id="ai-messages" aria-live="polite">
           <div class="ai-welcome">
             <span class="ai-welcome-mark"><i data-lucide="sparkles"></i></span>
             <b>今天想推进哪项科研工作？</b>
-            <p>创建项目、整理实验执行、比较历史或检索知识库。页面写入前都会展示差异。</p>
+            <p>创建项目、整理实验批次、比较历史或检索知识库。页面写入前都会展示差异。</p>
           </div>
         </div>
         <div class="ai-quick-prompts" id="ai-quick-prompts">
-          <button type="button">创建一个新的科研项目</button>
-          <button type="button">根据历史实验生成下一次计划</button>
-          <button type="button">检查并整理当前页面</button>
-          <button type="button">比较当前实验与历史重复实验</button>
-          <button type="button">生成本周实验周报</button>
-          <button type="button">检索相关过程记录</button>
+          <span class="ai-quick-prompts-label">快速开始</span>
+          <div class="ai-quick-prompts-list">
+            <button type="button">创建一个新的科研项目</button>
+            <button type="button">根据历史实验生成下一次计划</button>
+            <button type="button">检查并整理当前页面</button>
+            <button type="button">比较当前实验与历史重复实验</button>
+            <button type="button">生成本周实验周报</button>
+            <button type="button">检索相关过程记录</button>
+          </div>
         </div>
         <form class="ai-composer" id="ai-composer" enctype="multipart/form-data">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <div class="ai-file-list" id="ai-file-list"></div>
-          <textarea name="message" id="ai-message-input" rows="3" placeholder="输入消息，按 Enter 发送"></textarea>
+          <textarea name="message" id="ai-message-input" rows="3" maxlength="20000" placeholder="输入实验问题、记录内容或下一步计划" title="Enter 发送，Shift+Enter 换行"></textarea>
           <div class="ai-composer-tools">
             <div>
               <label class="icon-btn ai-file-button" title="上传文件" aria-label="上传文件"><i data-lucide="paperclip"></i><input id="ai-file-input" name="files" type="file" multiple></label>
@@ -212,11 +214,13 @@
             <button class="ai-stop" id="ai-stop" type="button" aria-label="停止生成" title="停止生成" hidden><i data-lucide="square"></i></button>
             <button class="ai-send" type="submit" aria-label="发送消息"><i data-lucide="arrow-up"></i></button>
           </div>
+          <div class="ai-composer-meta"><span>内容仅在确认后写入页面</span><span><b id="ai-input-count">0</b> 字符</span></div>
           <div class="ai-task-status" id="ai-task-status" hidden><span></span><time>00:00</time></div>
           <p class="ai-review-note"><i data-lucide="shield-alert"></i> 剂量、临床解释和统计结论需人工核验</p>
         </form>
       </div>
     </div>
+    <button class="ai-resize-handle" id="ai-resize-handle" type="button" title="拖动缩放窗口" aria-label="拖动缩放窗口"><i data-lucide="grip"></i></button>
   </section>
   <dialog class="ai-context-dialog" id="ai-context-dialog" aria-labelledby="ai-context-title">
     <header><div><p class="eyebrow">OUTGOING CONTEXT</p><h2 id="ai-context-title">发送前检查</h2></div><button class="icon-btn" type="button" data-ai-context-cancel aria-label="取消发送"><i data-lucide="x"></i></button></header>
@@ -227,7 +231,7 @@
     <footer><button class="btn ghost" type="button" data-ai-context-cancel>取消</button><button class="btn primary" id="ai-context-confirm" type="button"><i data-lucide="send"></i> 确认并发送</button></footer>
   </dialog>
   {% endif %}
-  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/app.js', v=config.APP_VERSION) }}"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

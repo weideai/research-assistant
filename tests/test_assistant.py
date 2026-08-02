@@ -219,7 +219,7 @@ def test_assistant_creates_execution_for_current_plan_and_can_revert(client, aut
         api_url="https://api.example.test/v1", api_key="test", model="execution-model", enabled=True,
     ))
     monkeypatch.setattr("app.main.chat_with_assistant", lambda *_args, **_kwargs: {
-        "reply": "实验执行草案已生成。",
+        "reply": "实验批次草案已生成。",
         "proposal": {
             "action": "create_execution",
             "changes": {
@@ -231,7 +231,7 @@ def test_assistant_creates_execution_for_current_plan_and_can_revert(client, aut
     })
 
     proposed = client.post("/assistant/chat", data={
-        "message": "开始一次新的实验执行", "page_type": "experiment", "page_id": experiment_id,
+        "message": "开始一个新的实验批次", "page_type": "experiment", "page_id": experiment_id,
     }).get_json()
     proposal = proposed["assistant_message"]["proposal"]
     assert proposal["action"] == "create_execution"
@@ -699,7 +699,7 @@ def test_assistant_execution_scope_separates_repeats_and_cites_execution_paramet
     ))
     monkeypatch.setattr("app.main.chat_with_assistant", fake_chat)
     response = client.post("/assistant/chat", data={
-        "message": "只总结所选实验执行",
+        "message": "只总结所选实验批次",
         "experiment_scope_present": "1", "batch_scope_present": "1",
         "batch_ids": [str(second_batch_id)],
     })
@@ -862,14 +862,17 @@ def test_assistant_ui_exposes_window_knowledge_and_message_controls(client, auth
     response = client.get("/")
     assert response.status_code == 200
     for control_id in (
-        "ai-dock-left", "ai-dock-right", "ai-maximize",
+        "ai-maximize", "ai-close", "ai-resize-handle",
         "ai-knowledge-create-form", "ai-prompt-form", "ai-prompt-reset", "ai-stop",
     ):
         assert f'id="{control_id}"'.encode() in response.data
+    assert b'id="ai-dock-left"' not in response.data
+    assert b'id="ai-dock-right"' not in response.data
     assert b'id="ai-popout"' not in response.data
     assert client.get("/assistant/popup").status_code == 404
     script = client.get("/static/js/app.js").data
     assert b"ResizeObserver" in script
+    assert b"dockAiWindow" not in script
     assert b"selected_change_ids" in script
     assert b"syncExperimentScopeControls" in script
     assert b"parent.indeterminate" in script
@@ -1159,12 +1162,12 @@ def test_assistant_rejects_invalid_batch_values_and_effective_date_order(
     })
 
     expected_errors = (
-        "实验执行状态不合法。",
+        "实验批次状态不合法。",
         "完成状态必须是 true 或 false。",
         "实际结束日期不能早于实际开始日期。",
         "记录日期格式不合法。",
-        "记录日期不能早于实验执行开始日期 2026-07-24。请先调整执行日期。",
-        "记录日期不能早于实验执行开始日期 2026-07-24。请先调整执行日期。",
+        "记录日期不能早于实验批次开始日期 2026-07-24。请先调整批次日期。",
+        "记录日期不能早于实验批次开始日期 2026-07-24。请先调整批次日期。",
         "已定稿过程记录不能通过 AI 删除，请保留原记录并通过修订说明更正。",
     )
     for index, expected_error in enumerate(expected_errors):

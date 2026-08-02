@@ -93,7 +93,7 @@ def test_record_template_selects_execution_and_opens_new_record_directly(client,
 
     detail = client.get(f"/record-templates/{template_id}").get_data(as_text=True)
     assert 'name="batch_id"' in detail
-    assert "目标实验执行" in detail
+    assert "目标实验批次" in detail
     assert "目标实验计划 · RUN-DIRECT" in detail
 
     response = client.get(f"/record-templates/{template_id}/use?batch_id={batch_id}")
@@ -193,3 +193,19 @@ def test_step_template_replace_requires_explicit_confirmation(client, auth, app)
     with app.app_context():
         experiment = db.session.get(Experiment, experiment_id)
         assert [step.title for step in experiment.steps] == ["新步骤"]
+
+
+def test_reference_text_is_saved_as_a_local_experiment_template(client, auth, app):
+    auth.register()
+    response = client.post("/templates/import", data={
+        "source_text": "细胞处理记录模板\n准备细胞\n药物处理 24 小时\n记录观察结果",
+    }, follow_redirects=True)
+    assert response.status_code == 200
+    assert "本地实验模板".encode() in response.data
+
+    with app.app_context():
+        template = ExperimentTemplate.query.one()
+        assert "来源：用户粘贴内容" in template.description
+        assert [step.title for step in template.steps] == [
+            "细胞处理记录模板", "准备细胞", "药物处理 24 小时", "记录观察结果",
+        ]

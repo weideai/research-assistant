@@ -44,5 +44,5 @@ def test_project_package_refuses_to_silently_drop_unassigned_record(client, auth
             lambda *_args, **_kwargs: pytest.fail("不应开始生成不完整的项目包"),
         )
 
-        with pytest.raises(ProjectPackageError, match="未归档或执行归属异常"):
+        with pytest.raises(ProjectPackageError, match="未归档或批次归属异常"):
             build_project_package(project, app.config["ATTACHMENT_UPLOAD_DIR"])

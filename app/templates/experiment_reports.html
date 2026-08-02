@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}实验报告 · {{ experiment.title }}{% endblock %}
+{% block content %}
+<header class="page-head report-browser-head">
+  <div>
+    <a class="back-link" href="{{ url_for('main.experiment_detail', item_id=experiment.id) }}"><i data-lucide="arrow-left"></i> 返回实验工作台</a>
+    <p class="eyebrow">EXPERIMENT REPORTS</p>
+    <h1>实验报告</h1>
+    <p class="muted">每条过程记录对应一份报告，可检索、翻页、复核并导出。</p>
+  </div>
+  <div class="page-head-actions report-page-actions">
+    <a class="btn ghost" href="{{ url_for('main.experiment_detail', item_id=experiment.id) }}#batches"><i data-lucide="layers-3"></i> 实验批次</a>
+    {% if selected_record %}
+    <div class="report-export-actions" aria-label="导出当前实验报告">
+      <label class="report-template-picker"><span>报告模板</span>
+        <select name="report_template" aria-label="选择报告模板" data-report-template-picker>
+          {% for value, label in report_templates %}<option value="{{ value }}" {{ 'selected' if report_template == value }}>{{ label }}</option>{% endfor %}
+        </select>
+      </label>
+      <a class="btn secondary" data-report-export="pdf" href="{{ url_for('main.record_export', record_id=selected_record.id, format='pdf', report_template=report_template) }}"><i data-lucide="file-down"></i> 导出 PDF</a>
+      <a class="btn secondary" data-report-export="docx" href="{{ url_for('main.record_export', record_id=selected_record.id, format='docx', report_template=report_template) }}"><i data-lucide="file-text"></i> 导出 Word</a>
+    </div>
+    {% endif %}
+  </div>
+</header>
+
+<section class="report-toolbar">
+  <form method="get" class="report-search-form">
+    <label class="grow"><span>查询实验记录</span><input name="q" value="{{ search }}" placeholder="日期、批次编号、人员、结果、过程或附件名称"></label>
+    <label><span>每页数量</span><select name="per_page">{% for value in page_sizes %}<option value="{{ value }}" {{ 'selected' if page_size == value }}>{{ value }} 份</option>{% endfor %}</select></label>
+    <button class="btn primary"><i data-lucide="search"></i> 查询</button>
+    {% if search %}<a class="btn ghost" href="{{ url_for('main.experiment_reports', item_id=experiment.id) }}"><i data-lucide="x"></i> 清除</a>{% endif %}
+  </form>
+  <div class="report-toolbar-meta"><b>{{ pagination.total }}</b><span>份匹配报告</span><small>按实验日期从新到旧</small></div>
+</section>
+
+<div class="report-browser" data-report-browser>
+  <aside class="panel report-index-panel">
+    <div class="panel-head report-index-head"><div><p class="eyebrow">RECORD INDEX</p><h2>记录列表</h2></div><span class="count-label">{{ experiment.code or '未设置编号' }}</span></div>
+    <div class="report-index-list">
+      {% for record in records %}
+      <a class="report-index-item {{ 'active' if selected_record and selected_record.id == record.id }}" href="{{ url_for('main.experiment_reports', item_id=experiment.id, record_id=record.id, q=search, page=pagination.page, per_page=page_size) }}">
+        <span class="report-index-number">{{ '%02d'|format((pagination.page - 1) * page_size + loop.index) }}</span>
+        <span class="report-index-copy">
+          <span class="report-index-title"><b>{{ record.batch.batch_code if record.batch else '历史记录' }}</b><span class="badge" data-state="{{ record.result | state_tone }}">{{ record.result }}</span></span>
+          <small>{{ record.record_date }} · {{ record.operator or '未填写实验人员' }}</small>
+          <span>{{ record.content|truncate(92, True) }}</span>
+        </span>
+        <i data-lucide="chevron-right"></i>
+      </a>
+      {% else %}
+      <div class="empty report-index-empty"><i data-lucide="notebook-tabs"></i><p>{{ '没有匹配的实验记录' if search else '还没有实验记录' }}</p><small>{{ '请修改查询条件。' if search else '在实验批次中新增过程记录后，这里会自动生成报告。' }}</small></div>
+      {% endfor %}
+    </div>
+    {% set pagination_label = '单实验报告目录翻页' %}{% set page_item_label = '份报告' %}{% include '_pagination.html' %}
+  </aside>
+
+  <main class="report-stage">
+    {% if selected_record %}
+    <nav class="report-pager" aria-label="实验报告翻页">
+      <a class="btn ghost {{ 'is-disabled' if not previous_record }}" href="{{ url_for('main.experiment_reports', item_id=experiment.id, record_id=previous_record.id, q=search, per_page=page_size) if previous_record else '#' }}" {{ 'aria-disabled=true tabindex=-1' if not previous_record else '' }}><i data-lucide="arrow-left"></i> 上一份</a>
+      <div><b>第 {{ selected_position }} / {{ pagination.total }} 份</b><small>{{ selected_record.record_date }} · {{ selected_record.batch.batch_code if selected_record.batch else '历史记录' }}</small></div>
+      <a class="btn ghost {{ 'is-disabled' if not next_record }}" href="{{ url_for('main.experiment_reports', item_id=experiment.id, record_id=next_record.id, q=search, per_page=page_size) if next_record else '#' }}" {{ 'aria-disabled=true tabindex=-1' if not next_record else '' }}>下一份 <i data-lucide="arrow-right"></i></a>
+    </nav>
+
+    <article class="report-sheet">
+      <header class="report-sheet-head">
+        <div><p class="eyebrow">LAB REPORT · R-{{ selected_record.id }}</p><h2>{{ experiment.title }}</h2><p>{{ selected_record.record_date }} · {{ selected_record.batch.batch_code if selected_record.batch else '历史记录' }}</p></div>
+        <div class="report-sheet-actions"><span class="badge large" data-state="{{ selected_record.result | state_tone }}">{{ selected_record.result }}</span></div>
+      </header>
+
+      <table class="report-form-table report-meta-table">
+        <tbody>
+          <tr><th>实验名称</th><td>{{ experiment.title }}</td><th>实验编号</th><td>{{ experiment.code or '未设置' }}</td></tr>
+          <tr><th>所属项目</th><td>{{ experiment.project.title if experiment.project else '未归类项目' }}</td><th>记录编号</th><td>R-{{ selected_record.id }}</td></tr>
+          <tr><th>实验日期</th><td>{{ selected_record.record_date }}</td><th>实验人员</th><td>{{ selected_record.operator or '未填写' }}</td></tr>
+          <tr><th>实验批次</th><td>{{ selected_record.batch.batch_code if selected_record.batch else '历史记录' }}</td><th>记录状态</th><td>{{ selected_record.lifecycle_status }}</td></tr>
+        </tbody>
+      </table>
+
+      <table class="report-form-table report-content-table">
+        <tbody>
+          <tr><th>实验目的</th><td colspan="3"><div class="report-prose">{{ experiment.objective or '未填写' }}</div></td></tr>
+          <tr><th>实验条件<br>仪器设备<br>实验原理</th><td colspan="3"><div class="report-prose">{{ selected_record.conditions or '未填写' }}</div></td></tr>
+          <tr><th>实验过程<br>观察记录</th><td colspan="3"><div class="report-prose report-prose-tall">{{ selected_record.content }}</div></td></tr>
+          <tr><th>实验结果<br>结论与备注</th><td colspan="3"><div class="report-prose report-result-prose">{{ selected_record.remark or '未填写' }}</div></td></tr>
+        </tbody>
+      </table>
+
+      <section class="report-table-section">
+        <div class="report-section-title"><h3>结构化参数</h3><span>{{ selected_record.parameters|length }} 项</span></div>
+        <table class="report-data-table"><thead><tr><th>参数</th><th>数值</th><th>单位</th><th>说明</th></tr></thead><tbody>
+          {% for parameter in selected_record.parameters %}<tr><td>{{ parameter.name }}</td><td>{{ parameter.value or '未填写' }}</td><td>{{ parameter.unit or '-' }}</td><td>{{ parameter.notes or '-' }}</td></tr>{% else %}<tr><td colspan="4" class="table-empty">暂无结构化参数</td></tr>{% endfor %}
+        </tbody></table>
+      </section>
+
+      {% set report_attachments = selected_record.attachments|rejectattr('is_deleted')|list %}
+      {% set report_images = report_attachments|selectattr('is_previewable_image')|list %}
+      <section class="report-table-section report-attachments-section">
+        <div class="report-section-title"><h3>原始数据与附件</h3><span>{{ report_attachments|length }} 个</span></div>
+        {% if report_attachments %}
+        <div class="report-attachment-grid">
+          {% for attachment in report_images[:2] %}
+          <a class="report-attachment-thumb" href="{{ url_for('main.attachment_preview', item_id=attachment.id) }}" target="_blank" rel="noopener" title="预览 {{ attachment.original_name }}">
+            <img src="{{ url_for('main.attachment_preview', item_id=attachment.id) }}" alt="{{ attachment.original_name }}" loading="lazy">
+            <span>{{ attachment.original_name }}</span>
+          </a>
+          {% endfor %}
+          <a class="report-attachment-folder" href="{{ url_for('main.experiment_files', item_id=experiment.id, record_id=selected_record.id) }}">
+            <i data-lucide="folder-open"></i><span><b>打开完整文件夹</b><small>查看该记录的全部原始文件</small></span><i data-lucide="arrow-up-right"></i>
+          </a>
+        </div>
+        {% else %}
+        <div class="report-attachment-empty"><i data-lucide="folder-open"></i><span>暂无原始数据或附件</span></div>
+        {% endif %}
+      </section>
+
+      <footer class="report-sheet-foot"><span>最后修改：<span class="edited-at" title="最后编辑 {{ selected_record.updated_at|edited_at_title }}">{{ selected_record.updated_at|edited_at }}</span></span><a href="{{ url_for('main.record_detail', record_id=selected_record.id) }}">打开完整记录编辑页 <i data-lucide="arrow-up-right"></i></a></footer>
+    </article>
+    {% else %}
+    <div class="panel report-empty-stage"><i data-lucide="notebook-tabs"></i><h2>{{ '没有匹配的实验报告' if search else '还没有可查看的实验报告' }}</h2><p>{{ '请调整查询条件。' if search else '选择一个实验批次并新增过程记录后，这里会自动生成报告。' }}</p></div>
+    {% endif %}
+  </main>
+</div>
+{% endblock %}

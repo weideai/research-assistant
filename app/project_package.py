@@ -98,7 +98,7 @@ def _assert_complete_record_ownership(experiment, batches):
         if len(invalid_record_ids) > 8:
             identifiers += " 等"
         raise ProjectPackageError(
-            f"实验“{experiment.title}”存在未归档或执行归属异常的过程记录（ID：{identifiers}）。"
+            f"实验“{experiment.title}”存在未归档或批次归属异常的过程记录（ID：{identifiers}）。"
             "为避免项目包遗漏数据，导出已停止；请先运行数据库升级（flask db upgrade）后重试。"
         )
     return {record.id for record in active_records}
@@ -180,7 +180,7 @@ def _project_payload(project, storage_root):
             identifiers = "、".join(str(item_id) for item_id in sorted(missing)[:8]) or "未知"
             raise ProjectPackageError(
                 f"实验“{experiment.title}”的过程记录未能完整写入项目包（ID：{identifiers}）。"
-                "导出已停止，请先检查实验执行归属。"
+                "导出已停止，请先检查实验批次归属。"
             )
         data["experiments"].append(experiment_data)
     return data

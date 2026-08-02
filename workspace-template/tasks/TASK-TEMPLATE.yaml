@@ -1,0 +1,30 @@
+schema_version: 1
+task:
+  id: "TASK-000"
+  title: "TBD"
+  owner_role: "planner|executor|reviewer|human"
+  status: "TODO"
+  research_question: "TBD"
+inputs:
+  - path: "TBD"
+    description: "TBD"
+    sha256: "TBD"
+assumptions: []
+method:
+  approved_plan: "TBD"
+  allowed_tools: []
+  prohibited_changes:
+    - "Do not modify data/raw"
+outputs:
+  - path: "TBD"
+    description: "TBD"
+acceptance:
+  - "Input identity and grouping verified"
+  - "Outputs are reproducible from versioned code"
+  - "Claims do not exceed evidence"
+human_gates:
+  before_run: true
+  before_release: true
+review:
+  required: true
+  report_path: "review/TASK-000-review.md"

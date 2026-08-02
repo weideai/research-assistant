@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}实验报告{% endblock %}
+{% block content %}
+<header class="page-head experiment-report-index-head">
+  <div><p class="eyebrow">RESEARCH EVIDENCE</p><h1>报告与文件</h1><p class="muted">从报告结论进入完整阅读，或切换到文件视图检索原始资料。</p></div>
+  <div class="page-head-actions"><a class="btn ghost" href="{{ url_for('main.experiments') }}"><i data-lucide="flask-conical"></i> 实验台</a></div>
+</header>
+
+<nav class="section-tabs" aria-label="报告与文件视图">
+  <a class="active" href="{{ url_for('main.experiment_report_index', project_id=selected_project_id, experiment_id=selected_experiment_id, batch_id=selected_batch_id) }}" aria-current="page"><i data-lucide="notebook-tabs"></i><span><b>实验报告</b><small>{{ pagination.total }} 条结果</small></span></a>
+  <a href="{{ url_for('main.file_center', project_id=selected_project_id, experiment_id=selected_experiment_id, batch_id=selected_batch_id) }}"><i data-lucide="folder-open"></i><span><b>文件中心</b><small>原始数据与附件</small></span></a>
+</nav>
+
+<div class="evidence-browser">
+  {% include '_evidence_directory.html' %}
+  <div class="evidence-browser-content">
+<section class="report-feed-toolbar"><form method="get" class="report-feed-search">{% if selected_project_id %}<input type="hidden" name="project_id" value="{{ selected_project_id }}">{% endif %}{% if selected_experiment_id %}<input type="hidden" name="experiment_id" value="{{ selected_experiment_id }}">{% endif %}{% if selected_batch_id %}<input type="hidden" name="batch_id" value="{{ selected_batch_id }}">{% endif %}<label><i data-lucide="search"></i><input name="q" value="{{ search }}" placeholder="搜索实验、批次编号、结果或记录内容" aria-label="搜索实验报告"></label><select name="per_page" aria-label="每页报告数量">{% for value in page_sizes %}<option value="{{ value }}" {{ 'selected' if page_size == value }}>每页 {{ value }} 条</option>{% endfor %}</select><button class="btn primary"><i data-lucide="search"></i> 搜索</button></form><span class="count-label">{{ pagination.total }} 条记录</span></section>
+
+<section class="report-feed">
+  {% for record in records %}
+  {% set images = record.attachments|rejectattr('is_deleted')|selectattr('is_previewable_image')|list %}
+  <article class="report-feed-card">
+    <header class="report-feed-card-head"><div><p class="eyebrow">{{ record.record_date }} · {{ record.batch.batch_code if record.batch else '历史记录' }}</p><h2>{{ record.experiment.title }}</h2><p>{{ record.experiment.project.title if record.experiment.project else '未归类项目' }} · {{ record.operator or '未填写实验人员' }}</p></div><span class="badge" data-state="{{ record.result | state_tone }}">{{ record.result }}</span></header>
+    <div class="report-feed-card-body{% if images %} has-thumbnail{% endif %}">
+      <div class="report-feed-conclusion"><small>结论与备注</small><p>{{ (record.remark or record.content)|truncate(260, True) }}</p></div>
+      {% if images %}<a class="report-feed-thumbnail" href="{{ url_for('main.attachment_preview', item_id=images[0].id) }}" target="_blank" rel="noopener"><img src="{{ url_for('main.attachment_preview', item_id=images[0].id) }}" alt="{{ images[0].original_name }}" loading="lazy">{% if images|length > 1 %}<span>+{{ images|length - 1 }} 张</span>{% endif %}</a>{% endif %}
+    </div>
+    <footer class="report-feed-card-foot"><span>最后修改 <span class="edited-at" title="最后编辑 {{ record.updated_at|edited_at_title }}">{{ record.updated_at|edited_at }}</span></span><a class="btn primary" href="{{ url_for('main.experiment_reports', item_id=record.experiment_id, record_id=record.id) }}">打开报告 <i data-lucide="arrow-right"></i></a></footer>
+  </article>
+  {% else %}<div class="panel report-feed-empty"><i data-lucide="notebook-tabs"></i><h2>{{ '没有匹配的实验报告' if search else '还没有实验报告' }}</h2><p>在实验批次中新增过程记录后，报告卡片会自动出现在这里。</p><a class="btn primary" href="{{ url_for('main.experiments') }}">进入实验计划</a></div>{% endfor %}
+</section>
+{% set pagination_label = '实验报告索引翻页' %}{% set page_item_label = '条报告' %}{% include '_pagination.html' %}
+  </div>
+</div>
+{% endblock %}

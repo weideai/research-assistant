@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}周报资料库{% endblock %}
+{% block content %}
+<header class="page-head weekly-page-head">
+  <div>
+    <p class="eyebrow">WEEKLY REPORT LIBRARY</p>
+    <h1>周报资料库</h1>
+    <p class="muted">按日期保存本地周报文件，记录反馈和修改日常，让每次汇报都有出处。</p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn primary" href="#weekly-upload"><i data-lucide="upload"></i> 上传周报</a>
+    <a class="btn secondary" href="#weekly-generator"><i data-lucide="presentation"></i> 生成 PPT</a>
+  </div>
+</header>
+
+<section class="weekly-summary" aria-label="周报概览">
+  <div class="weekly-summary-main"><span class="summary-icon"><i data-lucide="calendar-range"></i></span><div><b>{{ weekly_total }}</b><span>份匹配周报</span><small>最近更新 {{ weekly_latest_at.strftime('%Y-%m-%d %H:%M') if weekly_latest_at else '尚无记录' }}</small></div></div>
+  <div class="weekly-summary-stat"><b>{{ weekly_status_counts.get('待反馈', 0) }}</b><span>待反馈</span></div>
+  <div class="weekly-summary-stat"><b>{{ weekly_status_counts.get('修改中', 0) }}</b><span>修改中</span></div>
+  <div class="weekly-summary-stat"><b>{{ weekly_status_counts.get('已确认', 0) }}</b><span>已确认</span></div>
+</section>
+
+<form id="weekly-report-bulk-form" method="post" action="{{ url_for('main.weekly_report_bulk') }}" class="resource-bulk-form index-resource-bulk weekly-report-bulk" data-bulk-form data-bulk-label="周报" data-bulk-delete-message="确定将选中的 {count} 份周报移入回收站吗？本地文件不会立即删除。">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="q" value="{{ weekly_search }}">
+  <input type="hidden" name="return_status" value="{{ weekly_status }}">
+  <input type="hidden" name="page" value="{{ weekly_pagination.page }}">
+  <input type="hidden" name="per_page" value="{{ weekly_page_size }}">
+  <input type="hidden" name="return_report_id" value="{{ selected_weekly_report.id if selected_weekly_report else '' }}">
+  <details class="resource-bulk-panel">
+    <summary><span><i data-lucide="list-checks"></i><b>批量管理当前页周报</b></span><span data-bulk-selected>已选择 0 个</span></summary>
+    <div class="resource-bulk-body">
+      <div class="bulk-head"><label class="bulk-select-all"><input type="checkbox" data-bulk-select-all> 全选当前页</label><small>标题和日期仍逐份编辑；未选择的字段保持不变</small></div>
+      <div class="bulk-fields bulk-fields-wide">
+        <label>周报状态<select name="bulk_status"><option value="__keep__">保持不变</option>{% for value in weekly_report_statuses %}<option>{{ value }}</option>{% endfor %}</select></label>
+        <label>项目操作<select name="project_mode"><option value="keep">保持不变</option><option value="replace">统一归入</option><option value="clear">取消归类</option></select></label>
+        <label class="bulk-grow">目标项目<select name="bulk_project_id"><option value="">选择项目</option>{% for project in projects %}<option value="{{ project.id }}">{{ project.title }}</option>{% endfor %}</select></label>
+        <label>摘要操作<select name="summary_mode"><option value="keep">保持不变</option><option value="append">追加</option><option value="replace">替换</option><option value="clear">清空</option></select></label>
+        <label class="bulk-grow">摘要内容<input name="bulk_summary" maxlength="10000" placeholder="统一补充或替换的摘要"></label>
+      </div>
+      <div class="bulk-actions"><button class="btn secondary" name="action" value="update" disabled><i data-lucide="save"></i> 批量保存</button><button class="btn danger" name="action" value="delete" disabled><i data-lucide="trash-2"></i> 批量移入回收站</button></div>
+    </div>
+  </details>
+</form>
+
+<div class="weekly-browser">
+  <aside class="panel weekly-index-panel">
+    <div class="panel-head weekly-index-head"><div><p class="eyebrow">REPORT INDEX</p><h2>周报列表</h2></div><span class="count-label">标题可检索</span></div>
+    <form method="get" class="weekly-index-filter">
+      <label class="search-field"><i data-lucide="search"></i><input name="q" value="{{ weekly_search }}" placeholder="搜索标题、文件名或反馈" aria-label="搜索周报"></label>
+      <select name="status" aria-label="周报状态"><option>全部</option>{% for value in weekly_report_statuses %}<option value="{{ value }}" {{ 'selected' if weekly_status == value }}>{{ value }}</option>{% endfor %}</select>
+      <select name="per_page" aria-label="每页周报数量">{% for value in weekly_page_sizes %}<option value="{{ value }}" {{ 'selected' if weekly_page_size == value }}>{{ value }} / 页</option>{% endfor %}</select>
+      <button class="icon-btn" type="submit" title="筛选周报" aria-label="筛选周报"><i data-lucide="sliders-horizontal"></i></button>
+    </form>
+    <div class="weekly-index-list">
+      {% for report in weekly_reports %}
+      <div class="weekly-index-row">
+        <label class="weekly-index-select"><input type="checkbox" name="report_ids" value="{{ report.id }}" form="weekly-report-bulk-form" data-bulk-select aria-label="选择周报 {{ report.title }}"></label>
+        <a class="weekly-index-item {{ 'active' if selected_weekly_report and report.id == selected_weekly_report.id }}" href="{{ url_for('main.presentation_report', report_id=report.id, q=weekly_search, status=weekly_status, page=weekly_pagination.page, per_page=weekly_page_size) }}">
+          <span class="weekly-index-date"><b>{{ report.report_date.strftime('%d') }}</b><small>{{ report.report_date.strftime('%Y.%m') }}</small></span>
+          <span class="weekly-index-copy"><b>{{ report.title }}</b><small>{{ report.original_name }}</small><span>{{ report.project.title if report.project else '未归类项目' }}</span></span>
+          <span class="status-dot" data-state="{{ report.status | state_tone }}"></span>
+        </a>
+      </div>
+      {% else %}
+      <div class="empty weekly-index-empty"><i data-lucide="folder-open"></i><p>还没有周报</p><small>上传一份 PPT 或 PDF，周报会自动按日期归档。</small></div>
+      {% endfor %}
+    </div>
+    {% if weekly_pagination.pages > 1 %}
+    <nav class="weekly-index-pagination" aria-label="周报列表翻页">
+      <a class="icon-btn {{ 'is-disabled' if not weekly_pagination.has_prev }}" href="{{ url_for('main.presentation_report', q=weekly_search, status=weekly_status, page=weekly_pagination.prev_num or 1, per_page=weekly_page_size) }}" title="上一页" aria-label="上一页" aria-disabled="{{ 'true' if not weekly_pagination.has_prev else 'false' }}"><i data-lucide="chevron-left"></i></a>
+      <span>第 {{ weekly_pagination.page }} / {{ weekly_pagination.pages }} 页</span>
+      <a class="icon-btn {{ 'is-disabled' if not weekly_pagination.has_next }}" href="{{ url_for('main.presentation_report', q=weekly_search, status=weekly_status, page=weekly_pagination.next_num or weekly_pagination.pages, per_page=weekly_page_size) }}" title="下一页" aria-label="下一页" aria-disabled="{{ 'true' if not weekly_pagination.has_next else 'false' }}"><i data-lucide="chevron-right"></i></a>
+    </nav>
+    {% endif %}
+  </aside>
+
+  <main class="weekly-reader">
+    {% if selected_weekly_report %}
+    <article class="weekly-report-card">
+      <header class="weekly-report-card-head">
+        <div class="weekly-report-title-block"><p class="eyebrow">{{ selected_weekly_report.report_date.strftime('%Y.%m.%d') }} · WEEKLY REPORT</p><h2>{{ selected_weekly_report.title }}</h2><p class="weekly-file-name"><i data-lucide="presentation"></i>{{ selected_weekly_report.original_name }} · {{ selected_weekly_report.size_label }}</p></div>
+        <div class="weekly-report-card-actions"><span class="badge" data-state="{{ selected_weekly_report.status | state_tone }}">{{ selected_weekly_report.status }}</span><a class="btn secondary" href="{{ url_for('main.weekly_report_download', report_id=selected_weekly_report.id) }}"><i data-lucide="download"></i> 下载文件</a><a class="btn primary" href="{{ url_for('main.weekly_report_open_folder', report_id=selected_weekly_report.id) }}"><i data-lucide="folder-open"></i> 打开文件夹</a><form method="post" action="{{ url_for('main.weekly_report_delete', report_id=selected_weekly_report.id) }}" data-confirm="将这份周报移入回收站？本地文件不会立即删除。"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-btn danger" title="删除周报" aria-label="删除周报"><i data-lucide="trash-2"></i></button></form></div>
+      </header>
+      <div class="weekly-report-meta-strip"><span><small>报告日期</small><b>{{ selected_weekly_report.report_date }}</b></span><span><small>覆盖周期</small><b>{% if selected_weekly_report.period_start %}{{ selected_weekly_report.period_start }} 至 {{ selected_weekly_report.period_end or selected_weekly_report.period_start }}{% else %}未填写{% endif %}</b></span><span><small>所属项目</small><b>{{ selected_weekly_report.project.title if selected_weekly_report.project else '未归类项目' }}</b></span><span><small>最后修改</small><b><span class="edited-at" title="最后编辑 {{ selected_weekly_report.updated_at|edited_at_title }}">{{ selected_weekly_report.updated_at|edited_at }}</span></b></span></div>
+      {% if selected_weekly_report.summary %}<section class="weekly-report-summary"><p class="eyebrow">REPORT NOTE</p><p>{{ selected_weekly_report.summary }}</p></section>{% endif %}
+
+      <div class="weekly-report-content-grid">
+        <section class="weekly-feedback-panel">
+          <div class="section-title-row"><div><p class="eyebrow">FEEDBACK & CHANGELOG</p><h3>反馈与修改日常</h3></div><span class="count-label">{{ selected_weekly_report.updates|length }} 条记录</span></div>
+          <div class="weekly-update-list">
+            {% for update in selected_weekly_report.updates %}
+            <article class="weekly-update-item {{ 'is-done' if update.status == '已完成' }}"><span class="weekly-update-marker"><i data-lucide="{{ 'message-square-text' if update.kind == '反馈' else 'pencil-line' }}"></i></span><div class="weekly-update-body"><div class="weekly-update-head"><span class="badge {{ 'result-success' if update.kind == '反馈' else 'badge-soft' }}">{{ update.kind }}</span><time>{{ update.entry_date }}</time><span class="weekly-update-status">{{ update.status }}</span></div><p>{{ update.content }}</p><form method="post" action="{{ url_for('main.weekly_report_update_toggle', update_id=update.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="text-button" type="submit"><i data-lucide="{{ 'circle-check' if update.status == '已完成' else 'circle' }}"></i>{{ '标记为待处理' if update.status == '已完成' else '标记为已完成' }}</button></form></div></article>
+            {% else %}<div class="empty compact-empty"><i data-lucide="message-square-plus"></i><p>还没有反馈或修改日常</p><small>把老板意见、修改内容和下一步动作记在这里。</small></div>{% endfor %}
+          </div>
+          <form method="post" action="{{ url_for('main.weekly_report_update_add', report_id=selected_weekly_report.id) }}" class="weekly-update-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="form-grid weekly-update-form-top"><label>日期<input type="date" name="entry_date" value="{{ selected_weekly_report.report_date }}"></label><label>类型<select name="kind">{% for value in weekly_update_kinds %}<option>{{ value }}</option>{% endfor %}</select></label><label>状态<select name="update_status">{% for value in weekly_update_statuses %}<option>{{ value }}</option>{% endfor %}</select></label></div><label>新增反馈或修改日常<textarea name="content" rows="3" placeholder="例如：补充第 3 页结果图标注；老板建议增加对照组说明。" required></textarea></label><button class="btn secondary" type="submit"><i data-lucide="plus"></i> 记录一条更新</button></form>
+        </section>
+
+        <aside class="weekly-report-edit-panel">
+          <div class="section-title-row"><div><p class="eyebrow">REPORT INFO</p><h3>周报信息</h3></div></div>
+          <form method="post" action="{{ url_for('main.weekly_report_update', report_id=selected_weekly_report.id) }}" class="stack-form compact-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>周报标题<input name="title" value="{{ selected_weekly_report.title }}" required></label><label>报告日期<input type="date" name="report_date" value="{{ selected_weekly_report.report_date }}" required></label><div class="form-grid"><label>开始<input type="date" name="period_start" value="{{ selected_weekly_report.period_start or '' }}"></label><label>结束<input type="date" name="period_end" value="{{ selected_weekly_report.period_end or '' }}"></label></div><label>所属项目<select name="project_id"><option value="">未归类项目</option>{% for project in projects %}<option value="{{ project.id }}" {{ 'selected' if selected_weekly_report.project_id == project.id }}>{{ project.code or '未编号' }} · {{ project.title }}</option>{% endfor %}</select></label><label>状态<select name="status">{% for value in weekly_report_statuses %}<option {{ 'selected' if selected_weekly_report.status == value }}>{{ value }}</option>{% endfor %}</select></label><label>摘要或说明<textarea name="summary" rows="5" placeholder="这份周报讲了什么？">{{ selected_weekly_report.summary }}</textarea></label><button class="btn primary full" type="submit"><i data-lucide="save"></i> 保存信息</button></form>
+          <div class="weekly-folder-note"><i data-lucide="folder-tree"></i><span><b>本地归档位置</b><small>{{ selected_weekly_report.folder_path }}</small></span></div>
+        </aside>
+      </div>
+    </article>
+    {% else %}
+    <div class="panel weekly-reader-empty"><i data-lucide="calendar-plus"></i><h2>从一份周报开始</h2><p>上传本地 PPT/PDF 后，这里会展示标题、日期、反馈和修改时间线。</p><a class="btn primary" href="#weekly-upload"><i data-lucide="upload"></i> 上传第一份周报</a></div>
+    {% endif %}
+  </main>
+</div>
+
+<section class="panel weekly-upload-panel" id="weekly-upload">
+  <div class="panel-head"><div><p class="eyebrow">LOCAL ARCHIVE</p><h2>上传并归档周报</h2></div><span class="count-label">PPT / PDF / ODP / KEY</span></div>
+  <form method="post" action="{{ url_for('main.weekly_report_upload') }}" enctype="multipart/form-data" class="weekly-upload-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label class="weekly-file-drop"><i data-lucide="file-up"></i><span><b>选择本地周报文件</b><small>文件会保存在本机资料目录，并保留原始文件名</small></span><input type="file" name="report_file" accept=".ppt,.pptx,.pdf,.odp,.key" required></label><div class="form-grid weekly-upload-fields"><label>周报标题<input name="title" placeholder="留空则使用 PPT 文件名"></label><label>报告日期<input type="date" name="report_date" value="{{ week_end }}" required></label><label>所属项目<select name="project_id"><option value="">未归类项目</option>{% for project in projects %}<option value="{{ project.id }}">{{ project.code or '未编号' }} · {{ project.title }}</option>{% endfor %}</select></label><label>状态<select name="status">{% for value in weekly_report_statuses %}<option>{{ value }}</option>{% endfor %}</select></label><label>周期开始<input type="date" name="period_start" value="{{ week_start }}"></label><label>周期结束<input type="date" name="period_end" value="{{ week_end }}"></label><label class="field-span-2">摘要或说明<textarea name="summary" rows="2" placeholder="可选：本周完成、问题和下一步"></textarea></label></div><button class="btn primary" type="submit"><i data-lucide="archive-restore"></i> 保存到周报资料库</button></form>
+</section>
+
+<details class="panel weekly-generator-panel" id="weekly-generator">
+  <summary class="feature-summary"><div><p class="eyebrow">PPT GENERATOR</p><h2>从实验证据生成新周报</h2><small>保留现有的证据预览与 PPT 导出能力，生成后可再次上传归档。</small></div><span class="feature-summary-meta"><span class="count-label">{{ experiments|length }} 个实验可用</span><i data-lucide="chevron-down"></i></span></summary>
+  <div class="feature-body">
+    <form method="post" class="stack-form presentation-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>汇报标题<input name="title" value="{{ report_title }}" maxlength="120" required></label><div class="form-grid"><label>开始日期<input type="date" name="start_date" value="{{ week_start }}" required></label><label>结束日期<input type="date" name="end_date" value="{{ week_end }}" required></label></div><fieldset class="presentation-experiment-field"><legend>纳入实验</legend><div class="presentation-select-actions"><button type="button" class="btn ghost" data-report-select="all"><i data-lucide="list-checks"></i> 全选</button><button type="button" class="btn ghost" data-report-select="none"><i data-lucide="square"></i> 清空</button></div><div class="presentation-experiment-list">{% for experiment in experiments %}<label class="presentation-experiment-option"><input type="checkbox" name="experiment_ids" value="{{ experiment.id }}" {{ 'checked' if experiment.id in selected_ids }}><span><b>{{ experiment.title }}</b><small>{{ experiment.code or '未编号' }} · {{ experiment.status }} · {{ experiment.records|length }} 条过程记录</small></span></label>{% else %}<div class="empty compact-empty"><p>还没有实验计划。</p></div>{% endfor %}</div></fieldset><fieldset class="presentation-skill-field"><legend>选择 PPT Skill</legend><div class="presentation-skill-list">{% for skill in builtin_skills %}<label><input type="radio" name="presentation_skill" value="{{ skill.id }}" {{ 'checked' if selected_skill.id == skill.id }}><span><i data-lucide="badge-check"></i><b>{{ skill.name }}</b><small>{{ skill.description }}</small><em>内置已审核</em></span></label>{% endfor %}{% for skill in custom_skills %}<label><input type="radio" name="presentation_skill" value="user:{{ skill.id }}" {{ 'checked' if selected_skill.id == ('user:' ~ skill.id) }}><span><i data-lucide="layout-template"></i><b>{{ skill.name }}</b><small>{{ skill.description or '用户自定义页面结构' }}</small><em>声明式 Skill</em></span></label>{% endfor %}</div></fieldset><label class="toggle-line"><span><b>包含结果图片</b><small>自动选取日期范围内可预览的实验图片。</small></span><input type="checkbox" name="include_images" value="1" {{ 'checked' if include_images }}></label><div class="form-actions split-actions"><button class="btn secondary" name="action" value="preview"><i data-lucide="scan-search"></i> 预览证据与结构</button><button class="btn primary" name="action" value="export"><i data-lucide="presentation"></i> 生成并下载 PPTX</button></div></form>
+    {% if preview_payload %}<section class="presentation-preview-panel"><div class="panel-head"><div><p class="eyebrow">EVIDENCE PREVIEW</p><h2>导出前预览</h2></div><span class="badge">{{ preview_payload.skill.name }}</span></div><div class="presentation-preview-metrics"><span><b>{{ preview_payload.metrics.experiment_count }}</b><small>实验</small></span><span><b>{{ preview_payload.metrics.record_count }}</b><small>过程记录</small></span><span><b>{{ preview_payload.metrics.image_count }}</b><small>结果图</small></span><span><b>{{ preview_payload.metrics.attention_count }}</b><small>待核验</small></span></div><div class="presentation-preview-grid"><div><h3>纳入实验</h3>{% for experiment in preview_payload.experiments %}<a href="{{ url_for('main.experiment_detail', item_id=experiment.id) }}"><b>{{ experiment.title }}</b><small>{{ experiment.code }} · {{ experiment.record_count }} 条过程记录 · {{ experiment.latest_result }}</small></a>{% endfor %}</div><div><h3>结果证据</h3>{% for evidence in preview_payload.evidence %}<div><b>{{ evidence.date }} · {{ evidence.experiment }}</b><small>{{ evidence.result }} · {{ evidence.parameters }}</small><p>{{ evidence.summary }}</p></div>{% else %}<p class="muted">当前日期范围没有过程记录。</p>{% endfor %}</div></div></section>{% endif %}
+  </div>
+</details>
+
+<details class="panel presentation-skill-editor">
+  <summary class="feature-summary"><div><p class="eyebrow">CUSTOM SKILLS</p><h2>创建自己的 PPT Skill</h2><small>定义页面结构与叙事顺序，供上方的 PPT 生成器选用。</small></div><span class="feature-summary-meta"><span class="count-label">只保存说明，不执行脚本</span><i data-lucide="chevron-down"></i></span></summary>
+  <div class="feature-body">
+    <form method="post" action="{{ url_for('main.presentation_skill_save') }}" class="stack-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="form-grid three">
+        <label>Skill 名称<input name="name" placeholder="例如：课题组组会模板" required></label>
+        <label>视觉主题<select name="theme"><option value="evidence">证据蓝绿</option><option value="review">复盘暖色</option></select></label>
+        <label>用途说明<input name="description" placeholder="适用场景"></label>
+      </div>
+      <label>排版与叙事说明<textarea name="instructions" rows="4" placeholder="例如：先展示原始证据，再总结进展；失败原因标为推断。" required></textarea></label>
+      <label>页面结构（每行一页）<textarea name="slides" rows="7" placeholder="封面&#10;研究问题&#10;实验进展&#10;结果证据&#10;下一步计划" required></textarea></label>
+      <div class="form-actions"><button class="btn secondary"><i data-lucide="save"></i> 保存 Skill</button></div>
+    </form>
+    {% if custom_skills %}<div class="custom-skill-list">{% for skill in custom_skills %}<div><span><b>{{ skill.name }}</b><small>{{ skill.description or skill.theme }}</small></span><form method="post" action="{{ url_for('main.presentation_skill_delete', item_id=skill.id) }}" data-confirm="删除这个 PPT Skill？"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-btn danger" title="删除 Skill" aria-label="删除这个 PPT Skill"><i data-lucide="trash-2"></i></button></form></div>{% endfor %}</div>{% endif %}
+  </div>
+</details>
+{% endblock %}
+{% block scripts %}<script>
+document.querySelectorAll('[data-report-select]').forEach((button) => button.addEventListener('click', () => {
+  document.querySelectorAll('.presentation-experiment-option input').forEach((input) => { input.checked = button.dataset.reportSelect === 'all'; });
+}));
+</script>{% endblock %}

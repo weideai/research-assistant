@@ -7,6 +7,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN groupadd --system research && useradd --system --gid research --home /app research
+
+# fonts-noto-cjk is required for PDF export: reportlab needs a font with CJK
+# glyphs, otherwise every Chinese character renders blank. See export_service.
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt requirements-prod.txt ./
 RUN python -m pip install --upgrade pip && python -m pip install -r requirements-prod.txt
 

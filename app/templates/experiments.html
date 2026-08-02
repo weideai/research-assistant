@@ -5,19 +5,22 @@
   <div>
     <p class="eyebrow">WORK / EXPERIMENTS</p>
     <h1>实验计划</h1>
-    <p class="muted">查找实验计划，开始一次执行，或从步骤模板快速建立方案。</p>
+    <p class="muted">查找实验计划，新建实验批次，或从步骤模板快速建立方案。</p>
   </div>
   <div class="page-head-actions">
     <a class="btn ghost" href="{{ url_for('main.template_center', kind='steps') }}"><i data-lucide="copy"></i> 模板中心</a>
-    <a class="btn primary" href="#create-experiment"><i data-lucide="plus"></i> 新建实验计划</a>
+    <button class="btn primary" type="button" data-dialog-open="create-experiment"><i data-lucide="plus"></i> 新建实验计划</button>
   </div>
 </header>
 
-<section class="workspace-intro" id="create-experiment">
-  <div class="workspace-intro-copy">
-    <span class="intro-index">01</span>
-    <div><h2>新建实验计划</h2><p>先定义目标和方案，再从计划中创建真实执行并逐条记录过程。</p></div>
-  </div>
+<nav class="section-tabs" aria-label="实验台视图">
+  <a href="{{ url_for('workspace.projects') }}"><i data-lucide="folder-kanban"></i><span><b>科研项目</b><small>按课题组织</small></span></a>
+  <a class="active" href="{{ url_for('main.experiments', status=selected_status, project_id=requested_project_id) }}" aria-current="page"><i data-lucide="flask-conical"></i><span><b>全部计划</b><small>{{ pagination.total }} 个结果</small></span></a>
+</nav>
+
+<dialog class="workspace-dialog" id="create-experiment" data-workspace-dialog aria-labelledby="create-experiment-title">
+  <header class="workspace-dialog-head"><div><p class="eyebrow">NEW EXPERIMENT</p><h2 id="create-experiment-title">新建实验计划</h2><p class="muted">先定义目标和方案，再从计划中创建实验批次并逐条记录过程。</p></div><button class="icon-btn" type="button" data-dialog-close aria-label="关闭新建实验计划"><i data-lucide="x"></i></button></header>
+  <div class="workspace-dialog-body">
   <div class="creation-choice-list">
     <details class="creation-choice" open>
       <summary><span><i data-lucide="file-plus-2"></i><b>空白创建</b><small>从研究目的开始</small></span><i data-lucide="chevron-down"></i></summary>
@@ -47,33 +50,52 @@
           <label>开始日期<input type="date" name="start_date" value="{{ today }}"></label>
           <label>负责人<input name="owner" value="{{ current_user.name }}"></label>
         </div>
-        <p class="form-hint"><i data-lucide="info"></i> 模板只负责计划步骤；实验执行和过程记录会在创建计划后单独维护。<a href="{{ url_for('main.template_center', kind='steps') }}">查看全部模板</a></p>
+        <p class="form-hint"><i data-lucide="info"></i> 模板只负责计划步骤；实验批次和过程记录会在创建计划后单独维护。<a href="{{ url_for('main.template_center', kind='steps') }}">查看全部模板</a></p>
         <div class="form-actions"><button class="btn secondary" {% if not templates %}disabled{% endif %}><i data-lucide="copy-plus"></i> 使用模板创建</button></div>
       </form>
     </details>
   </div>
-</section>
+  </div>
+</dialog>
 
-<div class="list-toolbar">
-  <div><p class="eyebrow">YOUR WORK</p><h2>实验计划</h2></div>
-  <div class="filter-bar">{% for status in ['全部','未开始','进行中','完成','暂停'] %}<a class="chip {{ 'active' if selected_status == status }}" href="{{ url_for('main.experiments', status=status, project_id=requested_project_id) }}">{{ status }}</a>{% endfor %}</div>
+<div class="file-center-toolbar list-index-toolbar">
+  <form method="get" class="index-filter-form">
+    <label class="grow"><span>查找计划或批次</span><input name="q" value="{{ search }}" placeholder="计划名称、编号、负责人或批次信息"></label>
+    <label><span>所属项目</span><select name="project_id"><option value="">全部项目</option>{% for project in projects %}<option value="{{ project.id }}" {{ 'selected' if requested_project_id == project.id }}>{{ project.code or '未编号' }} · {{ project.title }}</option>{% endfor %}</select></label>
+    <label><span>计划状态</span><select name="status"><option>全部</option>{% for value in experiment_statuses %}<option {{ 'selected' if selected_status == value }}>{{ value }}</option>{% endfor %}</select></label>
+    <label><span>每页数量</span><select name="per_page">{% for value in page_sizes %}<option value="{{ value }}" {{ 'selected' if page_size == value }}>{{ value }} 个</option>{% endfor %}</select></label>
+    <button class="btn primary"><i data-lucide="search"></i> 筛选</button>
+    {% if search or requested_project_id or selected_status != '全部' %}<a class="btn ghost" href="{{ url_for('main.experiments') }}"><i data-lucide="x"></i> 清除</a>{% endif %}
+  </form>
+  <span class="muted">找到 {{ pagination.total }} 个实验计划</span>
 </div>
+
+<form id="experiment-index-bulk-form" method="post" action="{{ url_for('main.experiment_bulk') }}" class="resource-bulk-form index-resource-bulk" data-bulk-form data-bulk-label="实验计划">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="q" value="{{ search }}"><input type="hidden" name="return_status" value="{{ selected_status }}"><input type="hidden" name="return_project_id" value="{{ requested_project_id or '' }}"><input type="hidden" name="page" value="{{ pagination.page }}"><input type="hidden" name="per_page" value="{{ page_size }}">
+  <details class="resource-bulk-panel"><summary><span><i data-lucide="list-checks"></i><b>批量编辑当前页计划</b></span><span data-bulk-selected>已选择 0 个</span></summary><div class="resource-bulk-body">
+    <div class="bulk-head"><label class="bulk-select-all"><input type="checkbox" data-bulk-select-all> 全选当前页</label><small>只修改勾选的实验计划</small></div>
+    <div class="bulk-fields bulk-fields-wide"><label>计划状态<select name="bulk_status"><option value="__keep__">保持不变</option>{% for value in experiment_statuses %}<option>{{ value }}</option>{% endfor %}</select></label><label>负责人操作<select name="owner_mode"><option value="keep">保持不变</option><option value="replace">统一替换</option><option value="clear">清空</option></select></label><label>负责人<input name="owner" maxlength="80" placeholder="新的负责人"></label><label>项目操作<select name="project_mode"><option value="keep">保持不变</option><option value="replace">统一归入</option></select></label><label class="bulk-grow">目标项目<select name="bulk_project_id"><option value="">选择项目</option>{% for project in projects %}<option value="{{ project.id }}">{{ project.code or '未编号' }} · {{ project.title }}</option>{% endfor %}</select></label></div>
+    <div class="bulk-actions"><button class="btn secondary" name="action" value="update" disabled><i data-lucide="save"></i> 批量保存</button></div>
+  </div></details>
+</form>
 
 <section class="experiment-grid clean-experiment-grid">
   {% for experiment in experiments %}
   <article class="experiment-card">
-    <div class="experiment-card-top"><span class="badge state-{{ experiment.status }}">{{ experiment.status }}</span><small>{{ experiment.code or 'NO CODE' }}</small></div>
+    <label class="experiment-card-select"><input type="checkbox" name="experiment_ids" value="{{ experiment.id }}" form="experiment-index-bulk-form" data-bulk-select aria-label="选择实验计划 {{ experiment.title }}"><span>选择</span></label>
+    <div class="experiment-card-top"><span class="badge" data-state="{{ experiment.status | state_tone }}">{{ experiment.status }}</span><small>{{ experiment.code or 'NO CODE' }}</small></div>
     <div class="experiment-card-context">{% if experiment.project %}<i data-lucide="folder-kanban"></i>{{ experiment.project.title }}{% else %}<i data-lucide="folder"></i>未归类项目{% endif %}</div>
     <h2><a href="{{ url_for('main.experiment_detail', item_id=experiment.id) }}">{{ experiment.title }}</a></h2>
     <p>{{ experiment.objective or '尚未填写实验目的。' }}</p>
     {% set execution_progress = namespace(total=0, done=0) %}{% for execution in experiment.batches if not execution.is_deleted %}{% set execution_progress.total = execution_progress.total + execution.steps|length %}{% set execution_progress.done = execution_progress.done + execution.steps|selectattr('is_done')|list|length %}{% endfor %}
-    <div class="progress-caption"><span>{{ '执行步骤进度' if execution_progress.total else '计划步骤' }}</span><b>{% if execution_progress.total %}{{ execution_progress.done }}/{{ execution_progress.total }}{% else %}{{ experiment.steps|length }} 个{% endif %}</b></div>
+    <div class="progress-caption"><span>{{ '批次步骤进度' if execution_progress.total else '计划步骤' }}</span><b>{% if execution_progress.total %}{{ execution_progress.done }}/{{ execution_progress.total }}{% else %}{{ experiment.steps|length }} 个{% endif %}</b></div>
     <div class="progress-line"><span style="width: {{ (execution_progress.done / execution_progress.total * 100) if execution_progress.total else 0 }}%"></span></div>
-    <div class="experiment-meta"><span><i data-lucide="layers-3"></i>{{ experiment.batches|rejectattr('is_deleted')|list|length }} 次执行</span><span><i data-lucide="notebook-pen"></i>{{ experiment.records|rejectattr('is_deleted')|list|length }} 条过程记录</span><span><i data-lucide="calendar-days"></i>{{ experiment.updated_at.strftime('%m/%d') }}</span></div>
+    <div class="experiment-meta"><span><i data-lucide="layers-3"></i>{{ experiment.batches|rejectattr('is_deleted')|list|length }} 个批次</span><span><i data-lucide="notebook-pen"></i>{{ experiment.records|rejectattr('is_deleted')|list|length }} 条过程记录</span><span><i data-lucide="calendar-days"></i>{{ experiment.updated_at.strftime('%m/%d') }}</span></div>
     <a class="card-link" href="{{ url_for('main.experiment_detail', item_id=experiment.id) }}">打开实验计划 <i data-lucide="arrow-right"></i></a>
   </article>
   {% else %}
-  <div class="empty span-full"><i data-lucide="flask-conical"></i><h3>还没有实验计划</h3><p>先创建计划和方案，再从计划中开始一次真实实验执行。</p><a class="btn primary" href="#create-experiment">开始创建</a></div>
+  <div class="empty span-full"><i data-lucide="flask-conical"></i><h3>还没有实验计划</h3><p>先创建计划和方案，再从计划中新建实验批次。</p><button class="btn primary" type="button" data-dialog-open="create-experiment"><i data-lucide="plus"></i> 开始创建</button></div>
   {% endfor %}
 </section>
+{% set pagination_label = '实验计划列表翻页' %}{% set page_item_label = '个计划' %}{% include '_pagination.html' %}
 {% endblock %}

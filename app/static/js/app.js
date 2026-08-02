@@ -1,14 +1,6 @@
 document.addEventListener("DOMContentLoaded", () => {
   if (window.lucide) window.lucide.createIcons();
 
-  const accountMenu = document.querySelector("#account-menu");
-  document.addEventListener("click", (event) => {
-    if (accountMenu?.open && !accountMenu.contains(event.target)) accountMenu.open = false;
-  });
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && accountMenu?.open) accountMenu.open = false;
-  });
-
   const modelDiscoveryRoot = document.querySelector("[data-model-discovery-url]");
   if (modelDiscoveryRoot) {
     const discoveryUrl = modelDiscoveryRoot.dataset.modelDiscoveryUrl;
@@ -151,13 +143,6 @@ document.addEventListener("DOMContentLoaded", () => {
       .catch(() => {});
   }
 
-  const sidebar = document.querySelector("#sidebar");
-  document.querySelector("#menu-toggle")?.addEventListener("click", () => sidebar?.classList.toggle("open"));
-  document.addEventListener("click", (event) => {
-    if (window.innerWidth <= 820 && sidebar?.classList.contains("open") &&
-        !sidebar.contains(event.target) && !event.target.closest("#menu-toggle")) sidebar.classList.remove("open");
-  });
-
   const appearanceDialog = document.querySelector("#appearance-dialog");
   const appearanceForm = document.querySelector("#appearance-form");
   const backgroundInput = document.querySelector("#background-input");
@@ -177,6 +162,32 @@ document.addEventListener("DOMContentLoaded", () => {
     appearanceDialog?.showModal();
   });
   document.querySelector("#appearance-close")?.addEventListener("click", () => appearanceDialog?.close());
+
+  const openWorkspaceDialog = (dialogId) => {
+    const dialog = document.getElementById(dialogId);
+    if (!(dialog instanceof HTMLDialogElement)) return;
+    if (!dialog.open) dialog.showModal();
+    window.requestAnimationFrame(() => {
+      dialog.querySelector("input:not([type='hidden']), select, textarea, button")?.focus();
+    });
+  };
+  document.querySelectorAll("[data-dialog-open]").forEach((trigger) => {
+    trigger.addEventListener("click", (event) => {
+      event.preventDefault();
+      openWorkspaceDialog(trigger.dataset.dialogOpen);
+    });
+  });
+  document.querySelectorAll("dialog[data-workspace-dialog]").forEach((dialog) => {
+    dialog.querySelectorAll("[data-dialog-close]").forEach((button) => {
+      button.addEventListener("click", () => dialog.close());
+    });
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog) dialog.close();
+    });
+  });
+  const initialDialogId = window.location.hash.replace(/^#/, "");
+  if (initialDialogId) openWorkspaceDialog(initialDialogId);
+
   appearanceDialog?.addEventListener("close", () => {
     if (!appearanceSubmitting && appearanceSnapshot) {
       document.documentElement.dataset.theme = appearanceSnapshot.theme;
@@ -221,34 +232,67 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
+  document.querySelectorAll("[data-report-template-picker]").forEach((picker) => {
+    picker.addEventListener("change", () => {
+      document.querySelectorAll("[data-report-export]").forEach((link) => {
+        const url = new URL(link.href, window.location.origin);
+        url.searchParams.set("report_template", picker.value);
+        link.href = url.pathname + url.search;
+      });
+    });
+  });
+
   document.querySelectorAll("[data-attachment-bulk]").forEach((form) => {
     const checkboxes = [...document.querySelectorAll(`[data-attachment-select][form="${form.id}"]`)];
-    const selectAll = form.querySelector("[data-attachment-select-all]");
+    const selectPage = form.querySelector("[data-attachment-select-page], [data-attachment-select-all]");
+    const selectAllMatches = form.querySelector("[data-attachment-select-all-matches]");
+    const selectionScope = form.querySelector("[data-attachment-selection-scope]");
     const selectedLabel = form.querySelector("[data-attachment-selected]");
     const actionButtons = [...form.querySelectorAll('button[name="action"]')];
+    const totalCount = Number.parseInt(form.dataset.total || `${checkboxes.length}`, 10) || 0;
+    let allMatchesSelected = selectionScope?.value === "all";
     const updateState = () => {
       const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
-      if (selectedLabel) selectedLabel.textContent = `已选择 ${selectedCount} 个`;
-      if (selectAll) {
-        selectAll.checked = checkboxes.length > 0 && selectedCount === checkboxes.length;
-        selectAll.indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
+      const effectiveCount = allMatchesSelected ? totalCount : selectedCount;
+      if (selectedLabel) {
+        selectedLabel.textContent = allMatchesSelected
+          ? `已选择全部 ${totalCount} 个匹配文件`
+          : `已选择本页 ${selectedCount} 个`;
       }
-      actionButtons.forEach((button) => { button.disabled = selectedCount === 0; });
+      if (selectPage) {
+        selectPage.checked = allMatchesSelected || (checkboxes.length > 0 && selectedCount === checkboxes.length);
+        selectPage.indeterminate = !allMatchesSelected && selectedCount > 0 && selectedCount < checkboxes.length;
+      }
+      if (selectionScope) selectionScope.value = allMatchesSelected ? "all" : "page";
+      selectAllMatches?.classList.toggle("is-active", allMatchesSelected);
+      selectAllMatches?.setAttribute("aria-pressed", allMatchesSelected ? "true" : "false");
+      actionButtons.forEach((button) => { button.disabled = effectiveCount === 0; });
+      form.classList.toggle("has-selection", effectiveCount > 0);
     };
-    selectAll?.addEventListener("change", () => {
-      checkboxes.forEach((checkbox) => { checkbox.checked = selectAll.checked; });
+    selectPage?.addEventListener("change", () => {
+      allMatchesSelected = false;
+      checkboxes.forEach((checkbox) => { checkbox.checked = selectPage.checked; });
       updateState();
     });
-    checkboxes.forEach((checkbox) => checkbox.addEventListener("change", updateState));
+    selectAllMatches?.addEventListener("click", () => {
+      allMatchesSelected = !allMatchesSelected;
+      checkboxes.forEach((checkbox) => { checkbox.checked = allMatchesSelected; });
+      updateState();
+    });
+    checkboxes.forEach((checkbox) => checkbox.addEventListener("change", () => {
+      allMatchesSelected = false;
+      updateState();
+    }));
     form.addEventListener("submit", (event) => {
       const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
-      if (!selectedCount) {
+      const effectiveCount = allMatchesSelected ? totalCount : selectedCount;
+      if (!effectiveCount) {
         event.preventDefault();
         window.alert("请先勾选至少一个文件。");
         return;
       }
       if (event.submitter?.value === "delete" &&
-          !window.confirm(`确定永久删除选中的 ${selectedCount} 个文件吗？此操作无法撤销。`)) {
+          !window.confirm(`确定将选中的 ${effectiveCount} 个文件移入回收站吗？原始文件不会立即删除。`)) {
         event.preventDefault();
       }
     });
@@ -283,9 +327,11 @@ document.addEventListener("DOMContentLoaded", () => {
         window.alert(`请先勾选至少一个${resourceLabel}。`);
         return;
       }
-      if (event.submitter?.value === "delete" &&
-          !window.confirm(`确定批量删除选中的 ${selectedCount} 个${resourceLabel}吗？此操作无法撤销。`)) {
-        event.preventDefault();
+      if (event.submitter?.value === "delete") {
+        const message = form.dataset.bulkDeleteMessage
+          ? form.dataset.bulkDeleteMessage.replace("{count}", String(selectedCount))
+          : `确定批量删除选中的 ${selectedCount} 个${resourceLabel}吗？此操作无法撤销。`;
+        if (!window.confirm(message)) event.preventDefault();
       }
     });
     updateState();
@@ -326,6 +372,23 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
+  const wireTabKeyboard = (tabs, activate) => {
+    tabs.forEach((tab, index) => {
+      tab.addEventListener("keydown", (event) => {
+        let nextIndex = null;
+        if (event.key === "ArrowRight") nextIndex = (index + 1) % tabs.length;
+        if (event.key === "ArrowLeft") nextIndex = (index - 1 + tabs.length) % tabs.length;
+        if (event.key === "Home") nextIndex = 0;
+        if (event.key === "End") nextIndex = tabs.length - 1;
+        if (nextIndex === null) return;
+        event.preventDefault();
+        const nextTab = tabs[nextIndex];
+        nextTab.focus();
+        activate(nextTab);
+      });
+    });
+  };
+
   // Keep the experiment page focused on one work area at a time. The panels
   // remain in the DOM so existing links, form actions and accessibility
   // fallbacks continue to work when JavaScript is unavailable.
@@ -349,6 +412,8 @@ document.addEventListener("DOMContentLoaded", () => {
       tabs.forEach((link) => {
         const active = link.dataset.experimentTab === tab;
         link.classList.toggle("active", active);
+        link.setAttribute("aria-selected", active ? "true" : "false");
+        link.tabIndex = active ? 0 : -1;
         if (active) link.setAttribute("aria-current", "page");
         else link.removeAttribute("aria-current");
       });
@@ -363,6 +428,7 @@ document.addEventListener("DOMContentLoaded", () => {
       event.preventDefault();
       setExperimentTab(link.dataset.experimentTab);
     }));
+    wireTabKeyboard(tabs, (link) => setExperimentTab(link.dataset.experimentTab));
     document.querySelectorAll("[data-experiment-tab-link]").forEach((link) => {
       link.addEventListener("click", (event) => {
         event.preventDefault();
@@ -374,6 +440,55 @@ document.addEventListener("DOMContentLoaded", () => {
     window.addEventListener("hashchange", () => {
       const next = tabForHash[window.location.hash.replace(/^#/, "")];
       if (next) setExperimentTab(next, false);
+    });
+  }
+
+  const batchWorkspace = document.querySelector("[data-batch-workspace]");
+  if (batchWorkspace) {
+    batchWorkspace.classList.add("tabs-ready");
+    const tabs = [...document.querySelectorAll("[data-batch-tab]")];
+    const panels = [...batchWorkspace.querySelectorAll("[data-batch-panel]")];
+    const tabForHash = {
+      "batch-steps": "steps", "new-record": "records", "batch-records": "records",
+      "batch-parameters": "resources", "batch-samples": "resources",
+    };
+    const hashForTab = {steps: "batch-steps", records: "new-record", resources: "batch-parameters"};
+    const setBatchTab = (value, updateHash = true) => {
+      const tab = ["steps", "records", "resources"].includes(value) ? value : "steps";
+      batchWorkspace.dataset.activeBatchTab = tab;
+      panels.forEach((panel) => { panel.hidden = panel.dataset.batchPanel !== tab; });
+      const activePanels = panels.filter((panel) => panel.dataset.batchPanel === tab);
+      const activeDetails = activePanels.filter((panel) => panel.matches("details"));
+      if (activeDetails.length && activeDetails.every((panel) => !panel.open)) activeDetails[0].open = true;
+      tabs.forEach((link) => {
+        const active = link.dataset.batchTab === tab;
+        link.classList.toggle("active", active);
+        link.setAttribute("aria-selected", active ? "true" : "false");
+        link.tabIndex = active ? 0 : -1;
+        if (active) link.setAttribute("aria-current", "page");
+        else link.removeAttribute("aria-current");
+      });
+      if (updateHash && window.history?.replaceState) window.history.replaceState(null, "", `#${hashForTab[tab]}`);
+    };
+    const hashName = window.location.hash.replace(/^#/, "");
+    let initialTab = tabForHash[hashName] || new URLSearchParams(window.location.search).get("view") || "steps";
+    if (new URLSearchParams(window.location.search).has("record_template_id")) initialTab = "records";
+    setBatchTab(initialTab, false);
+    tabs.forEach((link) => link.addEventListener("click", (event) => {
+      event.preventDefault();
+      setBatchTab(link.dataset.batchTab);
+    }));
+    wireTabKeyboard(tabs, (link) => setBatchTab(link.dataset.batchTab));
+    document.querySelectorAll("[data-batch-tab-link]").forEach((link) => {
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        setBatchTab(link.dataset.batchTabLink);
+        document.querySelector(link.getAttribute("href"))?.scrollIntoView({block: "start", behavior: "smooth"});
+      });
+    });
+    window.addEventListener("hashchange", () => {
+      const next = tabForHash[window.location.hash.replace(/^#/, "")];
+      if (next) setBatchTab(next, false);
     });
   }
 
@@ -396,6 +511,8 @@ document.addEventListener("DOMContentLoaded", () => {
       tabs.forEach((link) => {
         const active = link.dataset.recordTab === tab;
         link.classList.toggle("active", active);
+        link.setAttribute("aria-selected", active ? "true" : "false");
+        link.tabIndex = active ? 0 : -1;
         if (active) link.setAttribute("aria-current", "page");
         else link.removeAttribute("aria-current");
       });
@@ -407,6 +524,7 @@ document.addEventListener("DOMContentLoaded", () => {
       event.preventDefault();
       setRecordTab(link.dataset.recordTab);
     }));
+    wireTabKeyboard(tabs, (link) => setRecordTab(link.dataset.recordTab));
     document.querySelectorAll("[data-record-tab-link]").forEach((link) => {
       link.addEventListener("click", (event) => {
         event.preventDefault();
@@ -485,7 +603,7 @@ document.addEventListener("DOMContentLoaded", () => {
     updateViewLink();
   });
 
-  const aiFab = document.querySelector("#ai-fab");
+  const aiOpenButton = document.querySelector("[data-open-ai-assistant]");
   const aiDock = document.querySelector("#ai-dock");
   const aiMessages = document.querySelector("#ai-messages");
   const aiComposer = document.querySelector("#ai-composer");
@@ -516,6 +634,21 @@ document.addEventListener("DOMContentLoaded", () => {
   const aiContextSources = document.querySelector("#ai-context-sources");
   const aiContextWarning = document.querySelector("#ai-context-warning");
   const aiContextConfirm = document.querySelector("#ai-context-confirm");
+  const aiContextLabel = document.querySelector("#ai-context-label");
+  const aiContextState = document.querySelector("#ai-context-state");
+  const aiInputCount = document.querySelector("#ai-input-count");
+  const resizeAiInput = () => {
+    if (!aiInput) return;
+    aiInput.style.height = "auto";
+    const maxHeight = Number.parseFloat(window.getComputedStyle(aiInput).maxHeight) || 190;
+    const nextHeight = Math.min(aiInput.scrollHeight, maxHeight);
+    aiInput.style.height = `${nextHeight}px`;
+    aiInput.style.overflowY = aiInput.scrollHeight > maxHeight ? "auto" : "hidden";
+  };
+  const syncAiInputMeta = () => {
+    if (aiInputCount) aiInputCount.textContent = (aiInput?.value.length || 0).toLocaleString();
+    resizeAiInput();
+  };
   const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
   const assistantPage = {
     type: document.body.dataset.assistantPageType || "",
@@ -534,13 +667,11 @@ document.addEventListener("DOMContentLoaded", () => {
   let aiTaskStartedAt = 0;
   let aiTaskTimer = null;
   const baseDocumentTitle = document.title;
-  const aiWindowStorageKey = "research-assistant-window-state-v2";
+  const aiWindowStorageKey = "research-assistant-window-state-v3";
   const aiChannel = "BroadcastChannel" in window ? new BroadcastChannel("research-assistant-ai") : null;
-  document.querySelector("[data-open-ai-assistant]")?.addEventListener("click", () => aiFab?.click());
-
   const hideAiNotice = () => {
     if (aiCompletionToast) aiCompletionToast.hidden = true;
-    aiFab?.classList.remove("complete");
+    aiOpenButton?.classList.remove("complete");
     document.title = baseDocumentTitle;
   };
 
@@ -550,7 +681,7 @@ document.addEventListener("DOMContentLoaded", () => {
     aiCompletionToast.querySelector("small").textContent = message;
     aiCompletionToast.classList.toggle("failed", failed);
     aiCompletionToast.hidden = false;
-    aiFab?.classList.toggle("complete", !failed);
+    aiOpenButton?.classList.toggle("complete", !failed);
     document.title = `${failed ? "!" : "✓"} ${failed ? "AI 运行失败" : "AI 已完成"} · ${baseDocumentTitle}`;
   };
 
@@ -586,40 +717,46 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   const saveAiWindowState = () => {
-    if (!aiDock || window.innerWidth <= 600) return;
+    if (!aiDock) return;
+    if (aiDock.classList.contains("ai-maximized")) {
+      window.localStorage.setItem(aiWindowStorageKey, JSON.stringify({
+        ...readAiWindowState(), maximized: true,
+      }));
+      return;
+    }
     const rect = aiDock.getBoundingClientRect();
     window.localStorage.setItem(aiWindowStorageKey, JSON.stringify({
       left: Math.round(rect.left), top: Math.round(rect.top), width: Math.round(rect.width),
-      height: Math.round(rect.height), dock: aiDock.classList.contains("dock-left") ? "left" : (aiDock.classList.contains("dock-right") ? "right" : "free"),
-      maximized: aiDock.classList.contains("ai-maximized"),
+      height: Math.round(rect.height), maximized: false,
     }));
   };
 
+  const fitAiWindowToViewport = () => {
+    if (!aiDock || aiDock.classList.contains("ai-maximized")) return;
+    const width = Math.min(aiDock.offsetWidth, Math.max(window.innerWidth - 16, 1));
+    const height = Math.min(aiDock.offsetHeight, Math.max(window.innerHeight - 16, 1));
+    if (aiDock.offsetWidth !== width) aiDock.style.width = `${width}px`;
+    if (aiDock.offsetHeight !== height) aiDock.style.height = `${height}px`;
+    const rect = aiDock.getBoundingClientRect();
+    aiDock.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - rect.width - 8))}px`;
+    aiDock.style.top = `${Math.max(8, Math.min(rect.top, window.innerHeight - rect.height - 8))}px`;
+    aiDock.style.right = "auto";
+    aiDock.style.bottom = "auto";
+  };
+
   const applyAiWindowState = () => {
-    if (!aiDock || window.innerWidth <= 600) return;
+    if (!aiDock) return;
     const state = readAiWindowState();
     if (state.width) aiDock.style.width = `${Math.min(state.width, window.innerWidth - 24)}px`;
     if (state.height) aiDock.style.height = `${Math.min(state.height, window.innerHeight - 24)}px`;
-    aiDock.classList.toggle("dock-left", state.dock === "left");
-    aiDock.classList.toggle("dock-right", state.dock === "right");
     aiDock.classList.toggle("ai-maximized", Boolean(state.maximized));
-    if (state.dock === "free" && Number.isFinite(state.left) && Number.isFinite(state.top)) {
-      aiDock.style.left = `${Math.max(0, Math.min(state.left, window.innerWidth - 120))}px`;
-      aiDock.style.top = `${Math.max(0, Math.min(state.top, window.innerHeight - 80))}px`;
+    if (!state.maximized && Number.isFinite(state.left) && Number.isFinite(state.top)) {
+      aiDock.style.left = `${state.left}px`;
+      aiDock.style.top = `${state.top}px`;
       aiDock.style.right = "auto";
       aiDock.style.bottom = "auto";
     }
-  };
-
-  const dockAiWindow = (side) => {
-    if (!aiDock) return;
-    aiDock.classList.remove("ai-maximized", "dock-left", "dock-right");
-    aiDock.classList.add(side === "left" ? "dock-left" : "dock-right");
-    aiDock.style.left = "";
-    aiDock.style.top = "";
-    aiDock.style.right = "";
-    aiDock.style.bottom = "";
-    saveAiWindowState();
+    window.requestAnimationFrame(fitAiWindowToViewport);
   };
 
   const copyText = async (text, button) => {
@@ -662,9 +799,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const renderAiMessage = (message) => {
     const article = makeElement("article", `ai-message ${message.role}`);
     article.dataset.messageId = message.id || "";
+    const head = makeElement("div", "ai-message-head");
+    const avatar = makeElement("span", "ai-message-avatar");
+    avatar.innerHTML = `<i data-lucide="${message.role === "user" ? "user-round" : "sparkles"}"></i>`;
     const label = makeElement("small", "ai-message-role", message.role === "user" ? "你" : "AI 助手");
+    head.append(avatar, label);
     const content = makeElement("div", "ai-message-content", message.content);
-    article.append(label, content);
+    article.append(head, content);
 
     if (message.role === "assistant") {
       const actions = makeElement("div", "ai-message-actions");
@@ -903,14 +1044,15 @@ document.addEventListener("DOMContentLoaded", () => {
     const planCount = aiHistoryList?.querySelectorAll('input[name="experiment_ids"]:checked').length || 0;
     if (aiHistoryCount) {
       aiHistoryCount.textContent = executionCount
-        ? `已选择 ${executionCount} 次执行${planCount ? `、${planCount} 个计划` : ""}`
-        : (planCount ? `已选择 ${planCount} 个计划` : "未选择实验执行");
+        ? `已选择 ${executionCount} 个批次${planCount ? `、${planCount} 个计划` : ""}`
+        : (planCount ? `已选择 ${planCount} 个计划` : "未选择实验批次");
     }
     const pptLink = document.querySelector("#ai-create-ppt");
     if (pptLink) {
       const query = selectedExperimentIds().map((id) => `experiment_id=${encodeURIComponent(id)}`).join("&");
       pptLink.href = `/reports/presentation${query ? `?${query}` : ""}`;
     }
+    updateAiContextStatus();
   };
 
   const renderExperimentScope = (experiments, batches, selectedIds = [], selectedExecutionIds = [], pageScope = {}) => {
@@ -959,7 +1101,7 @@ document.addEventListener("DOMContentLoaded", () => {
       input.checked = selectedPlans.has(String(experiment.id));
       const copy = makeElement("span", "");
       copy.append(makeElement("b", "", experiment.title));
-      copy.append(makeElement("small", "", `${experiment.code} · ${experiment.status} · ${experimentBatches.length} 次执行`));
+      copy.append(makeElement("small", "", `${experiment.code} · ${experiment.status} · ${experimentBatches.length} 个批次`));
       label.append(input, copy);
       group.append(label);
       if (experimentBatches.length) {
@@ -984,11 +1126,11 @@ document.addEventListener("DOMContentLoaded", () => {
         });
         group.append(executionList);
       } else {
-        copy.querySelector("small").textContent = `${experiment.code} · ${experiment.status} · 尚无实验执行，仅发送计划信息`;
+        copy.querySelector("small").textContent = `${experiment.code} · ${experiment.status} · 尚无实验批次，仅发送计划信息`;
       }
       aiHistoryList.append(group);
     });
-    if (!aiExperimentOptions.length) aiHistoryList.append(makeElement("p", "", "还没有可选择的实验计划或执行"));
+    if (!aiExperimentOptions.length) aiHistoryList.append(makeElement("p", "", "还没有可选择的实验计划或批次"));
     updateHistoryCount();
   };
 
@@ -1007,6 +1149,24 @@ document.addEventListener("DOMContentLoaded", () => {
   const updateKnowledgeCount = () => {
     const count = selectedKnowledgeBaseIds().length;
     if (aiKnowledgeCount) aiKnowledgeCount.textContent = count ? `已选择 ${count} 个知识库` : "未选择知识库";
+    updateAiContextStatus();
+  };
+
+  const updateAiContextStatus = () => {
+    const executionCount = selectedBatchIds().length;
+    const planCount = aiHistoryList?.querySelectorAll('input[name="experiment_ids"]:checked').length || 0;
+    const knowledgeCount = selectedKnowledgeBaseIds().length;
+    const scopeLabel = executionCount
+      ? `${executionCount} 个实验批次${planCount ? ` · ${planCount} 个计划` : ""}`
+      : planCount
+        ? `${planCount} 个实验计划`
+        : (aiPageScope.batch_id ? "当前实验批次" : (aiPageScope.experiment_id ? "当前实验计划" : "未限定实验范围"));
+    if (aiContextLabel) aiContextLabel.textContent = `${scopeLabel} · ${knowledgeCount ? `${knowledgeCount} 个知识库` : "未选知识库"}`;
+    if (aiContextState) {
+      aiContextState.textContent = executionCount || planCount || aiPageScope.experiment_id || aiPageScope.batch_id
+        ? "范围已限定" : "仅使用当前会话";
+      aiContextState.classList.toggle("is-ready", Boolean(executionCount || planCount || aiPageScope.experiment_id || aiPageScope.batch_id));
+    }
   };
 
   const postAiForm = async (url, data) => {
@@ -1172,40 +1332,56 @@ document.addEventListener("DOMContentLoaded", () => {
     aiLoaded = true;
   };
 
-  aiFab?.addEventListener("click", async () => {
+  const openAiAssistant = async () => {
     hideAiNotice();
     aiDock?.classList.add("open");
     aiDock?.setAttribute("aria-hidden", "false");
+    fitAiWindowToViewport();
     if (!aiLoaded) {
       try { await loadAiState(); } catch (error) { aiWelcome(); }
     }
+    syncAiInputMeta();
     aiInput?.focus();
-  });
+  };
+  aiOpenButton?.addEventListener("click", openAiAssistant);
   if (new URLSearchParams(window.location.search).get("assistant") === "open") {
-    window.setTimeout(() => aiFab?.click(), 0);
+    window.setTimeout(openAiAssistant, 0);
   }
   document.querySelector("#ai-close")?.addEventListener("click", () => {
     aiDock?.classList.remove("open");
     aiDock?.setAttribute("aria-hidden", "true");
   });
-  aiCompletionToast?.addEventListener("click", () => aiFab?.click());
+  aiCompletionToast?.addEventListener("click", openAiAssistant);
 
-  document.querySelector("#ai-dock-left")?.addEventListener("click", () => dockAiWindow("left"));
-  document.querySelector("#ai-dock-right")?.addEventListener("click", () => dockAiWindow("right"));
   document.querySelector("#ai-maximize")?.addEventListener("click", () => {
     if (!aiDock) return;
-    aiDock.classList.toggle("ai-maximized");
-    saveAiWindowState();
+    if (!aiDock.classList.contains("ai-maximized")) {
+      saveAiWindowState();
+      aiDock.classList.add("ai-maximized");
+      saveAiWindowState();
+      return;
+    }
+    const state = readAiWindowState();
+    aiDock.classList.remove("ai-maximized");
+    if (state.width) aiDock.style.width = `${state.width}px`;
+    if (state.height) aiDock.style.height = `${state.height}px`;
+    if (Number.isFinite(state.left) && Number.isFinite(state.top)) {
+      aiDock.style.left = `${state.left}px`;
+      aiDock.style.top = `${state.top}px`;
+    }
+    window.requestAnimationFrame(() => {
+      fitAiWindowToViewport();
+      saveAiWindowState();
+    });
   });
   const aiDockHead = aiDock?.querySelector(".ai-dock-head");
   aiDockHead?.addEventListener("pointerdown", (event) => {
-    if (window.innerWidth <= 600 || aiDock.classList.contains("ai-maximized") || event.target.closest("button,a")) return;
+    if (aiDock.classList.contains("ai-maximized") || event.target.closest("button,a")) return;
     const rect = aiDock.getBoundingClientRect();
     const startX = event.clientX;
     const startY = event.clientY;
     const startLeft = rect.left;
     const startTop = rect.top;
-    aiDock.classList.remove("dock-left", "dock-right");
     aiDock.classList.add("ai-dragging");
     aiDock.style.left = `${startLeft}px`;
     aiDock.style.top = `${startTop}px`;
@@ -1213,8 +1389,8 @@ document.addEventListener("DOMContentLoaded", () => {
     aiDock.style.bottom = "auto";
     aiDockHead.setPointerCapture(event.pointerId);
     const move = (moveEvent) => {
-      const left = Math.max(0, Math.min(startLeft + moveEvent.clientX - startX, window.innerWidth - aiDock.offsetWidth));
-      const top = Math.max(0, Math.min(startTop + moveEvent.clientY - startY, window.innerHeight - aiDock.offsetHeight));
+      const left = Math.max(8, Math.min(startLeft + moveEvent.clientX - startX, window.innerWidth - aiDock.offsetWidth - 8));
+      const top = Math.max(8, Math.min(startTop + moveEvent.clientY - startY, window.innerHeight - aiDock.offsetHeight - 8));
       aiDock.style.left = `${left}px`;
       aiDock.style.top = `${top}px`;
     };
@@ -1230,13 +1406,49 @@ document.addEventListener("DOMContentLoaded", () => {
     aiDockHead.addEventListener("pointercancel", end);
   });
 
+  const aiResizeHandle = document.querySelector("#ai-resize-handle");
+  aiResizeHandle?.addEventListener("pointerdown", (event) => {
+    if (aiDock?.classList.contains("ai-maximized")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = aiDock.getBoundingClientRect();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startWidth = rect.width;
+    const startHeight = rect.height;
+    aiDock.classList.add("ai-resizing");
+    const move = (moveEvent) => {
+      const minWidth = Math.min(380, window.innerWidth - 16);
+      const minHeight = Math.min(520, window.innerHeight - 16);
+      const maxWidth = Math.max(minWidth, window.innerWidth - rect.left - 8);
+      const maxHeight = Math.max(minHeight, window.innerHeight - rect.top - 8);
+      aiDock.style.width = `${Math.max(minWidth, Math.min(startWidth + moveEvent.clientX - startX, maxWidth))}px`;
+      aiDock.style.height = `${Math.max(minHeight, Math.min(startHeight + moveEvent.clientY - startY, maxHeight))}px`;
+    };
+    const end = () => {
+      aiDock.classList.remove("ai-resizing");
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+      fitAiWindowToViewport();
+      saveAiWindowState();
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+  });
+
   if (aiDock && "ResizeObserver" in window) {
     let resizeSaveTimer;
     new ResizeObserver(() => {
       window.clearTimeout(resizeSaveTimer);
-      resizeSaveTimer = window.setTimeout(saveAiWindowState, 250);
+      resizeSaveTimer = window.setTimeout(() => {
+        fitAiWindowToViewport();
+        saveAiWindowState();
+      }, 250);
     }).observe(aiDock);
   }
+  window.addEventListener("resize", fitAiWindowToViewport);
   applyAiWindowState();
 
   const createAiConversation = async () => {
@@ -1305,6 +1517,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll("#ai-quick-prompts button").forEach((button) => {
     button.addEventListener("click", () => {
       if (aiInput) aiInput.value = button.textContent;
+      syncAiInputMeta();
       aiInput?.focus();
     });
   });
@@ -1454,6 +1667,9 @@ document.addEventListener("DOMContentLoaded", () => {
       aiComposer?.requestSubmit();
     }
   });
+  aiInput?.addEventListener("input", () => {
+    syncAiInputMeta();
+  });
 
   aiComposer?.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -1477,7 +1693,7 @@ document.addEventListener("DOMContentLoaded", () => {
     setAiTaskStatus("正在分析上下文和生成回复");
     if (aiStop) aiStop.hidden = false;
     sendButton.disabled = true;
-    aiFab?.classList.add("working");
+    aiOpenButton?.classList.add("working");
     if (aiModelLabel) aiModelLabel.textContent = "正在后台运行…";
     const pending = makeElement("div", "ai-thinking", "AI 正在分析…");
     aiMessages.append(pending);
@@ -1497,6 +1713,7 @@ document.addEventListener("DOMContentLoaded", () => {
       aiInput.value = "";
       aiFiles.value = "";
       aiFileList.innerHTML = "";
+      syncAiInputMeta();
       if (!aiDock?.classList.contains("open")) showAiNotice("点击查看本次回复");
       aiChannel?.postMessage({type: "completed", id: aiConversationId});
     } catch (error) {
@@ -1508,7 +1725,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (aiStop) aiStop.hidden = true;
       setAiTaskStatus("");
       sendButton.disabled = false;
-      aiFab?.classList.remove("working");
+      aiOpenButton?.classList.remove("working");
       if (aiModelLabel) aiModelLabel.textContent = aiModelLabel.dataset.idleLabel || "准备就绪";
     }
   });
@@ -1641,8 +1858,15 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   document.addEventListener("keydown", (event) => {
-    if (!aiDock || !aiDock.classList.contains("open")) return;
     const modifier = event.ctrlKey || event.metaKey;
+    if (modifier && event.key.toLowerCase() === "k" && (!aiDock || !aiDock.classList.contains("open"))) {
+      event.preventDefault();
+      const pageSearch = document.querySelector(".report-feed-search input, .report-search-form input, .file-center-search input, .weekly-index-filter input");
+      if (pageSearch) pageSearch.focus();
+      else document.querySelector(".topbar-search")?.click();
+      return;
+    }
+    if (!aiDock || !aiDock.classList.contains("open")) return;
     if (modifier && event.key.toLowerCase() === "n") {
       event.preventDefault();
       createAiConversation();

@@ -19,7 +19,7 @@ def _start_execution(client, app, experiment_id, batch_code="BATCH-01"):
 def test_register_login_logout(client, auth):
     response = auth.register()
     assert response.status_code == 200
-    assert "早上好".encode() in response.data
+    assert "科研工作台".encode() in response.data
 
     response = auth.logout()
     assert "登录科研工作台".encode() in response.data
@@ -73,7 +73,7 @@ def test_experiment_steps_and_records(client, auth, app):
         "content": "完成处理并收样。", "result": "成功", "remark": "重复一次。"
     })
     response = client.get(f"/experiments/{experiment_id}")
-    assert "实验执行".encode() in response.data
+    assert "实验批次".encode() in response.data
     assert "细胞铺板".encode() in response.data
     assert "张同学".encode() in response.data
     assert "每孔接种".encode() in response.data

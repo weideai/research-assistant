@@ -1,0 +1,32 @@
+schema_version: 1
+run:
+  id: "RUN-000"
+  task_id: "TASK-000"
+  started_at: "TBD"
+  completed_at: "TBD"
+  operator: "TBD"
+  status: "planned"
+environment:
+  operating_system: "TBD"
+  runtime_versions: {}
+  package_lock: "TBD"
+  git_commit: "TBD"
+execution:
+  command: "TBD"
+  working_directory: "TBD"
+  random_seed: "TBD"
+  parameters: {}
+inputs:
+  - path: "TBD"
+    sha256: "TBD"
+outputs:
+  - path: "TBD"
+    sha256: "TBD"
+logs:
+  stdout: "TBD"
+  stderr: "TBD"
+deviations: []
+human_approval:
+  reviewer: "TBD"
+  decision: "pending"
+  date: "TBD"

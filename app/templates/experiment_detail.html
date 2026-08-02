@@ -5,58 +5,65 @@
   <div>
     {% if experiment.project and not experiment.project.is_deleted %}<a class="back-link" href="{{ url_for('workspace.project_detail', item_id=experiment.project.id) }}"><i data-lucide="arrow-left"></i> 返回 {{ experiment.project.title }}</a>{% else %}<a class="back-link" href="{{ url_for('main.experiments') }}"><i data-lucide="arrow-left"></i> 返回实验计划</a>{% endif %}
     <h1>{{ experiment.title }}</h1>
-    <p class="muted">{% if experiment.project %}{{ experiment.project.title }} · {% endif %}{{ experiment.code or '未设置编号' }} · {{ batches|length }} 次实验执行</p>
+    <p class="muted">{% if experiment.project %}{{ experiment.project.title }} · {% endif %}{{ experiment.code or '未设置编号' }} · {{ batch_total }} 个实验批次 · <span class="edited-at" title="最后编辑 {{ experiment.updated_at|edited_at_title }}"><i data-lucide="history"></i>{{ experiment.updated_at|edited_at }}编辑</span></p>
   </div>
   <div class="page-head-actions">
-    <a class="btn primary" href="#batches" data-experiment-tab-link="batches"><i data-lucide="play"></i> {{ '新建实验执行' if not batches else '查看实验执行' }}</a>
+    <a class="btn secondary" href="{{ url_for('main.experiment_reports', item_id=experiment.id) }}"><i data-lucide="notebook-tabs"></i> 实验报告</a>
+    <a class="btn primary" href="#batches" data-experiment-tab-link="batches"><i data-lucide="play"></i> {{ '新建实验批次' if not batch_total else '查看实验批次' }}</a>
     <form class="experiment-export-form" method="get" action="{{ url_for('main.experiment_export', item_id=experiment.id) }}">
       <label class="experiment-export-picker"><span>导出格式</span><select name="format" aria-label="选择实验导出格式">
         <option value="markdown">Markdown 报告</option>
+        <option value="pdf">PDF 实验记录</option>
         <option value="docx">Word 文档 (.docx)</option>
         <option value="xlsx">Excel 工作簿 (.xlsx)</option>
         <option value="json">JSON 结构化数据</option>
         <option value="zip">ZIP 完整归档（含附件）</option>
       </select></label>
+      <label class="experiment-export-picker"><span>报告模板</span><select name="report_template" aria-label="选择 PDF 与 Word 报告模板">
+        {% for value, label in report_templates %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+      </select></label>
       <button class="btn secondary"><i data-lucide="download"></i> 导出</button>
     </form>
-    <span class="badge large state-{{ experiment.status }}">{{ experiment.status }}</span>
+    <span class="badge large" data-state="{{ experiment.status | state_tone }}">{{ experiment.status }}</span>
   </div>
 </header>
-<nav class="experiment-workspace-tabs" data-experiment-tabs aria-label="实验工作区">
-  <a href="#overview" data-experiment-tab="overview"><i data-lucide="layout-dashboard"></i><span><b>概览</b><small>目标与基本信息</small></span></a>
-  <a href="#protocol" data-experiment-tab="protocol"><i data-lucide="list-checks"></i><span><b>实验方案</b><small>步骤、参数与样本</small></span></a>
-  <a href="#batches" data-experiment-tab="batches"><i data-lucide="layers-3"></i><span><b>实验执行</b><small>{{ batches|length }} 次执行</small></span></a>
+<nav class="experiment-workspace-tabs" data-experiment-tabs role="tablist" aria-orientation="horizontal" aria-label="实验工作区">
+  <a id="experiment-tab-overview" href="#overview" data-experiment-tab="overview" role="tab" aria-selected="true" aria-controls="experiment-overview experiment-profile" tabindex="0"><i data-lucide="layout-dashboard"></i><span><b>概览</b><small>目标与基本信息</small></span></a>
+  <a id="experiment-tab-protocol" href="#protocol" data-experiment-tab="protocol" role="tab" aria-selected="false" aria-controls="experiment-steps experiment-protocol-resources" tabindex="-1"><i data-lucide="list-checks"></i><span><b>实验方案</b><small>步骤、参数与样本</small></span></a>
+  <a id="experiment-tab-batches" href="#batches" data-experiment-tab="batches" role="tab" aria-selected="false" aria-controls="experiment-batches" tabindex="-1"><i data-lucide="layers-3"></i><span><b>实验批次</b><small>{{ batch_total }} 个批次</small></span></a>
 </nav>
 <div class="detail-layout experiment-tabbed-layout" data-active-tab="overview" data-experiment-workspace>
   <div class="detail-main">
-    <details class="panel feature-disclosure batch-overview-panel" id="experiment-batches" data-experiment-panel="batches" open>
-      <summary class="feature-summary"><div><p class="eyebrow">EXECUTIONS</p><h2>实验执行</h2></div><span class="feature-summary-meta"><span class="count-label">{{ batches|length }} 次</span><i data-lucide="chevron-down"></i></span></summary>
+    <details class="panel feature-disclosure batch-overview-panel" id="experiment-batches" data-experiment-panel="batches" role="tabpanel" aria-labelledby="experiment-tab-batches" tabindex="0" open>
+      <summary class="feature-summary"><div><p class="eyebrow">BATCHES</p><h2>实验批次</h2></div><span class="feature-summary-meta"><span class="count-label">{{ batch_total }} 个</span><i data-lucide="chevron-down"></i></span></summary>
       <div class="feature-body">
-        <div class="experiment-batch-list">{% for batch in batches %}<a href="{{ url_for('workspace.batch_detail', item_id=batch.id) }}"><span class="batch-sequence">{{ '%02d'|format(loop.index) }}</span><span><b>{{ batch.batch_code or ('执行 ' ~ loop.index) }}</b><small>{{ batch.repeat_kind }} #{{ batch.repeat_number }}{% if batch.group_name %} · {{ batch.group_name }}{% endif %}</small></span><span class="badge">{{ batch.status }}</span><span><b>{{ batch.records|rejectattr('is_deleted')|list|length }}</b><small>过程记录</small></span><i data-lucide="chevron-right"></i></a>{% else %}<div class="empty compact-empty"><p>尚未开始实验执行。创建后，所有过程记录都会归入这一次执行。</p></div>{% endfor %}</div>
+        <div class="experiment-batch-list">{% for batch in batches %}<a href="{{ url_for('workspace.batch_detail', item_id=batch.id) }}"><span class="batch-sequence">{{ '%02d'|format((batch_pagination.page - 1) * batch_pagination.per_page + loop.index) }}</span><span><b>{{ batch.batch_code or ('批次 ' ~ ((batch_pagination.page - 1) * batch_pagination.per_page + loop.index)) }}</b><small>{{ batch.repeat_kind }} #{{ batch.repeat_number }}{% if batch.group_name %} · {{ batch.group_name }}{% endif %}</small></span><span class="badge">{{ batch.status }}</span><span><b>{{ batch.records|rejectattr('is_deleted')|list|length }}</b><small>过程记录</small></span><i data-lucide="chevron-right"></i></a>{% else %}<div class="empty compact-empty"><p>尚无实验批次。新建后，所有过程记录都会归入对应批次。</p></div>{% endfor %}</div>
         {% if selected_record_template %}
-        <div class="template-applied-note"><i data-lucide="notebook-tabs"></i><span>已填入记录模板 <b>{{ selected_record_template.name }}</b> 的调用入口。请选择一次实验执行后填写并保存。</span></div>
-        <div class="experiment-batch-list">{% for batch in batches %}<a href="{{ url_for('workspace.batch_detail', item_id=batch.id, record_template_id=selected_record_template.id) }}#new-record"><span class="batch-sequence">{{ '%02d'|format(loop.index) }}</span><span><b>{{ batch.batch_code or ('执行 ' ~ loop.index) }}</b><small>在这次执行中调用模板</small></span><span class="badge">{{ batch.status }}</span><span></span><i data-lucide="chevron-right"></i></a>{% else %}<div class="empty compact-empty"><p>请先新建一次实验执行，再调用过程记录模板。</p></div>{% endfor %}</div>
+        <div class="template-applied-note"><i data-lucide="notebook-tabs"></i><span>已填入记录模板 <b>{{ selected_record_template.name }}</b> 的调用入口。请选择一个实验批次后填写并保存。</span></div>
+        <div class="experiment-batch-list">{% for batch in batches %}<a href="{{ url_for('workspace.batch_detail', item_id=batch.id, record_template_id=selected_record_template.id) }}#new-record"><span class="batch-sequence">{{ '%02d'|format(loop.index) }}</span><span><b>{{ batch.batch_code or ('批次 ' ~ loop.index) }}</b><small>在这个批次中调用模板</small></span><span class="badge">{{ batch.status }}</span><span></span><i data-lucide="chevron-right"></i></a>{% else %}<div class="empty compact-empty"><p>请先新建实验批次，再调用过程记录模板。</p></div>{% endfor %}</div>
         {% endif %}
-        <form method="post" action="{{ url_for('workspace.batch_create', item_id=experiment.id) }}" class="batch-create-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input name="batch_code" placeholder="执行编号，如 RUN-02"><select name="repeat_kind">{% for kind in repeat_kinds %}<option>{{ kind }}</option>{% endfor %}</select><input type="number" name="repeat_number" min="1" value="{{ batches|length + 1 }}"><input name="group_name" placeholder="实验分组"><input name="operator" value="{{ experiment.owner or current_user.name }}" placeholder="实验人员"><input type="date" name="start_date" value="{{ today }}"><button class="btn secondary"><i data-lucide="play"></i> 新建实验执行</button></form>
-        {% if active_records %}
+        {% set pagination = batch_pagination %}{% set page_param = 'batch_page' %}{% set pagination_label = '实验批次翻页' %}{% set page_item_label = '个批次' %}{% include '_pagination.html' %}
+        <form method="post" action="{{ url_for('workspace.batch_create', item_id=experiment.id) }}" class="batch-create-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input name="batch_code" placeholder="批次编号，如 RUN-02"><select name="repeat_kind">{% for kind in repeat_kinds %}<option>{{ kind }}</option>{% endfor %}</select><input type="number" name="repeat_number" min="1" value="{{ batch_total + 1 }}"><input name="group_name" placeholder="实验分组"><input name="operator" value="{{ experiment.owner or current_user.name }}" placeholder="实验人员"><input type="date" name="start_date" value="{{ today }}"><button class="btn secondary"><i data-lucide="play"></i> 新建实验批次</button></form>
+        {% if record_total %}
         <details class="resource-bulk-panel" id="experiment-record-index">
-          <summary><span><i data-lucide="notebook-tabs"></i><b>跨执行过程记录索引</b></span><span>{{ active_records|length }} 条</span></summary>
+          <summary><span><i data-lucide="notebook-tabs"></i><b>跨批次过程记录索引</b></span><span>{{ record_total }} 条</span></summary>
           <div class="record-list">
             {% for record in active_records %}
             <article class="record-item">
               <span class="resource-select" aria-hidden="true"></span>
               <div class="record-date"><b>{{ record.record_date.strftime('%m/%d') }}</b><small>{{ record.record_date.strftime('%Y') }}</small></div>
-              <div class="record-body"><div class="record-head"><span class="badge">{{ record.lifecycle_status }}</span><span class="badge result-{{ record.result }}">{{ record.result }}</span><span>{{ record.batch.batch_code if record.batch else '历史未归档' }}</span><span>{{ record.operator or '未填写人员' }}</span></div><div class="record-block"><b>过程</b><p>{{ record.content|truncate(140) }}</p></div></div>
+              <div class="record-body"><div class="record-head"><span class="badge">{{ record.lifecycle_status }}</span><span class="badge" data-state="{{ record.result | state_tone }}">{{ record.result }}</span><span>{{ record.batch.batch_code if record.batch else '历史未归档' }}</span><span>{{ record.operator or '未填写人员' }}</span></div><div class="record-block"><b>过程</b><p>{{ record.content|truncate(140) }}</p></div></div>
               <div class="record-actions"><a class="icon-btn" href="{{ url_for('main.record_detail', record_id=record.id) }}" title="查看过程记录"><i data-lucide="arrow-up-right"></i></a></div>
             </article>
             {% endfor %}
           </div>
+          {% set pagination = record_pagination %}{% set page_param = 'record_page' %}{% set pagination_label = '跨批次过程记录翻页' %}{% set page_item_label = '条记录' %}{% include '_pagination.html' %}
         </details>
         {% endif %}
       </div>
     </details>
-    <details class="panel feature-disclosure" id="experiment-steps" data-experiment-panel="protocol" data-disclosure-key="experiment-{{ experiment.id }}-steps" open>
-      <summary class="feature-summary"><div><p class="eyebrow">PROTOCOL</p><h2>实验步骤</h2></div><span class="feature-summary-meta"><span class="count-label">{{ experiment.steps|length }} 个计划步骤</span><i data-lucide="chevron-down"></i></span></summary>
+    <details class="panel feature-disclosure" id="experiment-steps" data-experiment-panel="protocol" role="tabpanel" aria-labelledby="experiment-tab-protocol" tabindex="0" data-disclosure-key="experiment-{{ experiment.id }}-steps" open>
+      <summary class="feature-summary"><div><p class="eyebrow">PROTOCOL</p><h2>实验步骤</h2></div><span class="feature-summary-meta"><span class="count-label">{{ step_pagination.total }} 个计划步骤</span><i data-lucide="chevron-down"></i></span></summary>
       <div class="feature-body">
       <div class="component-template-tools" id="step-templates">
         <form method="post" action="{{ url_for('main.experiment_save_template', item_id=experiment.id) }}" class="component-template-form">
@@ -101,7 +108,7 @@
         </details>
       </form>
       <div class="timeline">
-        {% for step in experiment.steps %}
+        {% for step in steps %}
         <div class="timeline-step">
           <label class="resource-select"><input type="checkbox" name="step_ids" value="{{ step.id }}" form="step-bulk-form" data-bulk-select aria-label="选择步骤 {{ step.title }}"></label>
           <span class="step-marker plan-step-marker" aria-hidden="true">{{ step.position }}</span>
@@ -125,12 +132,13 @@
         <div class="empty compact-empty"><p>尚无实验步骤</p></div>
         {% endfor %}
       </div>
+      {% set pagination = step_pagination %}{% set page_param = 'step_page' %}{% set pagination_label = '实验步骤翻页' %}{% set page_item_label = '个步骤' %}{% include '_pagination.html' %}
       </div>
     </details>
 
-    <div class="research-trace-grid" data-experiment-panel="protocol">
+    <div class="research-trace-grid" id="experiment-protocol-resources" data-experiment-panel="protocol" role="tabpanel" aria-labelledby="experiment-tab-protocol" tabindex="0">
       <details class="panel trace-panel feature-disclosure" id="experiment-samples" data-disclosure-key="experiment-{{ experiment.id }}-samples">
-        <summary class="feature-summary"><div><p class="eyebrow">SAMPLES</p><h2>关联样本</h2></div><span class="feature-summary-meta"><span class="count-label">{{ experiment.sample_usages|length }} 个</span><i data-lucide="chevron-down"></i></span></summary>
+        <summary class="feature-summary"><div><p class="eyebrow">SAMPLES</p><h2>关联样本</h2></div><span class="feature-summary-meta"><span class="count-label">{{ sample_pagination.total }} 个</span><i data-lucide="chevron-down"></i></span></summary>
         <div class="feature-body">
         {% if sample_requirements %}<div class="template-requirement-hint"><i data-lucide="clipboard-list"></i><span><b>模板样本要求</b>{% for requirement in sample_requirements %}<small>{{ requirement.role }} · {{ requirement.amount_used or '用量待定' }}{% if requirement.notes %} · {{ requirement.notes }}{% endif %}</small>{% endfor %}</span></div>{% endif %}
         <form method="post" action="{{ url_for('main.experiment_sample_add', item_id=experiment.id) }}" class="trace-add-form">
@@ -154,15 +162,16 @@
           </div></details>
         </form>
         <div class="trace-list">
-          {% for usage in experiment.sample_usages %}
+          {% for usage in sample_usages %}
           <div class="trace-row"><label class="resource-select"><input type="checkbox" name="sample_usage_ids" value="{{ usage.id }}" form="sample-bulk-form" data-bulk-select aria-label="选择样本 {{ usage.sample.sample_code }}"></label><span><b>{{ usage.sample.sample_code }}</b><small>{{ usage.role }} · {{ usage.amount_used or '用量未填' }}{% if usage.notes %} · {{ usage.notes }}{% endif %}</small></span><form method="post" action="{{ url_for('main.experiment_sample_delete', item_id=usage.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-btn danger" title="解除关联"><i data-lucide="unlink"></i></button></form></div>
           {% else %}<div class="empty compact-empty"><p>尚未关联样本</p></div>{% endfor %}
         </div>
+        {% set pagination = sample_pagination %}{% set page_param = 'sample_page' %}{% set pagination_label = '关联样本翻页' %}{% set page_item_label = '个样本' %}{% include '_pagination.html' %}
         </div>
       </details>
 
       <details class="panel trace-panel feature-disclosure" id="plan-parameters" data-disclosure-key="experiment-{{ experiment.id }}-parameters">
-        <summary class="feature-summary"><div><p class="eyebrow">VARIABLES</p><h2>计划参数</h2></div><span class="feature-summary-meta"><span class="count-label">{{ experiment.plan_parameters|length }} 项</span><i data-lucide="chevron-down"></i></span></summary>
+        <summary class="feature-summary"><div><p class="eyebrow">VARIABLES</p><h2>计划参数</h2></div><span class="feature-summary-meta"><span class="count-label">{{ parameter_pagination.total }} 项</span><i data-lucide="chevron-down"></i></span></summary>
         <div class="feature-body">
         <form method="post" action="{{ url_for('main.experiment_parameter_add', item_id=experiment.id) }}" class="parameter-form" data-parameter-builder>
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -180,10 +189,11 @@
           </div></details>
         </form>
         <div class="parameter-list">
-          {% for parameter in experiment.plan_parameters %}
+          {% for parameter in plan_parameters %}
           <div class="parameter-row"><label class="resource-select"><input type="checkbox" name="parameter_ids" value="{{ parameter.id }}" form="parameter-bulk-form" data-bulk-select aria-label="选择参数 {{ parameter.name }}"></label><span><b>{{ parameter.name }}</b><small>{{ parameter.notes or '计划值' }}</small></span><strong>{{ parameter.value or '—' }} {{ parameter.unit }}</strong><form method="post" action="{{ url_for('main.experiment_parameter_delete', item_id=parameter.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-btn danger" title="删除参数"><i data-lucide="trash-2"></i></button></form></div>
           {% else %}<div class="empty compact-empty"><p>尚无结构化参数</p></div>{% endfor %}
         </div>
+        {% set pagination = parameter_pagination %}{% set page_param = 'parameter_page' %}{% set pagination_label = '计划参数翻页' %}{% set page_item_label = '项参数' %}{% include '_pagination.html' %}
         </div>
       </details>
     </div>
@@ -191,7 +201,36 @@
   </div>
 
   <aside class="detail-side">
-    <details class="panel sticky-panel feature-disclosure" data-experiment-panel="overview" data-disclosure-key="experiment-{{ experiment.id }}-overview" open>
+    <section class="panel experiment-overview-panel" id="experiment-overview" data-experiment-panel="overview" role="tabpanel" aria-labelledby="experiment-tab-overview" tabindex="0">
+      <div class="panel-head"><div><p class="eyebrow">EXPERIMENT SNAPSHOT</p><h2>实验工作台</h2></div><span class="count-label">{{ latest_activity_at.strftime('%Y-%m-%d %H:%M') }} 更新</span></div>
+      <div class="experiment-snapshot-metrics">
+        <div><b>{{ step_pagination.total }}</b><span>计划步骤</span></div>
+        <div><b>{{ batch_total }}</b><span>实验批次</span></div>
+        <div><b>{{ record_total }}</b><span>过程记录</span></div>
+        <div><b>{{ attachment_count }}</b><span>本地文件</span></div>
+      </div>
+      {% if experiment.objective %}<div class="experiment-snapshot-objective"><small>实验目的</small><p>{{ experiment.objective|truncate(260) }}</p></div>{% endif %}
+      <div class="experiment-snapshot-section">
+        <div class="snapshot-section-head"><b>计划步骤与最近批次</b>{% if latest_batch %}<a href="{{ url_for('workspace.batch_detail', item_id=latest_batch.id) }}">打开批次 <i data-lucide="arrow-up-right"></i></a>{% endif %}</div>
+        {% if snapshot_steps %}
+        <div class="experiment-plan-strip">
+          {% for step in snapshot_steps %}<span class="{{ 'has-execution' if latest_batch_steps and latest_batch_steps|selectattr('source_step_id', 'equalto', step.id)|selectattr('is_done')|list else '' }}"><i>{{ '%02d'|format(step.position) }}</i><b>{{ step.title }}</b><small>{{ step.planned_date or '未安排' }}</small></span>{% endfor %}
+        </div>
+        {% else %}<p class="muted small-text">还没有计划步骤，进入“实验方案”即可添加。</p>{% endif %}
+        {% if latest_batch %}<div class="snapshot-progress"><span><b>{{ latest_step_done }}/{{ latest_batch_steps|length }}</b> 最近批次步骤完成</span><span>{{ latest_batch.batch_code or '未编号批次' }} · {{ latest_batch.status }}</span></div>{% endif %}
+      </div>
+      <div class="experiment-snapshot-section">
+        <div class="snapshot-section-head"><b>最近过程记录</b><a href="#batches" data-experiment-tab-link="batches">查看全部 <i data-lucide="arrow-up-right"></i></a></div>
+        {% for record in recent_records %}<a class="snapshot-record-row" href="{{ url_for('main.record_detail', record_id=record.id) }}"><span class="snapshot-record-date">{{ record.record_date.strftime('%m/%d') }}</span><span><b>{{ record.batch.batch_code if record.batch else '历史记录' }}</b><small>{{ record.content|truncate(80) }}</small></span><span class="badge" data-state="{{ record.result | state_tone }}">{{ record.result }}</span></a>{% else %}<p class="muted small-text">还没有过程记录。</p>{% endfor %}
+      </div>
+      <div class="experiment-snapshot-section">
+        <div class="snapshot-section-head"><b>本地文件与结果</b><span>{{ attachment_size_label }}</span></div>
+        <div class="snapshot-file-categories">{% for category, count in attachment_category_counts.items() %}<span><b>{{ count }}</b>{{ category }}</span>{% else %}<span class="muted">还没有导入文件</span>{% endfor %}</div>
+        {% for attachment in recent_attachments[:4] %}<a class="snapshot-file-row" href="{{ url_for('main.attachment_download', item_id=attachment.id) }}"><i data-lucide="{{ 'image' if attachment.is_previewable_image else 'file' }}"></i><span><b>{{ attachment.original_name }}</b><small>{{ attachment.category }} · <span class="edited-at" title="最后编辑 {{ attachment.updated_at|edited_at_title }}">{{ attachment.updated_at|edited_at }}</span> · {{ attachment.size_label }}</small></span><i data-lucide="download"></i></a>{% endfor %}
+        <a class="snapshot-files-link" href="{{ url_for('main.experiment_files', item_id=experiment.id) }}">进入实验文件中心 <i data-lucide="arrow-right"></i></a>
+      </div>
+    </section>
+    <details class="panel sticky-panel feature-disclosure" id="experiment-profile" data-experiment-panel="overview" role="tabpanel" aria-labelledby="experiment-tab-overview" tabindex="0" data-disclosure-key="experiment-{{ experiment.id }}-overview" open>
       <summary class="feature-summary"><div><p class="eyebrow">OVERVIEW</p><h2>计划信息</h2></div><span class="feature-summary-meta"><span class="count-label">{{ experiment.status }}</span><i data-lucide="chevron-down"></i></span></summary>
       <div class="feature-body">
       <form method="post" class="stack-form compact-form">
@@ -206,7 +245,7 @@
         <button class="btn secondary full"><i data-lucide="save"></i> 保存信息</button>
       </form>
       <hr>
-      <form method="post" action="{{ url_for('main.experiment_delete', item_id=experiment.id) }}" data-confirm="将实验计划及其所有实验执行、过程记录移入回收站？文件不会被删除。">
+      <form method="post" action="{{ url_for('main.experiment_delete', item_id=experiment.id) }}" data-confirm="将实验计划及其所有实验批次、过程记录移入回收站？文件不会被删除。">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button class="text-danger"><i data-lucide="trash-2"></i> 移入回收站</button>
       </form>

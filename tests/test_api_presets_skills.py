@@ -131,6 +131,34 @@ def test_disabled_default_preset_is_not_presented_as_current(client, auth, app):
     assert client.get("/assistant/state").get_json()["api"]["enabled"] is False
 
 
+def test_presentation_skill_editor_is_reachable_from_the_weekly_report_page(client, auth, app):
+    """Every skill route needs a UI entry point, or the feature is unusable."""
+    auth.register()
+    page = client.get("/reports/presentation")
+    assert page.status_code == 200
+    body = page.get_data(as_text=True)
+    assert "/reports/presentation/skills" in body, "缺少创建 Skill 的表单入口"
+    assert "创建自己的 PPT Skill" in body
+    assert 'name="slides"' in body and 'name="instructions"' in body
+
+    saved = client.post("/reports/presentation/skills", data={
+        "name": "可达性检查", "description": "验证入口",
+        "theme": "evidence", "instructions": "说明。",
+        "slides": "封面\n结论",
+    })
+    assert saved.status_code == 302
+    with app.app_context():
+        skill_id = PresentationSkill.query.one().id
+
+    listing = client.get("/reports/presentation").get_data(as_text=True)
+    assert "可达性检查" in listing
+    assert f"/reports/presentation/skills/{skill_id}/delete" in listing, "缺少删除入口"
+
+    removed = client.post(f"/reports/presentation/skills/{skill_id}/delete")
+    assert removed.status_code == 302
+    assert "可达性检查" not in client.get("/reports/presentation").get_data(as_text=True)
+
+
 def test_custom_presentation_skill_can_preview_evidence(client, auth, app):
     auth.register()
     client.post("/experiments", data={"title": "Skill 实验", "code": "SK-01"})

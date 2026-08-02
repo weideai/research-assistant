@@ -6,23 +6,23 @@
     <div class="breadcrumb">
       {% if record.experiment.project %}<a href="{{ url_for('workspace.project_detail', item_id=record.experiment.project.id) }}">{{ record.experiment.project.title }}</a><i data-lucide="chevron-right"></i>{% endif %}
       <a href="{{ url_for('main.experiment_detail', item_id=record.experiment_id) }}#batches">{{ record.experiment.title }}</a><i data-lucide="chevron-right"></i>
-      {% if record.batch %}<a href="{{ url_for('workspace.batch_detail', item_id=record.batch.id) }}#batch-records">{{ record.batch.batch_code or '未编号执行' }}</a><i data-lucide="chevron-right"></i>{% endif %}<span>{{ record.record_date }}</span>
+      {% if record.batch %}<a href="{{ url_for('workspace.batch_detail', item_id=record.batch.id) }}#batch-records">{{ record.batch.batch_code or '未编号批次' }}</a><i data-lucide="chevron-right"></i>{% endif %}<span>{{ record.record_date }}</span>
     </div>
-    <a class="back-link" href="{{ url_for('workspace.batch_detail', item_id=record.batch.id) if record.batch else url_for('main.experiment_detail', item_id=record.experiment_id) }}"><i data-lucide="arrow-left"></i> {{ ('返回 ' ~ (record.batch.batch_code or '实验执行')) if record.batch else ('返回 ' ~ record.experiment.title) }}</a>
+    <a class="back-link" href="{{ url_for('workspace.batch_detail', item_id=record.batch.id) if record.batch else url_for('main.experiment_detail', item_id=record.experiment_id) }}"><i data-lucide="arrow-left"></i> {{ ('返回 ' ~ (record.batch.batch_code or '实验批次')) if record.batch else ('返回 ' ~ record.experiment.title) }}</a>
     <h1>{{ record.record_date }} 过程记录</h1>
-    <p class="muted">{{ record.batch.batch_code if record.batch else '历史未归档' }} · 创建于 {{ record.created_at.strftime('%Y-%m-%d %H:%M') }} · 更新于 {{ record.updated_at.strftime('%Y-%m-%d %H:%M') }}</p>
+    <p class="muted">{{ record.batch.batch_code if record.batch else '历史未归档' }} · 创建于 {{ record.created_at.strftime('%Y-%m-%d %H:%M') }} · <span class="edited-at" title="最后编辑 {{ record.updated_at|edited_at_title }}"><i data-lucide="history"></i>{{ record.updated_at|edited_at }}编辑</span></p>
   </div>
-  <div class="page-head-actions"><a class="btn primary" href="#record-edit" data-record-tab-link="edit"><i data-lucide="pencil"></i> 编辑记录</a><span class="badge large lifecycle-{{ record.lifecycle_status }}">{{ record.lifecycle_status }}</span><span class="badge large result-{{ record.result }}">{{ record.result }}</span></div>
+  <div class="page-head-actions"><a class="btn secondary" href="{{ url_for('main.experiment_reports', item_id=record.experiment_id, record_id=record.id) }}"><i data-lucide="notebook-tabs"></i> 报告视图</a><a class="btn primary" href="#record-edit" data-record-tab-link="edit"><i data-lucide="pencil"></i> 编辑记录</a><span class="badge large" data-state="{{ record.lifecycle_status | state_tone }}">{{ record.lifecycle_status }}</span><span class="badge large" data-state="{{ record.result | state_tone }}">{{ record.result }}</span></div>
 </header>
-<nav class="record-workspace-tabs" data-record-tabs aria-label="记录工作区">
-  <a href="#record-view" data-record-tab="view"><i data-lucide="book-open"></i><span><b>阅读</b><small>查看已记录内容</small></span></a>
-  <a href="#record-files" data-record-tab="files"><i data-lucide="folder-open"></i><span><b>文件与数据</b><small>{{ record.attachments|rejectattr('is_deleted')|list|length }} 个文件</small></span></a>
-  <a href="#record-edit" data-record-tab="edit"><i data-lucide="square-pen"></i><span><b>编辑</b><small>修改记录内容</small></span></a>
-  <a href="#record-history" data-record-tab="history"><i data-lucide="history"></i><span><b>模板与修订</b><small>{{ record.revisions|length }} 次修订</small></span></a>
+<nav class="record-workspace-tabs" data-record-tabs role="tablist" aria-orientation="horizontal" aria-label="记录工作区">
+  <a id="record-tab-view" href="#record-view" data-record-tab="view" role="tab" aria-selected="true" aria-controls="record-view" tabindex="0"><i data-lucide="book-open"></i><span><b>阅读</b><small>查看已记录内容</small></span></a>
+  <a id="record-tab-files" href="#record-files" data-record-tab="files" role="tab" aria-selected="false" aria-controls="record-files" tabindex="-1"><i data-lucide="folder-open"></i><span><b>文件与数据</b><small>{{ record.attachments|rejectattr('is_deleted')|list|length }} 个文件</small></span></a>
+  <a id="record-tab-edit" href="#record-edit" data-record-tab="edit" role="tab" aria-selected="false" aria-controls="record-edit" tabindex="-1"><i data-lucide="square-pen"></i><span><b>编辑</b><small>修改记录内容</small></span></a>
+  <a id="record-tab-history" href="#record-history" data-record-tab="history" role="tab" aria-selected="false" aria-controls="record-history record-template-tools" tabindex="-1"><i data-lucide="history"></i><span><b>模板与修订</b><small>{{ record.revisions|length }} 次修订</small></span></a>
 </nav>
 <div class="detail-layout record-detail-layout record-tabbed-layout" data-active-record-tab="view" data-record-workspace>
   <div class="detail-main">
-    <section class="panel record-sheet" id="record-view" data-record-panel="view">
+    <section class="panel record-sheet" id="record-view" data-record-panel="view" role="tabpanel" aria-labelledby="record-tab-view" tabindex="0">
       <div class="panel-head"><div><p class="eyebrow">RECORD</p><h2>记录内容</h2></div>{% if record.lifecycle_status == '草稿' %}<form method="post" action="{{ url_for('main.record_finalize', record_id=record.id) }}" data-confirm="定稿后每次修改都必须填写原因并保留修订历史。确认定稿？"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn secondary"><i data-lucide="badge-check"></i> 定稿</button></form>{% else %}<span class="record-finalized-note"><i data-lucide="lock-keyhole"></i>{{ record.finalized_at.strftime('%Y-%m-%d %H:%M') if record.finalized_at else '已锁定修订流程' }}</span>{% endif %}</div>
       <div class="record-view">
         <div class="record-facts"><span><small>实验人员</small><b>{{ record.operator or '未填写' }}</b></span><span><small>记录日期</small><b>{{ record.record_date }}</b></span><span><small>实验结果</small><b>{{ record.result }}</b></span></div>
@@ -45,9 +45,9 @@
       </div>
     </section>
 
-    <details class="panel feature-disclosure" id="record-history" data-record-panel="history" open><summary class="feature-summary"><div><p class="eyebrow">AUDIT TRAIL</p><h2>修订历史</h2></div><span class="feature-summary-meta"><span class="count-label">{{ record.revisions|length }} 次</span><i data-lucide="chevron-down"></i></span></summary><div class="feature-body revision-list">{% for revision in record.revisions %}<details><summary><span><b>修订 {{ record.revisions|length - loop.index0 }}</b><small>{{ revision.created_at.strftime('%Y-%m-%d %H:%M') }} · {{ revision.reason }}</small></span><i data-lucide="chevron-down"></i></summary><div class="revision-diff"><div><small>修改前</small><pre>{{ revision.before_json }}</pre></div><div><small>修改后</small><pre>{{ revision.after_json }}</pre></div></div></details>{% else %}<div class="empty compact-empty"><i data-lucide="history"></i><p>暂无修订记录</p><small>记录定稿后再次修改时，这里会保留修改原因和前后差异。</small></div>{% endfor %}</div></details>
+    <details class="panel feature-disclosure" id="record-history" data-record-panel="history" role="tabpanel" aria-labelledby="record-tab-history" tabindex="0" open><summary class="feature-summary"><div><p class="eyebrow">AUDIT TRAIL</p><h2>修订历史</h2></div><span class="feature-summary-meta"><span class="count-label">{{ record.revisions|length }} 次</span><i data-lucide="chevron-down"></i></span></summary><div class="feature-body revision-list">{% for revision in record.revisions %}<details><summary><span><b>修订 {{ record.revisions|length - loop.index0 }}</b><small>{{ revision.created_at.strftime('%Y-%m-%d %H:%M') }} · {{ revision.reason }}</small></span><i data-lucide="chevron-down"></i></summary><div class="revision-diff"><div><small>修改前</small><pre>{{ revision.before_json }}</pre></div><div><small>修改后</small><pre>{{ revision.after_json }}</pre></div></div></details>{% else %}<div class="empty compact-empty"><i data-lucide="history"></i><p>暂无修订记录</p><small>记录定稿后再次修改时，这里会保留修改原因和前后差异。</small></div>{% endfor %}</div></details>
 
-    <section class="panel attachment-panel" id="record-files" data-record-panel="files">
+    <section class="panel attachment-panel" id="record-files" data-record-panel="files" role="tabpanel" aria-labelledby="record-tab-files" tabindex="0">
       <div class="panel-head">
         <div><p class="eyebrow">RESULTS & DATA</p><h2>实验结果与数据</h2></div>
         <div class="attachment-head-actions">
@@ -134,7 +134,7 @@
   </div>
 
   <aside class="detail-side">
-    <details class="panel template-save-panel feature-disclosure" id="record-template-tools" data-record-panel="history" data-disclosure-key="record-{{ record.id }}-template" open>
+    <details class="panel template-save-panel feature-disclosure" id="record-template-tools" data-record-panel="history" role="tabpanel" aria-labelledby="record-tab-history" tabindex="0" data-disclosure-key="record-{{ record.id }}-template" open>
       <summary class="feature-summary"><div><p class="eyebrow">REUSE</p><h2>记录模板</h2></div><span class="feature-summary-meta"><span class="template-ready-label">{{ record.parameters|length }} 个参数</span><i data-lucide="chevron-down"></i></span></summary>
       <div class="feature-body">
         <form method="post" action="{{ url_for('main.record_template_save', record_id=record.id) }}" class="stack-form compact-form">
@@ -147,11 +147,11 @@
         {% if record_templates %}<div class="saved-template-list"><small>已保存记录模板</small>{% for template in record_templates %}<a href="{{ url_for('main.record_template_detail', item_id=template.id) }}"><span><b>{{ template.name }}</b><small>{{ template.parameters|length }} 个参数</small></span><i data-lucide="arrow-right"></i></a>{% endfor %}</div>{% endif %}
       </div>
     </details>
-    <section class="panel sticky-panel record-edit-panel" id="record-edit" data-record-panel="edit">
+    <section class="panel sticky-panel record-edit-panel" id="record-edit" data-record-panel="edit" role="tabpanel" aria-labelledby="record-tab-edit" tabindex="0">
       <div class="panel-head"><div><p class="eyebrow">EDIT</p><h2>编辑记录</h2></div></div>
       <form method="post" class="stack-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <div class="form-grid"><label>日期<input type="date" name="record_date" value="{{ record.record_date }}" {% if record.batch and record.batch.start_date %}min="{{ record.batch.start_date }}"{% endif %} {% if record.batch and record.batch.end_date %}max="{{ record.batch.end_date }}"{% endif %}><small>日期必须处于所属实验执行区间内</small></label><label>实验人员<input name="operator" value="{{ record.operator }}"></label></div>
+        <div class="form-grid"><label>日期<input type="date" name="record_date" value="{{ record.record_date }}" {% if record.batch and record.batch.start_date %}min="{{ record.batch.start_date }}"{% endif %} {% if record.batch and record.batch.end_date %}max="{{ record.batch.end_date }}"{% endif %}><small>日期必须处于所属实验批次区间内</small></label><label>实验人员<input name="operator" value="{{ record.operator }}"></label></div>
         <label>结果<select name="result">{% for value in ['待确认','成功','失败'] %}<option {{ 'selected' if record.result == value }}>{{ value }}</option>{% endfor %}</select></label>
         <label>实验条件<textarea name="conditions" rows="4">{{ record.conditions or '' }}</textarea></label>
         <label>实验过程<textarea name="content" rows="8" required>{{ record.content }}</textarea></label>
@@ -160,7 +160,7 @@
         <button class="btn primary full"><i data-lucide="save"></i> 保存修改</button>
       </form>
       <hr>
-      {% if record.lifecycle_status == '草稿' %}<form method="post" action="{{ url_for('workspace.record_move_batch', item_id=record.id) }}" class="stack-form compact-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>所属实验执行<select name="batch_id">{% for batch in record.experiment.batches if not batch.is_deleted %}<option value="{{ batch.id }}" {{ 'selected' if record.batch_id == batch.id }}>{{ batch.batch_code or ('执行 ' ~ loop.index) }}</option>{% endfor %}</select></label><button class="btn ghost full"><i data-lucide="move-right"></i> 调整执行归属</button></form>{% else %}<div class="notice inline-notice"><i data-lucide="lock-keyhole"></i><span>记录定稿后执行归属锁定；如需更正，请在上方编辑并填写修订原因。</span></div>{% endif %}
+      {% if record.lifecycle_status == '草稿' %}<form method="post" action="{{ url_for('workspace.record_move_batch', item_id=record.id) }}" class="stack-form compact-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>所属实验批次<select name="batch_id">{% for batch in record.experiment.batches if not batch.is_deleted %}<option value="{{ batch.id }}" {{ 'selected' if record.batch_id == batch.id }}>{{ batch.batch_code or ('批次 ' ~ loop.index) }}</option>{% endfor %}</select></label><button class="btn ghost full"><i data-lucide="move-right"></i> 调整批次归属</button></form>{% else %}<div class="notice inline-notice"><i data-lucide="lock-keyhole"></i><span>记录定稿后批次归属锁定；如需更正，请在上方编辑并填写修订原因。</span></div>{% endif %}
     </section>
   </aside>
 </div>

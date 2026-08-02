@@ -1,6 +1,39 @@
-{% extends "base.html" %}{% block title %}样本管理{% endblock %}{% block content %}
+{% extends "base.html" %}
+{% block title %}样本管理{% endblock %}
+{% block content %}
 <header class="page-head"><div><p class="eyebrow">SAMPLE INVENTORY</p><h1>样本管理</h1><p class="muted">用准确的位置编码管理珍贵样本。</p></div><a class="btn secondary" href="{{ url_for('main.export_csv', resource='samples') }}"><i data-lucide="download"></i> 导出 CSV</a></header>
-<section class="panel form-panel"><form method="post" class="quick-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>样本编号<input name="sample_code" required placeholder="Sample001"></label><label>样本类型<input name="sample_type" placeholder="骨肉瘤类器官"></label><label>来源<input name="source" placeholder="Patient 01"></label><label class="grow">存放位置<input name="location" placeholder="液氮 A区 / 2层 / 3号盒 / A5"></label><label>数量<input name="quantity" placeholder="3 管"></label><label>状态<select name="status"><option>可用</option><option>使用中</option><option>耗尽</option><option>异常</option></select></label><label class="grow">备注<input name="notes" placeholder="冻存日期、来源编号等"></label><button class="btn primary"><i data-lucide="plus"></i> 样本入库</button></form></section>
-<form class="search-bar" method="get"><i data-lucide="search"></i><input name="q" value="{{ keyword }}" placeholder="搜索编号、类型、来源或位置"><button class="btn secondary">搜索</button>{% if keyword %}<a href="{{ url_for('main.samples') }}">清除</a>{% endif %}</form>
-<section class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>样本编号</th><th>类型 / 来源</th><th>存放位置</th><th>数量</th><th>关联实验</th><th>状态</th><th>更新时间</th><th></th></tr></thead><tbody>{% for sample in samples %}<tr><td><b class="mono">{{ sample.sample_code }}</b></td><td>{{ sample.sample_type or '—' }}<small class="cell-note">{{ sample.source or '来源未填写' }}</small></td><td>{{ sample.location or '—' }}</td><td>{{ sample.quantity or '—' }}</td><td><b>{{ sample.experiment_usages|length }}</b> 个</td><td><span class="badge sample-{{ sample.status }}">{{ sample.status }}</span></td><td>{{ sample.updated_at.strftime('%Y-%m-%d') }}</td><td><div class="row-actions"><a class="icon-btn" href="{{ url_for('main.sample_edit', item_id=sample.id) }}"><i data-lucide="pencil"></i></a><form method="post" action="{{ url_for('main.sample_delete', item_id=sample.id) }}" data-confirm="确定删除这个样本？"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-btn danger"><i data-lucide="trash-2"></i></button></form></div></td></tr>{% else %}<tr><td colspan="8" class="empty-cell">没有找到样本</td></tr>{% endfor %}</tbody></table></div></section>
+
+<div class="creation-choice-list">
+  <details class="creation-choice">
+    <summary><span><i data-lucide="flask-conical"></i><b>样本入库</b><small>登记新样本与存放位置</small></span><i data-lucide="chevron-down"></i></summary>
+    <form method="post" class="quick-form creation-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>样本编号<input name="sample_code" required placeholder="Sample001"></label><label>样本类型<input name="sample_type" placeholder="骨肉瘤类器官"></label><label>来源<input name="source" placeholder="Patient 01"></label><label class="grow">存放位置<input name="location" placeholder="液氮 A区 / 2层 / 3号盒 / A5"></label><label>数量<input name="quantity" placeholder="3 管"></label><label>状态<select name="status">{% for value in sample_statuses %}<option>{{ value }}</option>{% endfor %}</select></label><label class="grow">备注<input name="notes" placeholder="冻存日期、来源编号等"></label><button class="btn primary"><i data-lucide="plus"></i> 样本入库</button></form>
+  </details>
+</div>
+
+<div class="file-center-toolbar list-index-toolbar">
+  <form method="get" class="index-filter-form compact-index-filter">
+    <label class="grow"><span>查找样本</span><input name="q" value="{{ keyword }}" placeholder="编号、类型、来源或位置"></label>
+    <label><span>样本状态</span><select name="status"><option>全部</option>{% for value in sample_statuses %}<option {{ 'selected' if status == value }}>{{ value }}</option>{% endfor %}</select></label>
+    <label><span>每页数量</span><select name="per_page">{% for value in page_sizes %}<option value="{{ value }}" {{ 'selected' if page_size == value }}>{{ value }} 个</option>{% endfor %}</select></label>
+    <button class="btn primary"><i data-lucide="search"></i> 筛选</button>
+    {% if keyword or status != '全部' %}<a class="btn ghost" href="{{ url_for('main.samples') }}"><i data-lucide="x"></i> 清除</a>{% endif %}
+  </form>
+  <span class="muted">找到 {{ pagination.total }} 个样本</span>
+</div>
+
+<form id="sample-bulk-form" method="post" action="{{ url_for('main.sample_bulk') }}" class="resource-bulk-form index-resource-bulk" data-bulk-form data-bulk-label="样本">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="q" value="{{ keyword }}"><input type="hidden" name="return_status" value="{{ status }}"><input type="hidden" name="page" value="{{ pagination.page }}"><input type="hidden" name="per_page" value="{{ page_size }}">
+  <details class="resource-bulk-panel"><summary><span><i data-lucide="list-checks"></i><b>批量编辑当前页样本</b></span><span data-bulk-selected>已选择 0 个</span></summary><div class="resource-bulk-body">
+    <div class="bulk-head"><label class="bulk-select-all"><input type="checkbox" data-bulk-select-all> 全选当前页</label><small>适合批量调整库存状态或迁移存放位置</small></div>
+    <div class="bulk-fields"><label>样本状态<select name="bulk_status"><option value="__keep__">保持不变</option>{% for value in sample_statuses %}<option>{{ value }}</option>{% endfor %}</select></label><label>位置操作<select name="location_mode"><option value="keep">保持不变</option><option value="replace">统一替换</option><option value="clear">清空</option></select></label><label class="bulk-grow">存放位置<input name="location" maxlength="180" placeholder="新的统一位置"></label></div>
+    <div class="bulk-actions"><button class="btn secondary" name="action" value="update" disabled><i data-lucide="save"></i> 批量保存</button></div>
+  </div></details>
+</form>
+
+<section class="panel table-panel">
+  <div class="table-wrap"><table><thead><tr><th class="check-col">选择</th><th>样本编号</th><th>类型 / 来源</th><th>存放位置</th><th>数量</th><th>关联实验</th><th>状态</th><th>更新时间</th><th></th></tr></thead><tbody>
+  {% for sample in samples %}<tr><td><label class="resource-select"><input type="checkbox" name="sample_ids" value="{{ sample.id }}" form="sample-bulk-form" data-bulk-select aria-label="选择样本 {{ sample.sample_code }}"></label></td><td><b class="mono">{{ sample.sample_code }}</b></td><td>{{ sample.sample_type or '—' }}<small class="cell-note">{{ sample.source or '来源未填写' }}</small></td><td>{{ sample.location or '—' }}</td><td>{{ sample.quantity or '—' }}</td><td><b>{{ sample.experiment_usages|length }}</b> 个</td><td><span class="badge" data-state="{{ sample.status | state_tone }}">{{ sample.status }}</span></td><td><span class="edited-at" title="最后编辑 {{ sample.updated_at|edited_at_title }}">{{ sample.updated_at|edited_at }}</span></td><td><div class="row-actions"><a class="icon-btn" href="{{ url_for('main.sample_edit', item_id=sample.id) }}" title="编辑样本"><i data-lucide="pencil"></i></a><form method="post" action="{{ url_for('main.sample_delete', item_id=sample.id) }}" data-confirm="确定删除这个样本？"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-btn danger" title="删除样本"><i data-lucide="trash-2"></i></button></form></div></td></tr>{% else %}<tr><td colspan="9" class="empty-cell">当前筛选条件下没有样本</td></tr>{% endfor %}
+  </tbody></table></div>
+  {% set pagination_label = '样本列表翻页' %}{% set page_item_label = '个样本' %}{% include '_pagination.html' %}
+</section>
 {% endblock %}

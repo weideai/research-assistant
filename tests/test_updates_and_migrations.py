@@ -19,9 +19,9 @@ def test_update_check_uses_cache_and_falls_back_offline(tmp_path, monkeypatch):
     def latest(_repository, timeout=4):
         calls.append(timeout)
         return {
-            "latest_version": "2.1.0",
-            "release_url": "https://github.com/weideai/research-assistant/releases/tag/v2.1.0",
-            "release_name": "V2.1",
+            "latest_version": "2.6.0",
+            "release_url": "https://github.com/weideai/research-assistant/releases/tag/v2.6.0",
+            "release_name": "V2.6",
             "published_at": "2026-07-23T00:00:00Z",
         }
 
@@ -48,8 +48,8 @@ def test_update_route_is_authenticated_and_returns_release(client, auth, monkeyp
     auth.register()
     monkeypatch.setattr("app.update_service.check_for_update", lambda *_args, **_kwargs: {
         "status": "ok",
-        "current_version": "2.0.0",
-        "latest_version": "2.1.0",
+        "current_version": "2.1.0",
+        "latest_version": "2.2.0",
         "release_url": "https://example.test/release",
         "update_available": True,
     })

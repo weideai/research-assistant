@@ -7,6 +7,7 @@ from app import create_app, db
 def app(tmp_path):
     app = create_app({
         "TESTING": True,
+        "LOCAL_MODE": False,
         "WTF_CSRF_ENABLED": False,
         "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
         "SECRET_KEY": "test-key",
@@ -24,6 +25,7 @@ def app(tmp_path):
         "ATTACHMENT_UPLOAD_DIR": str(tmp_path / "experiment-files"),
         "AI_UPLOAD_DIR": str(tmp_path / "assistant-files"),
         "KNOWLEDGE_UPLOAD_DIR": str(tmp_path / "knowledge-files"),
+        "WEEKLY_REPORT_UPLOAD_DIR": str(tmp_path / "weekly-reports"),
         "BACKUP_DIR": str(tmp_path / "backups"),
     })
     with app.app_context():

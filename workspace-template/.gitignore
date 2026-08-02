@@ -1,0 +1,24 @@
+# Sensitive or large research data
+data/raw/*
+data/interim/*
+data/processed/*
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+!data/processed/.gitkeep
+
+# Generated outputs
+results/*
+figures/generated/*
+final-package/*
+!results/.gitkeep
+!figures/generated/.gitkeep
+!final-package/.gitkeep
+
+# Secrets, local environments, and caches
+.env
+.venv/
+renv/library/
+__pycache__/
+.pytest_cache/
+*.log
+*.tmp

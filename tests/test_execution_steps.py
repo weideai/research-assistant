@@ -112,6 +112,6 @@ def test_plan_page_has_no_completion_controls_and_execution_page_does(client, au
     assert "1 个计划步骤" in plan_html
 
     execution_html = client.get(f"/batches/{batch_id}").get_data(as_text=True)
-    assert "本次执行步骤" in execution_html
+    assert "本批次步骤" in execution_html
     assert "批量更新完成状态" in execution_html
     assert "/batch-steps/" in execution_html

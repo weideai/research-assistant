@@ -1,0 +1,22 @@
+schema_version: 1
+project:
+  title: "{{PROJECT_TITLE}}"
+  created: "{{CREATED_DATE}}"
+  owner: "TBD"
+  organization: "TBD"
+  research_question: "TBD"
+  study_type: "TBD"
+governance:
+  sensitivity: "unknown"
+  ethics_approval: "TBD"
+  external_ai_allowed: false
+  approved_ai_destinations: []
+  raw_data_policy: "immutable"
+reproducibility:
+  primary_language: "TBD"
+  environment_file: "TBD"
+  workflow_entrypoint: "TBD"
+  random_seed: "TBD"
+status:
+  phase: "setup"
+  human_approved: false

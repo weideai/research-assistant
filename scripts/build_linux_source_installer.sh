@@ -19,6 +19,8 @@ tar \
   --exclude='./build' \
   --exclude='./dist' \
   --exclude='./release' \
+  --exclude='./tmp' \
+  --exclude='./*.png' \
   --exclude='./.env' \
   --exclude='./.env.production' \
   -czf "$payload" -C "$project_root" .

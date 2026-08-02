@@ -1,20 +1,84 @@
 {% extends 'base.html' %}
 {% block title %}回收站{% endblock %}
 {% block content %}
-<div class="page-head"><div><p class="eyebrow">RECYCLE BIN</p><h1>回收站</h1><p>删除先进入回收站。恢复不会移动文件，永久删除需要二次确认。</p></div><a class="btn ghost" href="{{ url_for('workspace.projects') }}"><i data-lucide="arrow-left"></i> 返回项目</a></div>
+<header class="page-head">
+  <div><p class="eyebrow">RECYCLE BIN</p><h1>回收站</h1><p class="muted">按类型查看已删除内容。恢复不会移动文件，永久删除需要二次确认。</p></div>
+  <a class="btn ghost" href="{{ url_for('workspace.projects') }}"><i data-lucide="arrow-left"></i> 返回实验台</a>
+</header>
+
 <div class="recycle-warning"><i data-lucide="shield-check"></i><div><b>外部大文件链接只删除索引</b><p>永久删除也不会删除资源管理器中的外部原始文件；应用托管的副本会在永久删除时清理。</p></div></div>
 
-{% set groups = [('project', '科研项目', projects), ('experiment', '实验计划', experiments), ('record', '过程记录', records), ('attachment', '实验文件', attachments), ('task', '任务', tasks), ('step_template', '步骤模板', step_templates), ('record_template', '记录模板', record_templates), ('presentation_skill', 'PPT Skill', presentation_skills)] %}
-<div class="recycle-groups">
-  {% for kind, label, items in groups %}
-  <details class="panel feature-disclosure" {{ 'open' if items }}>
-    <summary class="feature-summary"><div><p class="eyebrow">{{ kind|upper }}</p><h2>{{ label }}</h2></div><span class="feature-summary-meta"><span class="count-label">{{ items|length }} 项</span><i data-lucide="chevron-down"></i></span></summary>
-    <div class="feature-body recycle-list">
-      {% for item in items %}
-      <article class="recycle-row"><div><i data-lucide="{{ 'folder-kanban' if kind == 'project' else ('flask-conical' if kind == 'experiment' else ('notebook-pen' if kind == 'record' else 'file')) }}"></i><span><b>{{ item.title if item.title is defined else (item.name if item.name is defined else (item.original_name if item.original_name is defined else (item.experiment.title ~ ' · ' ~ item.record_date))) }}</b><small>删除于 {{ item.deleted_at.strftime('%Y-%m-%d %H:%M') if item.deleted_at else '未知时间' }}</small></span></div><div class="row-actions"><form method="post" action="{{ url_for('workspace.recycle_restore', kind=kind, item_id=item.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn secondary"><i data-lucide="rotate-ccw"></i> 恢复</button></form><details class="purge-confirm"><summary class="btn danger"><i data-lucide="trash-2"></i> 永久删除</summary><form method="post" action="{{ url_for('workspace.recycle_purge', kind=kind, item_id=item.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>输入“永久删除”确认<input name="confirmation" autocomplete="off" required></label><button class="btn danger">确认永久删除</button></form></details></div></article>
-      {% else %}<div class="empty compact-empty"><p>没有已删除的{{ label }}。</p></div>{% endfor %}
-    </div>
-  </details>
+<nav class="recycle-kind-nav" aria-label="回收站资源类型">
+  {% for meta in recycle_kinds %}
+  <a class="{{ 'active' if selected_kind == meta.key }}" href="{{ url_for('workspace.recycle_bin', kind=meta.key, per_page=page_size) }}"><i data-lucide="{{ meta.icon }}"></i><span>{{ meta.label }}</span><b>{{ recycle_counts.get(meta.key, 0) }}</b></a>
   {% endfor %}
-</div>
+</nav>
+
+<section class="panel recycle-browser">
+  <div class="panel-head recycle-browser-head">
+    <div><p class="eyebrow">{{ selected_kind|upper }}</p><h2>{{ selected_meta.label }}</h2><span class="muted">{{ pagination.total }} 个匹配项目 · 当前第 {{ pagination.page }} / {{ pagination.pages or 1 }} 页</span></div>
+    <form method="get" class="recycle-filter">
+      <input type="hidden" name="kind" value="{{ selected_kind }}">
+      <label class="search-field"><i data-lucide="search"></i><input name="q" value="{{ search }}" placeholder="搜索名称或内容" aria-label="搜索回收站"></label>
+      <select name="per_page" aria-label="每页项目数量">{% for value in page_sizes %}<option value="{{ value }}" {{ 'selected' if page_size == value }}>{{ value }} / 页</option>{% endfor %}</select>
+      <button class="btn secondary"><i data-lucide="search"></i> 查询</button>
+    </form>
+  </div>
+
+  {% if items %}
+  <form id="recycle-bulk-purge-form" method="post" action="{{ url_for('workspace.recycle_purge_bulk', kind=selected_kind) }}" class="recycle-bulk-form" data-bulk-form data-bulk-label="{{ selected_meta.label }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="q" value="{{ search }}">
+    <input type="hidden" name="page" value="{{ pagination.page }}">
+    <input type="hidden" name="per_page" value="{{ page_size }}">
+    <label class="recycle-select-all"><input type="checkbox" data-bulk-select-all><span>全选本页</span></label>
+    <span class="recycle-bulk-count" data-bulk-selected aria-live="polite">已选择 0 个</span>
+    <details class="recycle-bulk-confirm">
+      <summary class="btn danger"><i data-lucide="trash-2"></i> 批量永久删除</summary>
+      <div class="recycle-bulk-confirm-body">
+        <label for="recycle-bulk-confirmation">输入“永久删除”确认</label>
+        <input id="recycle-bulk-confirmation" name="confirmation" autocomplete="off" required>
+        <button class="btn danger" type="submit" name="action" value="delete" disabled><i data-lucide="trash-2"></i> 确认批量永久删除</button>
+      </div>
+    </details>
+  </form>
+  {% endif %}
+
+  <div class="recycle-list">
+    {% for item in items %}
+    <article class="recycle-row">
+      <div class="recycle-row-main">
+        <label class="recycle-select"><input type="checkbox" name="item_ids" value="{{ item.id }}" form="recycle-bulk-purge-form" data-bulk-select aria-label="选择{{ selected_meta.label }} {{ item.original_name|default(item.name, true)|default(item.title, true)|default('#' ~ item.id, true) }}"></label>
+        <span class="recycle-row-icon"><i data-lucide="{{ selected_meta.icon }}"></i></span>
+        <span class="recycle-row-copy">
+          {% if selected_kind == 'attachment' %}<b>{{ item.original_name }}</b><small>{{ item.experiment.title }} · {{ item.relative_path }}</small>
+          {% elif selected_kind == 'weekly_report' %}<b>{{ item.title }}</b><small>{{ item.report_date }} · {{ item.original_name }}</small>
+          {% elif selected_kind == 'record' %}<b>{{ item.experiment.title }} · {{ item.record_date }}</b><small>{{ item.content|truncate(120) }}</small>
+          {% elif selected_kind in ('step_template', 'record_template', 'presentation_skill') %}<b>{{ item.name }}</b><small>{{ item.description|default('', true)|truncate(120) }}</small>
+          {% elif selected_kind == 'task' %}<b>{{ item.title }}</b><small>{{ item.notes|default('', true)|truncate(120) }}</small>
+          {% else %}<b>{{ item.title }}</b><small>{{ item.code or '未编号' }}</small>{% endif %}
+          <em>删除于 {{ item.deleted_at.strftime('%Y-%m-%d %H:%M') if item.deleted_at else '未知时间' }}</em>
+        </span>
+      </div>
+      <div class="row-actions">
+        <form method="post" action="{{ url_for('workspace.recycle_restore', kind=selected_kind, item_id=item.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="q" value="{{ search }}"><input type="hidden" name="page" value="{{ pagination.page }}"><input type="hidden" name="per_page" value="{{ page_size }}">
+          <button class="btn secondary"><i data-lucide="rotate-ccw"></i> 恢复</button>
+        </form>
+        <details class="purge-confirm"><summary class="btn danger"><i data-lucide="trash-2"></i> 永久删除</summary><form method="post" action="{{ url_for('workspace.recycle_purge', kind=selected_kind, item_id=item.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="q" value="{{ search }}"><input type="hidden" name="page" value="{{ pagination.page }}"><input type="hidden" name="per_page" value="{{ page_size }}"><label>输入“永久删除”确认<input name="confirmation" autocomplete="off" required></label><button class="btn danger">确认永久删除</button></form></details>
+      </div>
+    </article>
+    {% else %}
+    <div class="empty recycle-empty"><i data-lucide="trash-2"></i><h3>没有匹配的{{ selected_meta.label }}</h3><p>{{ '可以换一种资源类型查看。' if not search else '清除搜索条件后再试。' }}</p></div>
+    {% endfor %}
+  </div>
+
+  {% if pagination.pages > 1 %}
+  <nav class="list-pagination" aria-label="回收站列表翻页">
+    <a class="btn ghost {{ 'is-disabled' if not pagination.has_prev }}" href="{{ url_for('workspace.recycle_bin', kind=selected_kind, q=search, page=pagination.prev_num or 1, per_page=page_size) }}" aria-disabled="{{ 'true' if not pagination.has_prev else 'false' }}"><i data-lucide="chevron-left"></i> 上一页</a>
+    <span><b>第 {{ pagination.page }} / {{ pagination.pages }} 页</b><small>共 {{ pagination.total }} 项，本页 {{ items|length }} 项</small></span>
+    <a class="btn ghost {{ 'is-disabled' if not pagination.has_next }}" href="{{ url_for('workspace.recycle_bin', kind=selected_kind, q=search, page=pagination.next_num or pagination.pages, per_page=page_size) }}" aria-disabled="{{ 'true' if not pagination.has_next else 'false' }}">下一页 <i data-lucide="chevron-right"></i></a>
+  </nav>
+  {% endif %}
+</section>
 {% endblock %}

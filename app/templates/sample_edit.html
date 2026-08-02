@@ -9,7 +9,7 @@
     <div class="sample-usage-list">
       {% for usage in sample.batch_usages %}
       <a class="sample-usage-row" href="{{ url_for('workspace.batch_detail', item_id=usage.batch_id) }}">
-        <span><b>{{ usage.batch.experiment.title }}</b><small>实际使用 · {{ usage.batch.batch_code or '未编号执行' }}</small></span>
+        <span><b>{{ usage.batch.experiment.title }}</b><small>实际使用 · {{ usage.batch.batch_code or '未编号批次' }}</small></span>
         <span><b>{{ usage.role }}</b><small>{{ usage.amount_used or '用量未填' }}</small></span><i data-lucide="arrow-right"></i>
       </a>
       {% endfor %}
@@ -19,7 +19,7 @@
         <span><b>{{ usage.role }}</b><small>{{ usage.amount_used or '用量未填' }}</small></span><i data-lucide="arrow-right"></i>
       </a>
       {% endfor %}
-      {% if not sample.batch_usages and not sample.experiment_usages %}<div class="empty"><i data-lucide="unlink"></i><p>该样本尚未关联实验计划或实验执行</p></div>{% endif %}
+      {% if not sample.batch_usages and not sample.experiment_usages %}<div class="empty"><i data-lucide="unlink"></i><p>该样本尚未关联实验计划或实验批次</p></div>{% endif %}
     </div>
   </section>
 </div>

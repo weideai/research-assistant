@@ -4,26 +4,45 @@ from pathlib import Path
 
 from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, send_file, url_for
 from flask_login import current_user, login_required
+from sqlalchemy import and_, func, or_
 
 from . import db
 from .models import (
     BatchParameter, BatchSample, BatchStep, Experiment, ExperimentAttachment, ExperimentBatch,
     ExperimentRecord, ExperimentTemplate, RecordTemplate, ResearchProject, Sample,
-    PresentationSkill, Task, utcnow,
+    PresentationSkill, Task, WeeklyReport, utcnow,
 )
 from .project_package import ProjectPackageError, build_project_package, import_project_package
 
 
 bp = Blueprint("workspace", __name__)
 PROJECT_STATUSES = ("进行中", "规划中", "已完成", "已暂停")
+EXPERIMENT_STATUSES = ("未开始", "进行中", "完成", "暂停")
 BATCH_STATUSES = ("未开始", "进行中", "已完成", "暂停")
 REPEAT_KINDS = ("独立实验", "预实验", "生物学重复", "技术重复")
 ATTACHMENT_MANUAL_CATEGORIES = ("原始数据", "结果图片", "分析结果", "实验文档", "其他")
+RECYCLE_PAGE_SIZES = (20, 50, 100)
+PROJECT_PAGE_SIZES = (12, 24, 48)
+PROJECT_DETAIL_PAGE_SIZES = (6, 12, 24)
+BATCH_MINI_PAGE_SIZES = (4, 8, 16)
+DETAIL_PAGE_SIZE = 8
+RECYCLE_KINDS = (
+    {"key": "attachment", "label": "实验文件", "icon": "file-archive"},
+    {"key": "weekly_report", "label": "周报", "icon": "calendar-days"},
+    {"key": "record", "label": "过程记录", "icon": "notebook-pen"},
+    {"key": "experiment", "label": "实验计划", "icon": "flask-conical"},
+    {"key": "project", "label": "科研项目", "icon": "panels-top-left"},
+    {"key": "task", "label": "任务", "icon": "check-square-2"},
+    {"key": "step_template", "label": "步骤模板", "icon": "list-ordered"},
+    {"key": "record_template", "label": "记录模板", "icon": "copy"},
+    {"key": "presentation_skill", "label": "PPT Skill", "icon": "presentation"},
+)
 
 
 @bp.before_request
 def reject_viewer_writes():
-    if (current_user.is_authenticated and current_user.role == "viewer"
+    if (not current_app.config.get("LOCAL_MODE")
+            and current_user.is_authenticated and current_user.role == "viewer"
             and request.method not in {"GET", "HEAD", "OPTIONS"}):
         abort(403)
 
@@ -41,6 +60,28 @@ def _positive_int(value, default=1):
         return parsed if parsed > 0 else default
     except (TypeError, ValueError):
         return default
+
+
+def _page_size(value, choices, default):
+    parsed = _positive_int(value, default)
+    return parsed if parsed in choices else default
+
+
+def _paginate(query, page_key="page", per_page=DETAIL_PAGE_SIZE, per_page_key=None, page_sizes=PROJECT_PAGE_SIZES):
+    page = _positive_int(request.args.get(page_key), 1)
+    if per_page_key:
+        per_page = _page_size(request.args.get(per_page_key), page_sizes, per_page)
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    if pagination.pages and page > pagination.pages:
+        pagination = query.paginate(page=pagination.pages, per_page=per_page, error_out=False)
+    return pagination, per_page
+
+
+def _form_ids(name):
+    try:
+        return {int(value) for value in request.form.getlist(name)}
+    except (TypeError, ValueError):
+        abort(400)
 
 
 def _project_or_404(item_id, include_deleted=False):
@@ -110,11 +151,25 @@ def projects():
             flash("科研项目已创建。", "success")
             return redirect(url_for("workspace.project_detail", item_id=item.id))
 
-    items = ResearchProject.query.filter_by(
-        user_id=current_user.id, is_deleted=False
-    ).order_by(ResearchProject.updated_at.desc()).all()
+    search = request.args.get("q", "").strip()[:120]
+    selected_status = request.args.get("status", "全部")
+    if selected_status not in {"全部", *PROJECT_STATUSES}:
+        selected_status = "全部"
+    query = ResearchProject.query.filter_by(user_id=current_user.id, is_deleted=False)
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(or_(
+            ResearchProject.title.ilike(pattern), ResearchProject.code.ilike(pattern),
+            ResearchProject.objective.ilike(pattern),
+        ))
+    if selected_status != "全部":
+        query = query.filter(ResearchProject.status == selected_status)
+    pagination, page_size = _paginate(
+        query.order_by(ResearchProject.updated_at.desc(), ResearchProject.id.desc()),
+        per_page=PROJECT_PAGE_SIZES[0], per_page_key="per_page",
+    )
     cards = []
-    for item in items:
+    for item in pagination.items:
         experiments = _active_experiments(item)
         records = [record for experiment in experiments for record in experiment.records if not record.is_deleted]
         cards.append({
@@ -124,7 +179,21 @@ def projects():
             "records": len(records),
             "finalized": sum(record.lifecycle_status in {"已定稿", "修订"} for record in records),
         })
-    return render_template("projects.html", project_cards=cards, statuses=PROJECT_STATUSES, today=date.today())
+    active_experiment_query = Experiment.query.filter_by(user_id=current_user.id, is_deleted=False)
+    active_record_query = ExperimentRecord.query.join(Experiment).filter(
+        Experiment.user_id == current_user.id, Experiment.is_deleted.is_(False),
+        ExperimentRecord.is_deleted.is_(False),
+    )
+    return render_template(
+        "projects.html", project_cards=cards, statuses=PROJECT_STATUSES, today=date.today(),
+        pagination=pagination, page_size=page_size, page_sizes=PROJECT_PAGE_SIZES,
+        search=search, selected_status=selected_status,
+        workspace_metrics={
+            "projects": ResearchProject.query.filter_by(user_id=current_user.id, is_deleted=False).count(),
+            "experiments": active_experiment_query.count(),
+            "records": active_record_query.count(),
+        },
+    )
 
 
 @bp.route("/projects/<int:item_id>", methods=["GET", "POST"])
@@ -146,15 +215,170 @@ def project_detail(item_id):
             db.session.commit()
             flash("项目信息已保存。", "success")
             return redirect(url_for("workspace.project_detail", item_id=item.id))
-    experiments = _active_experiments(item)
-    tasks = Task.query.filter_by(user_id=current_user.id, project_id=item.id, is_deleted=False).order_by(Task.deadline).all()
-    execution_count = sum(
-        1 for experiment in experiments for batch in experiment.batches if not batch.is_deleted
+    search = request.args.get("q", "").strip()[:120]
+    selected_experiment_status = request.args.get("experiment_status", "全部")
+    selected_batch_status = request.args.get("batch_status", "全部")
+    if selected_experiment_status not in {"全部", *EXPERIMENT_STATUSES}:
+        selected_experiment_status = "全部"
+    if selected_batch_status not in {"全部", *BATCH_STATUSES}:
+        selected_batch_status = "全部"
+
+    experiment_query = Experiment.query.filter_by(
+        user_id=current_user.id, project_id=item.id, is_deleted=False,
     )
+    if search:
+        pattern = f"%{search}%"
+        experiment_query = experiment_query.filter(or_(
+            Experiment.title.ilike(pattern), Experiment.code.ilike(pattern),
+            Experiment.objective.ilike(pattern), Experiment.owner.ilike(pattern),
+            Experiment.batches.any(and_(
+                ExperimentBatch.is_deleted.is_(False),
+                or_(
+                    ExperimentBatch.batch_code.ilike(pattern),
+                    ExperimentBatch.group_name.ilike(pattern),
+                    ExperimentBatch.operator.ilike(pattern),
+                ),
+            )),
+        ))
+    if selected_experiment_status != "全部":
+        experiment_query = experiment_query.filter(Experiment.status == selected_experiment_status)
+    if selected_batch_status != "全部":
+        experiment_query = experiment_query.filter(Experiment.batches.any(and_(
+            ExperimentBatch.is_deleted.is_(False),
+            ExperimentBatch.status == selected_batch_status,
+        )))
+    experiment_pagination, page_size = _paginate(
+        experiment_query.order_by(Experiment.updated_at.desc(), Experiment.id.desc()),
+        per_page=PROJECT_DETAIL_PAGE_SIZES[0], per_page_key="per_page",
+        page_sizes=PROJECT_DETAIL_PAGE_SIZES,
+    )
+    experiments = experiment_pagination.items
+
+    selected_batch_experiment_id = request.args.get("batch_experiment_id", type=int)
+    if selected_batch_experiment_id:
+        selected_batch_experiment = Experiment.query.filter_by(
+            id=selected_batch_experiment_id, user_id=current_user.id,
+            project_id=item.id, is_deleted=False,
+        ).first()
+        if not selected_batch_experiment:
+            abort(404)
+    batch_page_size = _page_size(
+        request.args.get("batch_per_page"), BATCH_MINI_PAGE_SIZES, BATCH_MINI_PAGE_SIZES[0],
+    )
+    batch_views = {}
+    for experiment in experiments:
+        batch_query = ExperimentBatch.query.filter_by(
+            experiment_id=experiment.id, is_deleted=False,
+        )
+        if selected_batch_status != "全部":
+            batch_query = batch_query.filter(ExperimentBatch.status == selected_batch_status)
+        batch_query = batch_query.order_by(ExperimentBatch.created_at.desc(), ExperimentBatch.id.desc())
+        total = batch_query.count()
+        if experiment.id == selected_batch_experiment_id:
+            batch_pagination, _ = _paginate(
+                batch_query, page_key="batch_page", per_page=batch_page_size,
+            )
+            batch_views[experiment.id] = {
+                "items": batch_pagination.items, "total": total,
+                "pagination": batch_pagination, "expanded": True,
+            }
+        else:
+            batch_views[experiment.id] = {
+                "items": batch_query.limit(3).all(), "total": total,
+                "pagination": None, "expanded": False,
+            }
+
+    task_query = Task.query.filter_by(
+        user_id=current_user.id, project_id=item.id, is_deleted=False,
+    )
+    task_total = task_query.count()
+    tasks = task_query.order_by(
+        Task.status, Task.deadline.is_(None), Task.deadline, Task.created_at.desc(),
+    ).limit(6).all()
+    experiment_total = Experiment.query.filter_by(
+        user_id=current_user.id, project_id=item.id, is_deleted=False,
+    ).count()
+    execution_count = ExperimentBatch.query.join(Experiment).filter(
+        Experiment.user_id == current_user.id, Experiment.project_id == item.id,
+        Experiment.is_deleted.is_(False), ExperimentBatch.is_deleted.is_(False),
+    ).count()
     return render_template(
         "project_detail.html", project=item, experiments=experiments, tasks=tasks,
-        statuses=PROJECT_STATUSES, execution_count=execution_count,
+        statuses=PROJECT_STATUSES, experiment_statuses=EXPERIMENT_STATUSES,
+        batch_statuses=BATCH_STATUSES, execution_count=execution_count,
+        experiment_total=experiment_total, task_total=task_total,
+        experiment_pagination=experiment_pagination, page_size=page_size,
+        page_sizes=PROJECT_DETAIL_PAGE_SIZES, batch_page_size=batch_page_size,
+        batch_page_sizes=BATCH_MINI_PAGE_SIZES, batch_views=batch_views,
+        search=search, selected_experiment_status=selected_experiment_status,
+        selected_batch_status=selected_batch_status,
+        selected_batch_experiment_id=selected_batch_experiment_id,
     )
+
+
+@bp.post("/projects/<int:item_id>/resources/bulk")
+@login_required
+def project_resource_bulk(item_id):
+    project = _project_or_404(item_id)
+    experiment_ids = _form_ids("experiment_ids")
+    batch_ids = _form_ids("batch_ids")
+    if not experiment_ids and not batch_ids:
+        flash("请先勾选至少一个实验计划或实验批次。", "warning")
+    else:
+        experiments = Experiment.query.filter(
+            Experiment.user_id == current_user.id,
+            Experiment.project_id == project.id,
+            Experiment.is_deleted.is_(False),
+            Experiment.id.in_(experiment_ids),
+        ).all() if experiment_ids else []
+        batches = ExperimentBatch.query.join(Experiment).filter(
+            Experiment.user_id == current_user.id,
+            Experiment.project_id == project.id,
+            Experiment.is_deleted.is_(False),
+            ExperimentBatch.is_deleted.is_(False),
+            ExperimentBatch.id.in_(batch_ids),
+        ).all() if batch_ids else []
+        if {experiment.id for experiment in experiments} != experiment_ids:
+            abort(404)
+        if {batch.id for batch in batches} != batch_ids:
+            abort(404)
+
+        experiment_status = request.form.get("experiment_status", "__keep__")
+        batch_status = request.form.get("batch_status", "__keep__")
+        owner_mode = request.form.get("owner_mode", "keep")
+        operator_mode = request.form.get("operator_mode", "keep")
+        if experiment_status not in {"__keep__", *EXPERIMENT_STATUSES}:
+            abort(400)
+        if batch_status not in {"__keep__", *BATCH_STATUSES}:
+            abort(400)
+        if owner_mode not in {"keep", "replace", "clear"}:
+            abort(400)
+        if operator_mode not in {"keep", "replace", "clear"}:
+            abort(400)
+
+        owner = request.form.get("owner", "").strip()[:80]
+        operator = request.form.get("operator", "").strip()[:80]
+        for experiment in experiments:
+            if experiment_status != "__keep__":
+                experiment.status = experiment_status
+            if owner_mode != "keep":
+                experiment.owner = owner if owner_mode == "replace" else ""
+        for batch in batches:
+            if batch_status != "__keep__":
+                batch.status = batch_status
+            if operator_mode != "keep":
+                batch.operator = operator if operator_mode == "replace" else ""
+        db.session.commit()
+        flash(f"已批量更新 {len(experiments)} 个实验计划和 {len(batches)} 个实验批次。", "success")
+
+    values = {
+        key: request.form.get(key) for key in (
+            "q", "page", "per_page", "batch_experiment_id", "batch_page", "batch_per_page",
+        ) if request.form.get(key)
+    }
+    values["experiment_status"] = request.form.get("return_experiment_status", "全部")
+    values["batch_status"] = request.form.get("return_batch_status", "全部")
+    return redirect(url_for("workspace.project_detail", item_id=project.id, **values, _anchor="project-experiment-directory"))
 
 
 @bp.post("/projects/<int:item_id>/delete")
@@ -245,7 +469,7 @@ def batch_create(item_id):
             amount_used=usage.amount_used, notes=usage.notes,
         ))
     db.session.commit()
-    flash("实验执行已创建，并复制了当前计划步骤和样本要求。", "success")
+    flash("实验批次已创建，并复制了当前计划步骤和样本要求。", "success")
     return redirect(url_for("workspace.batch_detail", item_id=batch.id))
 
 
@@ -259,7 +483,7 @@ def batch_detail(item_id):
         start_date = _parse_date(raw_start_date)
         end_date = _parse_date(raw_end_date)
         if (raw_start_date and not start_date) or (raw_end_date and not end_date):
-            flash("请输入有效的实验执行日期。", "danger")
+            flash("请输入有效的实验批次日期。", "danger")
             return redirect(url_for("workspace.batch_detail", item_id=batch.id, _anchor="batch-profile"))
         from .main import _batch_date_error
 
@@ -280,7 +504,7 @@ def batch_detail(item_id):
         batch.conclusion = request.form.get("conclusion", "").strip()
         batch.requires_repeat = request.form.get("requires_repeat") == "1"
         db.session.commit()
-        flash("实验执行信息已保存。", "success")
+        flash("实验批次信息已保存。", "success")
         return redirect(url_for("workspace.batch_detail", item_id=batch.id))
     selected_record_template = None
     record_template_id = request.args.get("record_template_id", type=int)
@@ -289,12 +513,30 @@ def batch_detail(item_id):
         if (not selected_record_template or selected_record_template.user_id != current_user.id
                 or selected_record_template.is_deleted):
             abort(404)
-    records = ExperimentRecord.query.filter_by(
-        batch_id=batch.id, is_deleted=False
-    ).order_by(ExperimentRecord.record_date.desc(), ExperimentRecord.created_at.desc()).all()
+    step_query = BatchStep.query.filter_by(batch_id=batch.id).order_by(
+        BatchStep.position, BatchStep.id,
+    )
+    step_pagination, _ = _paginate(step_query, page_key="step_page")
+    record_query = ExperimentRecord.query.filter_by(
+        batch_id=batch.id, is_deleted=False,
+    ).order_by(ExperimentRecord.record_date.desc(), ExperimentRecord.created_at.desc())
+    record_pagination, _ = _paginate(record_query, page_key="record_page")
+    parameter_query = BatchParameter.query.filter_by(batch_id=batch.id).order_by(
+        BatchParameter.position, BatchParameter.id,
+    )
+    parameter_pagination, _ = _paginate(parameter_query, page_key="parameter_page")
+    sample_query = BatchSample.query.filter_by(batch_id=batch.id).order_by(
+        BatchSample.created_at, BatchSample.id,
+    )
+    sample_pagination, _ = _paginate(sample_query, page_key="sample_page")
     samples = Sample.query.filter_by(user_id=current_user.id).order_by(Sample.sample_code).all()
     return render_template(
-        "batch_detail.html", batch=batch, records=records, samples=samples,
+        "batch_detail.html", batch=batch, records=record_pagination.items, samples=samples,
+        batch_steps=step_pagination.items, actual_parameters=parameter_pagination.items,
+        sample_usages=sample_pagination.items,
+        step_pagination=step_pagination, record_pagination=record_pagination,
+        parameter_pagination=parameter_pagination, sample_pagination=sample_pagination,
+        completed_step_count=BatchStep.query.filter_by(batch_id=batch.id, is_done=True).count(),
         statuses=BATCH_STATUSES, repeat_kinds=REPEAT_KINDS, today=date.today(),
         attachment_categories=ATTACHMENT_MANUAL_CATEGORIES,
         record_templates=RecordTemplate.query.filter_by(
@@ -314,7 +556,7 @@ def batch_step_edit(item_id):
     planned_date = _parse_date(raw_planned_date)
     completed_date = _parse_date(raw_completed_date)
     if not title:
-        flash("执行步骤标题不能为空。", "danger")
+        flash("批次步骤标题不能为空。", "danger")
     elif raw_planned_date and not planned_date:
         flash("请输入有效的计划日期。", "danger")
     elif step.is_done and raw_completed_date and not completed_date:
@@ -327,7 +569,7 @@ def batch_step_edit(item_id):
         if step.is_done:
             step.completed_date = completed_date or step.completed_date or date.today()
         db.session.commit()
-        flash("本次执行步骤已保存。", "success")
+        flash("本批次步骤已保存。", "success")
     return redirect(url_for("workspace.batch_detail", item_id=step.batch_id, _anchor="batch-steps"))
 
 
@@ -347,7 +589,7 @@ def batch_step_bulk(item_id):
     batch = _batch_or_404(item_id)
     raw_ids = request.form.getlist("step_ids")
     if not raw_ids:
-        flash("请先勾选至少一个执行步骤。", "warning")
+        flash("请先勾选至少一个批次步骤。", "warning")
         return redirect(url_for("workspace.batch_detail", item_id=batch.id, _anchor="batch-steps"))
     try:
         selected_ids = {int(value) for value in raw_ids}
@@ -370,7 +612,7 @@ def batch_step_bulk(item_id):
         step.completed_date = (completed_date or date.today()) if step.is_done else None
     db.session.commit()
     label = "完成" if action == "complete" else "未完成"
-    flash(f"已将 {len(selected)} 个执行步骤标记为{label}。", "success")
+    flash(f"已将 {len(selected)} 个批次步骤标记为{label}。", "success")
     return redirect(url_for("workspace.batch_detail", item_id=batch.id, _anchor="batch-steps"))
 
 
@@ -431,7 +673,7 @@ def batch_parameter_add(item_id):
             notes=request.form.get("notes", "").strip()[:255],
         ))
         db.session.commit()
-        flash("本次实验执行的实际参数已添加。", "success")
+        flash("本实验批次的实际参数已添加。", "success")
     return redirect(url_for("workspace.batch_detail", item_id=batch.id, _anchor="batch-parameters"))
 
 
@@ -444,7 +686,7 @@ def batch_sample_add(item_id):
     if not sample or sample.user_id != current_user.id:
         flash("请选择有效样本。", "danger")
     elif BatchSample.query.filter_by(batch_id=batch.id, sample_id=sample.id).first():
-        flash("这个样本已经关联到当前实验执行。", "warning")
+        flash("这个样本已经关联到当前实验批次。", "warning")
     else:
         db.session.add(BatchSample(
             batch_id=batch.id, sample_id=sample.id,
@@ -467,10 +709,10 @@ def record_move_batch(item_id):
     from .main import FINALIZED_RECORD_STATUSES, _prepare_batch_for_record
 
     if record.lifecycle_status in FINALIZED_RECORD_STATUSES:
-        flash("已定稿过程记录不能更换实验执行。请保留原归属，并通过单条修订说明更正。", "danger")
+        flash("已定稿过程记录不能更换实验批次。请保留原归属，并通过单条修订说明更正。", "danger")
         return redirect(url_for("main.record_detail", record_id=record.id))
     if batch.id == record.batch_id:
-        flash("过程记录已经属于当前实验执行。", "info")
+        flash("过程记录已经属于当前实验批次。", "info")
         return redirect(url_for("main.record_detail", record_id=record.id))
     date_error = _prepare_batch_for_record(batch, record.record_date)
     if date_error:
@@ -478,7 +720,7 @@ def record_move_batch(item_id):
         return redirect(url_for("main.record_detail", record_id=record.id))
     record.batch_id = batch.id
     db.session.commit()
-    flash("过程记录已归入所选实验执行。", "success")
+    flash("过程记录已归入所选实验批次。", "success")
     return redirect(url_for("main.record_detail", record_id=record.id))
 
 
@@ -533,6 +775,11 @@ def _recycle_item(kind, item_id):
         if not item or item.user_id != current_user.id:
             abort(404)
         return item
+    if kind == "weekly_report":
+        item = db.session.get(WeeklyReport, item_id)
+        if not item or item.user_id != current_user.id:
+            abort(404)
+        return item
     if kind == "attachment":
         item = db.session.get(ExperimentAttachment, item_id)
         if not item or item.record.experiment.user_id != current_user.id:
@@ -541,31 +788,108 @@ def _recycle_item(kind, item_id):
     abort(404)
 
 
+def _recycle_query(kind, search=""):
+    if kind == "project":
+        query = ResearchProject.query.filter_by(user_id=current_user.id, is_deleted=True)
+        fields = (ResearchProject.title, ResearchProject.code, ResearchProject.notes)
+    elif kind == "experiment":
+        deleted_projects = db.session.query(ResearchProject.id).filter(
+            ResearchProject.user_id == current_user.id,
+            ResearchProject.is_deleted.is_(True),
+        )
+        query = Experiment.query.filter(
+            Experiment.user_id == current_user.id,
+            Experiment.is_deleted.is_(True),
+            or_(Experiment.project_id.is_(None), Experiment.project_id.notin_(deleted_projects)),
+        )
+        fields = (Experiment.title, Experiment.code, Experiment.objective)
+    elif kind == "record":
+        query = ExperimentRecord.query.join(Experiment).filter(
+            Experiment.user_id == current_user.id,
+            Experiment.is_deleted.is_(False),
+            ExperimentRecord.is_deleted.is_(True),
+        )
+        fields = (ExperimentRecord.content, ExperimentRecord.result, Experiment.title)
+    elif kind == "attachment":
+        query = ExperimentAttachment.query.join(
+            Experiment, Experiment.id == ExperimentAttachment.experiment_id
+        ).join(
+            ExperimentRecord, ExperimentRecord.id == ExperimentAttachment.record_id
+        ).filter(
+            Experiment.user_id == current_user.id,
+            Experiment.is_deleted.is_(False),
+            ExperimentRecord.is_deleted.is_(False),
+            ExperimentAttachment.is_deleted.is_(True),
+        )
+        fields = (
+            ExperimentAttachment.original_name, ExperimentAttachment.relative_path,
+            ExperimentAttachment.tags, Experiment.title,
+        )
+    elif kind == "weekly_report":
+        query = WeeklyReport.query.filter_by(user_id=current_user.id, is_deleted=True)
+        fields = (WeeklyReport.title, WeeklyReport.original_name, WeeklyReport.summary)
+    elif kind == "task":
+        query = Task.query.filter_by(user_id=current_user.id, is_deleted=True)
+        fields = (Task.title, Task.notes)
+    elif kind == "step_template":
+        query = ExperimentTemplate.query.filter_by(user_id=current_user.id, is_deleted=True)
+        fields = (ExperimentTemplate.name, ExperimentTemplate.description)
+    elif kind == "record_template":
+        query = RecordTemplate.query.filter_by(user_id=current_user.id, is_deleted=True)
+        fields = (RecordTemplate.name, RecordTemplate.description)
+    elif kind == "presentation_skill":
+        query = PresentationSkill.query.filter_by(user_id=current_user.id, is_deleted=True)
+        fields = (PresentationSkill.name, PresentationSkill.description)
+    else:
+        abort(404)
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(or_(*(field.ilike(pattern) for field in fields)))
+    return query
+
+
+def _recycle_redirect(kind):
+    per_page = _positive_int(request.form.get("per_page"), RECYCLE_PAGE_SIZES[0])
+    if per_page not in RECYCLE_PAGE_SIZES:
+        per_page = RECYCLE_PAGE_SIZES[0]
+    return redirect(url_for(
+        "workspace.recycle_bin", kind=kind,
+        q=request.form.get("q", "").strip()[:120],
+        page=_positive_int(request.form.get("page"), 1), per_page=per_page,
+    ))
+
+
 @bp.get("/recycle-bin")
 @login_required
 def recycle_bin():
-    projects = ResearchProject.query.filter_by(user_id=current_user.id, is_deleted=True).all()
-    experiments = Experiment.query.filter_by(user_id=current_user.id, is_deleted=True).filter(
-        Experiment.project_id.notin_([item.id for item in projects]) if projects else True
-    ).all()
-    records = ExperimentRecord.query.join(Experiment).filter(
-        Experiment.user_id == current_user.id, ExperimentRecord.is_deleted.is_(True),
-        Experiment.is_deleted.is_(False),
-    ).all()
-    tasks = Task.query.filter_by(user_id=current_user.id, is_deleted=True).all()
-    step_templates = ExperimentTemplate.query.filter_by(user_id=current_user.id, is_deleted=True).all()
-    record_templates = RecordTemplate.query.filter_by(user_id=current_user.id, is_deleted=True).all()
-    presentation_skills = PresentationSkill.query.filter_by(user_id=current_user.id, is_deleted=True).all()
-    attachments = ExperimentAttachment.query.join(Experiment).filter(
-        Experiment.user_id == current_user.id,
-        ExperimentAttachment.is_deleted.is_(True),
-        Experiment.is_deleted.is_(False),
-        ExperimentAttachment.record.has(ExperimentRecord.is_deleted.is_(False)),
-    ).all()
+    kind_keys = {item["key"] for item in RECYCLE_KINDS}
+    counts = {kind: _recycle_query(kind).count() for kind in kind_keys}
+    selected_kind = request.args.get("kind", "").strip()
+    if selected_kind not in kind_keys:
+        selected_kind = next(
+            (item["key"] for item in RECYCLE_KINDS if counts[item["key"]]),
+            RECYCLE_KINDS[0]["key"],
+        )
+    search = request.args.get("q", "").strip()[:120]
+    page = _positive_int(request.args.get("page"), 1)
+    per_page = _positive_int(request.args.get("per_page"), RECYCLE_PAGE_SIZES[0])
+    if per_page not in RECYCLE_PAGE_SIZES:
+        per_page = RECYCLE_PAGE_SIZES[0]
+    query = _recycle_query(selected_kind, search)
+    entity = query.column_descriptions[0]["entity"]
+    query = query.order_by(entity.deleted_at.desc(), entity.id.desc())
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    if pagination.pages and page > pagination.pages:
+        pagination = query.paginate(
+            page=pagination.pages, per_page=per_page, error_out=False,
+        )
+    selected_meta = next(item for item in RECYCLE_KINDS if item["key"] == selected_kind)
     return render_template(
-        "recycle_bin.html", projects=projects, experiments=experiments, records=records,
-        tasks=tasks, step_templates=step_templates, record_templates=record_templates,
-        presentation_skills=presentation_skills, attachments=attachments,
+        "recycle_bin.html", recycle_kinds=RECYCLE_KINDS,
+        recycle_counts=counts, selected_kind=selected_kind,
+        selected_meta=selected_meta, items=pagination.items,
+        pagination=pagination, search=search, page_size=per_page,
+        page_sizes=RECYCLE_PAGE_SIZES,
     )
 
 
@@ -573,13 +897,22 @@ def recycle_bin():
 @login_required
 def recycle_restore(kind, item_id):
     item = _recycle_item(kind, item_id)
+    if not getattr(item, "is_deleted", False):
+        abort(400)
     _restore_graph(kind, item)
     db.session.commit()
     flash("内容已从回收站恢复。", "success")
-    return redirect(url_for("workspace.recycle_bin"))
+    return _recycle_redirect(kind)
 
 
 def _remove_managed_files(item):
+    if isinstance(item, WeeklyReport):
+        root = Path(current_app.config["WEEKLY_REPORT_UPLOAD_DIR"]).resolve()
+        if item.stored_path:
+            path = (root / item.stored_path).resolve()
+            if path != root and root in path.parents:
+                path.unlink(missing_ok=True)
+        return
     attachments = []
     if isinstance(item, ResearchProject):
         attachments = [attachment for experiment in item.experiments for record in experiment.records for attachment in record.attachments]
@@ -607,9 +940,41 @@ def recycle_purge(kind, item_id):
     confirmation = request.form.get("confirmation", "").strip()
     if confirmation != "永久删除":
         flash("请输入“永久删除”完成二次确认。", "danger")
-        return redirect(url_for("workspace.recycle_bin"))
+        return _recycle_redirect(kind)
     _remove_managed_files(item)
     db.session.delete(item)
     db.session.commit()
     flash("内容已永久删除。外部链接对应的原始文件未被删除。", "success")
-    return redirect(url_for("workspace.recycle_bin"))
+    return _recycle_redirect(kind)
+
+
+@bp.post("/recycle-bin/<kind>/purge-bulk")
+@login_required
+def recycle_purge_bulk(kind):
+    query = _recycle_query(kind)
+    raw_ids = request.form.getlist("item_ids")
+    if not raw_ids:
+        flash("请先勾选至少一个项目。", "warning")
+        return _recycle_redirect(kind)
+    try:
+        selected_ids = {int(value) for value in raw_ids}
+    except (TypeError, ValueError):
+        abort(400)
+
+    entity = query.column_descriptions[0]["entity"]
+    selected = query.filter(entity.id.in_(selected_ids)).all()
+    if {item.id for item in selected} != selected_ids:
+        abort(404)
+    if request.form.get("confirmation", "").strip() != "永久删除":
+        flash("请输入“永久删除”完成批量操作的二次确认。", "danger")
+        return _recycle_redirect(kind)
+
+    for item in selected:
+        _remove_managed_files(item)
+        db.session.delete(item)
+    db.session.commit()
+    flash(
+        f"已永久删除 {len(selected)} 个项目。外部链接对应的原始文件未被删除。",
+        "success",
+    )
+    return _recycle_redirect(kind)

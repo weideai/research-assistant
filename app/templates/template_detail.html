@@ -13,6 +13,14 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <label>模板名称<input name="name" value="{{ template.name }}" required></label>
         <label>适用说明<textarea name="description" rows="4" placeholder="适用实验、关键限制或准备要求">{{ template.description or '' }}</textarea></label>
+        <label>实验目的与背景<textarea name="objective" rows="4" placeholder="创建实验计划时自动带入">{{ template.objective or '' }}</textarea></label>
+        <div class="template-record-structure">
+          <p class="eyebrow">RECORD STRUCTURE</p>
+          <h3>实验记录字段提示</h3>
+          <label>实验条件<textarea name="record_conditions_template" rows="3" placeholder="例如：温度：\n时间：\n浓度：">{{ template.record_conditions_template or '' }}</textarea></label>
+          <label>操作与观察<textarea name="record_content_template" rows="4" placeholder="记录实际操作、观察和异常">{{ template.record_content_template or '' }}</textarea></label>
+          <label>结果、结论与备注<textarea name="record_remark_template" rows="3" placeholder="结果判断、意外说明、后续计划">{{ template.record_remark_template or '' }}</textarea></label>
+        </div>
         <div class="form-actions"><button class="btn primary"><i data-lucide="save"></i> 保存步骤模板</button></div>
       </form>
     </section>

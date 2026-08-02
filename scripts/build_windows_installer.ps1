@@ -54,6 +54,7 @@ try {
         "--hidden-import", "app.update_service",
         "--hidden-import", "app.version",
         "--hidden-import", "app.workspace",
+        "--collect-all", "reportlab",
         "--hidden-import", "version_info",
         "--hidden-import", "logging.config",
         $DesktopLauncher

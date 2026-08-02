@@ -151,7 +151,7 @@ def test_experiment_and_batch_pages_expose_scoped_bulk_management_controls(clien
     batch_response = client.get(f"/batches/{batch_id}")
     assert batch_response.status_code == 200
     assert b'id="batch-step-bulk-form"' in batch_response.data
-    assert "本次执行步骤".encode() in batch_response.data
+    assert "本批次步骤".encode() in batch_response.data
     assert b'id="batch-record-bulk-form"' in batch_response.data
     assert "过程记录时间线".encode() in batch_response.data
 

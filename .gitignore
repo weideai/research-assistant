@@ -11,3 +11,4 @@ dist/windows/
 build/linux/
 dist/linux/
 build/linux-source/
+tmp/

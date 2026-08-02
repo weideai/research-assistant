@@ -1,0 +1,76 @@
+{% macro directory_pager(pager, page_key, label) %}
+{% if pager and pager.pages > 1 %}
+<nav class="evidence-directory-pagination" aria-label="{{ label }}">
+  <a class="icon-btn {{ 'is-disabled' if not pager.has_prev }}" href="{{ page_url(pager.prev_num or 1, page_key) }}" aria-label="上一页" aria-disabled="{{ 'true' if not pager.has_prev else 'false' }}"><i data-lucide="chevron-left"></i></a>
+  <span>{{ pager.page }} / {{ pager.pages }}</span>
+  <a class="icon-btn {{ 'is-disabled' if not pager.has_next }}" href="{{ page_url(pager.next_num or pager.pages, page_key) }}" aria-label="下一页" aria-disabled="{{ 'true' if not pager.has_next else 'false' }}"><i data-lucide="chevron-right"></i></a>
+</nav>
+{% endif %}
+{% endmacro %}
+
+<aside class="evidence-directory" aria-label="报告与文件目录">
+  <header class="evidence-directory-head">
+    <span><i data-lucide="folder-tree"></i><span><b>资料目录</b><small>项目 / 实验计划 / 实验批次</small></span></span>
+    <form method="get" class="evidence-directory-search">
+      {% if search %}<input type="hidden" name="q" value="{{ search }}">{% endif %}
+      {% if selected_category %}<input type="hidden" name="category" value="{{ selected_category }}">{% endif %}
+      {% if page_size %}<input type="hidden" name="per_page" value="{{ page_size }}">{% endif %}
+      {% if selected_project_id %}<input type="hidden" name="project_id" value="{{ selected_project_id }}">{% endif %}
+      {% if selected_experiment_id %}<input type="hidden" name="experiment_id" value="{{ selected_experiment_id }}">{% endif %}
+      {% if selected_batch_id %}<input type="hidden" name="batch_id" value="{{ selected_batch_id }}">{% endif %}
+      {% if evidence_directory.is_unassigned %}<input type="hidden" name="directory_unassigned" value="1">{% endif %}
+      <label><i data-lucide="search"></i><input name="directory_q" value="{{ evidence_directory.search }}" placeholder="筛选目录" aria-label="筛选项目、计划或批次"></label>
+      <button class="icon-btn" aria-label="筛选目录" title="筛选目录"><i data-lucide="arrow-right"></i></button>
+    </form>
+  </header>
+  <nav class="evidence-directory-tree" aria-label="三级资料目录">
+    <a class="evidence-directory-root {{ 'active' if not selected_project_id and not selected_experiment_id and not selected_batch_id and not evidence_directory.is_unassigned }}" href="{{ url_for(evidence_endpoint, q=search, category=selected_category, per_page=page_size, directory_q=evidence_directory.search) }}">
+      <i data-lucide="library-big"></i><span><b>全部资料</b><small>跨项目查询</small></span><em>{{ evidence_directory.total }}</em>
+    </a>
+    {% for project in evidence_directory.projects %}
+    {% set project_active = selected_project_id == project.id %}
+    <details class="evidence-directory-node depth-project" {{ 'open' if project_active }}>
+      <summary><i data-lucide="folder"></i><span><b>{{ project.title }}</b><small>{{ project.code or '未设置项目编号' }}</small></span><em>{{ project.count }}</em><i data-lucide="chevron-right"></i></summary>
+      <div class="evidence-directory-children">
+        <a class="evidence-directory-scope {{ 'active' if project_active and not selected_experiment_id }}" href="{{ url_for(evidence_endpoint, q=search, category=selected_category, per_page=page_size, project_id=project.id, directory_q=evidence_directory.search) }}"><i data-lucide="files"></i><span>全部项目资料</span><em>{{ project.count }}</em></a>
+        {% for experiment in project.experiments %}
+        {% set experiment_active = selected_experiment_id == experiment.id %}
+        <details class="evidence-directory-node depth-experiment" {{ 'open' if experiment_active }}>
+          <summary><i data-lucide="flask-conical"></i><span><b>{{ experiment.title }}</b><small>{{ experiment.code or '未设置计划编号' }}</small></span><em>{{ experiment.count }}</em><i data-lucide="chevron-right"></i></summary>
+          <div class="evidence-directory-children">
+            <a class="evidence-directory-scope {{ 'active' if experiment_active and not selected_batch_id }}" href="{{ url_for(evidence_endpoint, q=search, category=selected_category, per_page=page_size, project_id=project.id, experiment_id=experiment.id, directory_q=evidence_directory.search) }}"><i data-lucide="files"></i><span>全部计划资料</span><em>{{ experiment.count }}</em></a>
+            {% for batch in experiment.batches %}<a class="evidence-directory-scope depth-batch {{ 'active' if selected_batch_id == batch.id }}" href="{{ url_for(evidence_endpoint, q=search, category=selected_category, per_page=page_size, project_id=project.id, experiment_id=experiment.id, batch_id=batch.id, directory_q=evidence_directory.search) }}"><i data-lucide="layers-3"></i><span>{{ batch.title }}</span><em>{{ batch.count }}</em></a>{% else %}<small class="evidence-directory-empty">尚无实验批次</small>{% endfor %}
+            {% if experiment.batch_total > experiment.batches|length and not experiment_active %}<a class="evidence-directory-more" href="{{ url_for(evidence_endpoint, q=search, category=selected_category, per_page=page_size, project_id=project.id, experiment_id=experiment.id, directory_q=evidence_directory.search) }}">查看全部 {{ experiment.batch_total }} 个批次</a>{% endif %}
+            {% if experiment_active %}{{ directory_pager(evidence_directory.batch_pagination, 'directory_batch_page', '批次目录翻页') }}{% endif %}
+          </div>
+        </details>
+        {% else %}<small class="evidence-directory-empty">尚无实验计划</small>{% endfor %}
+        {% if project.experiment_total > project.experiments|length and not project_active %}<a class="evidence-directory-more" href="{{ url_for(evidence_endpoint, q=search, category=selected_category, per_page=page_size, project_id=project.id, directory_q=evidence_directory.search) }}">查看全部 {{ project.experiment_total }} 个计划</a>{% endif %}
+        {% if project_active %}{{ directory_pager(evidence_directory.experiment_pagination, 'directory_experiment_page', '实验计划目录翻页') }}{% endif %}
+      </div>
+    </details>
+    {% endfor %}
+    {% if evidence_directory.unassigned %}
+    <details class="evidence-directory-node depth-project" {{ 'open' if evidence_directory.is_unassigned or (selected_experiment_id and not selected_project_id) }}>
+      <summary><i data-lucide="folder-question"></i><span><b>未归类计划</b><small>尚未放入科研项目</small></span><em>{{ evidence_directory.unassigned|sum(attribute='count') }}</em><i data-lucide="chevron-right"></i></summary>
+      <div class="evidence-directory-children">
+        {% for experiment in evidence_directory.unassigned %}
+        {% set experiment_active = selected_experiment_id == experiment.id %}
+        <details class="evidence-directory-node depth-experiment" {{ 'open' if experiment_active }}>
+          <summary><i data-lucide="flask-conical"></i><span><b>{{ experiment.title }}</b><small>{{ experiment.code or '未设置计划编号' }}</small></span><em>{{ experiment.count }}</em><i data-lucide="chevron-right"></i></summary>
+          <div class="evidence-directory-children">
+            <a class="evidence-directory-scope {{ 'active' if experiment_active and not selected_batch_id }}" href="{{ url_for(evidence_endpoint, q=search, category=selected_category, per_page=page_size, experiment_id=experiment.id, directory_q=evidence_directory.search, directory_unassigned=1) }}"><i data-lucide="files"></i><span>全部计划资料</span><em>{{ experiment.count }}</em></a>
+            {% for batch in experiment.batches %}<a class="evidence-directory-scope depth-batch {{ 'active' if selected_batch_id == batch.id }}" href="{{ url_for(evidence_endpoint, q=search, category=selected_category, per_page=page_size, experiment_id=experiment.id, batch_id=batch.id, directory_q=evidence_directory.search, directory_unassigned=1) }}"><i data-lucide="layers-3"></i><span>{{ batch.title }}</span><em>{{ batch.count }}</em></a>{% else %}<small class="evidence-directory-empty">尚无实验批次</small>{% endfor %}
+            {% if experiment.batch_total > experiment.batches|length and not experiment_active %}<a class="evidence-directory-more" href="{{ url_for(evidence_endpoint, q=search, category=selected_category, per_page=page_size, experiment_id=experiment.id, directory_q=evidence_directory.search, directory_unassigned=1) }}">查看全部 {{ experiment.batch_total }} 个批次</a>{% endif %}
+            {% if experiment_active %}{{ directory_pager(evidence_directory.batch_pagination, 'directory_batch_page', '未归类批次目录翻页') }}{% endif %}
+          </div>
+        </details>
+        {% endfor %}
+        {% if evidence_directory.unassigned_total > evidence_directory.unassigned|length and not evidence_directory.is_unassigned %}<a class="evidence-directory-more" href="{{ url_for(evidence_endpoint, q=search, category=selected_category, per_page=page_size, directory_q=evidence_directory.search, directory_unassigned=1) }}">查看全部 {{ evidence_directory.unassigned_total }} 个未归类计划</a>{% endif %}
+        {{ directory_pager(evidence_directory.unassigned_pagination, 'directory_experiment_page', '未归类计划目录翻页') }}
+      </div>
+    </details>
+    {% endif %}
+    {{ directory_pager(evidence_directory.project_pagination, 'directory_page', '项目目录翻页') }}
+  </nav>
+</aside>

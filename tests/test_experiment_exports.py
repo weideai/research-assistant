@@ -1,5 +1,6 @@
 import io
 import json
+import re
 import zipfile
 from datetime import date
 
@@ -212,8 +213,89 @@ def test_experiment_export_picker_lists_supported_formats(client, auth, app):
     experiment_id = _create_complete_experiment(client, auth, app)
     response = client.get(f"/experiments/{experiment_id}")
     assert response.status_code == 200
-    for label in ("Markdown 报告", "Word 文档", "Excel 工作簿", "JSON 结构化数据", "ZIP 完整归档"):
+    for label in ("Markdown 报告", "PDF 实验记录", "Word 文档", "Excel 工作簿", "JSON 结构化数据", "ZIP 完整归档", "科研档案"):
         assert label.encode() in response.data
+
+
+def _docx_parts(data):
+    with zipfile.ZipFile(io.BytesIO(data)) as document:
+        return {
+            name: document.read(name).decode("utf-8", errors="ignore")
+            for name in document.namelist()
+            if name.endswith(".xml")
+        }
+
+
+def _without_export_timestamp(markup):
+    """Exports embed their own export time, so mask it before comparing renders."""
+    return re.sub(r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}", "<EXPORTED-AT>", markup)
+
+
+REPORT_TEMPLATE_FINGERPRINTS = {
+    "research": ("RESEARCH RECORD", "2166F3"),
+    "notebook": ("LAB NOTEBOOK", "167C80"),
+    "compact": ("RESULT SUMMARY", "A15C00"),
+}
+
+
+def test_word_export_honours_the_selected_report_template(client, auth, app):
+    """The template picker must change Word output, not only PDF output."""
+    experiment_id = _create_complete_experiment(client, auth, app)
+
+    rendered = {}
+    for template_key, (kicker, accent) in REPORT_TEMPLATE_FINGERPRINTS.items():
+        response = client.get(
+            f"/experiments/{experiment_id}/export?format=docx&report_template={template_key}"
+        )
+        assert response.status_code == 200
+        parts = _docx_parts(response.data)
+        header = "".join(markup for name, markup in parts.items() if "header" in name)
+        assert kicker in header, f"{template_key}: 页眉未使用该模板的 kicker"
+        assert f'w:fill="{accent}"' in parts["word/document.xml"], (
+            f"{template_key}: 表头未使用该模板的强调色"
+        )
+        rendered[template_key] = _without_export_timestamp(parts["word/document.xml"])
+
+    assert rendered["research"] != rendered["notebook"]
+    assert rendered["notebook"] != rendered["compact"]
+
+    unknown = client.get(
+        f"/experiments/{experiment_id}/export?format=docx&report_template=does-not-exist"
+    )
+    assert unknown.status_code == 200
+    unknown_xml = _without_export_timestamp(_docx_parts(unknown.data)["word/document.xml"])
+    assert unknown_xml == rendered["research"]
+
+
+def test_record_word_export_honours_the_selected_report_template(client, auth, app):
+    experiment_id = _create_complete_experiment(client, auth, app)
+    with app.app_context():
+        record_id = ExperimentRecord.query.filter_by(
+            experiment_id=experiment_id, is_deleted=False
+        ).first().id
+
+    rendered = {}
+    for template_key, (kicker, accent) in REPORT_TEMPLATE_FINGERPRINTS.items():
+        response = client.get(
+            f"/records/{record_id}/export?format=docx&report_template={template_key}"
+        )
+        assert response.status_code == 200
+        parts = _docx_parts(response.data)
+        header = "".join(markup for name, markup in parts.items() if "header" in name)
+        assert kicker in header
+        assert f'w:fill="{accent}"' in parts["word/document.xml"]
+        rendered[template_key] = _without_export_timestamp(parts["word/document.xml"])
+
+    assert len(set(rendered.values())) == len(REPORT_TEMPLATE_FINGERPRINTS)
+
+
+def test_experiment_file_index_collects_local_files_and_filters_metadata(client, auth, app):
+    experiment_id = _create_complete_experiment(client, auth, app)
+    response = client.get(f"/experiments/{experiment_id}/files?q=raw")
+    assert response.status_code == 200
+    assert ACTIVE_ATTACHMENT.encode() in response.data
+    assert b"BATCH-A" in response.data
+    assert DELETED_ATTACHMENT.encode() not in response.data
 
 
 def test_json_export_groups_records_by_execution_and_keeps_flat_compatibility_view(client, auth, app):
@@ -291,15 +373,15 @@ def test_excel_export_has_execution_sheet_and_execution_code_on_record_rows(clie
     assert response.mimetype == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
     sheets = _workbook_rows(response.data)
-    assert "实验执行" in sheets
+    assert "实验批次" in sheets
     assert "过程记录" in sheets
     assert len(sheets) == 9
-    assert "执行步骤" in sheets
-    assert "执行编号" in sheets["过程记录"][0]
-    execution_code_column = sheets["过程记录"][0].index("执行编号")
+    assert "批次步骤" in sheets
+    assert "批次编号" in sheets["过程记录"][0]
+    execution_code_column = sheets["过程记录"][0].index("批次编号")
     execution_codes = {row[execution_code_column] for row in sheets["过程记录"][1:]}
     assert execution_codes == {"BATCH-A", "BATCH-B", "HISTORY-UNASSIGNED"}
-    assert {row[1] for row in sheets["实验执行"][1:]} == {
+    assert {row[1] for row in sheets["实验批次"][1:]} == {
         "BATCH-A",
         "BATCH-B",
         "HISTORY-UNASSIGNED",
@@ -371,9 +453,15 @@ def test_zip_export_uses_execution_folders_and_shared_schema(client, auth, app):
 
 def test_experiment_export_rejects_unknown_format_and_other_users(client, auth, app):
     experiment_id = _create_complete_experiment(client, auth, app)
-    assert client.get(f"/experiments/{experiment_id}/export?format=pdf").status_code == 400
+    for report_template in ("research", "notebook", "compact"):
+        pdf = client.get(
+            f"/experiments/{experiment_id}/export?format=pdf&report_template={report_template}"
+        )
+        assert pdf.status_code == 200
+        assert pdf.mimetype == "application/pdf"
+        assert pdf.data.startswith(b"%PDF")
 
     auth.logout()
     auth.register(email="other@example.com")
-    for export_format in ("markdown", "json", "docx", "xlsx", "zip"):
+    for export_format in ("markdown", "pdf", "json", "docx", "xlsx", "zip"):
         assert client.get(f"/experiments/{experiment_id}/export?format={export_format}").status_code == 404

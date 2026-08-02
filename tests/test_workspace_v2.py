@@ -30,6 +30,31 @@ def _workspace_experiment(client, app):
         return project_id, experiment_id, batch.id
 
 
+def _deleted_managed_attachments(client, app, names=("one.bin", "two.bin")):
+    _project_id, experiment_id, batch_id = _workspace_experiment(client, app)
+    client.post(f"/experiments/{experiment_id}/records", data={
+        "batch_id": batch_id, "content": "待批量清理的附件记录",
+    })
+    with app.app_context():
+        record_id = ExperimentRecord.query.filter_by(experiment_id=experiment_id).one().id
+    for name in names:
+        client.post(f"/records/{record_id}/attachments", data={
+            "files": (io.BytesIO(name.encode()), name),
+        }, content_type="multipart/form-data")
+    with app.app_context():
+        attachments = ExperimentAttachment.query.filter_by(record_id=record_id).order_by(
+            ExperimentAttachment.id
+        ).all()
+        attachment_ids = [item.id for item in attachments]
+        stored_paths = [
+            Path(app.config["ATTACHMENT_UPLOAD_DIR"]) / item.stored_path
+            for item in attachments
+        ]
+    for attachment_id in attachment_ids:
+        client.post(f"/attachments/{attachment_id}/delete")
+    return attachment_ids, stored_paths
+
+
 def test_project_workspace_creates_plan_then_explicit_execution(client, auth, app):
     auth.register()
     project_id, experiment_id, batch_id = _workspace_experiment(client, app)
@@ -65,7 +90,7 @@ def test_first_record_starts_execution_and_enforces_execution_date_range(client,
     for start_date, end_date, expected_message in (
         ("2026-07-21", "2026-07-22", "开始日期不能晚于已有过程记录"),
         ("2026-07-20", "2026-07-19", "结束日期不能早于开始日期"),
-        ("", "2026-07-22", "执行开始日期不能为空"),
+        ("", "2026-07-22", "实验批次开始日期不能为空"),
     ):
         response = client.post(f"/batches/{batch_id}", data={
             "batch_code": "BATCH-01", "repeat_kind": "独立实验", "repeat_number": "1",
@@ -80,8 +105,8 @@ def test_first_record_starts_execution_and_enforces_execution_date_range(client,
 
     for invalid_date, expected_message in (
         ("not-a-date", "有效的过程记录日期"),
-        ("2026-07-19", "不能早于实验执行开始日期"),
-        ("2026-07-23", "不能晚于实验执行结束日期"),
+        ("2026-07-19", "不能早于实验批次开始日期"),
+        ("2026-07-23", "不能晚于实验批次结束日期"),
     ):
         response = client.post(f"/batches/{batch_id}/records", data={
             "batch_id": batch_id,
@@ -95,7 +120,7 @@ def test_first_record_starts_execution_and_enforces_execution_date_range(client,
         "content": "不应移动到结束日期之后",
         "result": "待确认",
     }, follow_redirects=True)
-    assert "不能晚于实验执行结束日期".encode() in response.data
+    assert "不能晚于实验批次结束日期".encode() in response.data
 
     client.post(f"/batches/{batch_id}/records/bulk", data={
         "record_ids": [str(record_id)],
@@ -131,7 +156,7 @@ def test_finalized_record_cannot_move_bulk_change_or_delete(client, auth, app):
     response = client.post(f"/records/{record_id}/move-batch", data={
         "batch_id": other_batch_id,
     }, follow_redirects=True)
-    assert "不能更换实验执行".encode() in response.data
+    assert "不能更换实验批次".encode() in response.data
 
     response = client.post(f"/batches/{batch_id}/records/bulk", data={
         "record_ids": [str(record_id)],
@@ -178,7 +203,7 @@ def test_new_plan_waits_for_user_to_start_a_batch(client, auth, app):
         assert experiment.batches == []
 
     detail = client.get(f"/experiments/{experiment_id}")
-    assert "新建实验执行".encode() in detail.data
+    assert "新建实验批次".encode() in detail.data
     created = client.post(f"/experiments/{experiment_id}/batches", data={
         "batch_code": "BATCH-01",
     })
@@ -222,7 +247,7 @@ def test_execution_workspace_owns_record_creation_and_navigation(client, auth, a
     assert "过程记录" in record_page
 
     experiment_page = client.get(f"/experiments/{experiment_id}").get_data(as_text=True)
-    assert "跨执行过程记录索引" in experiment_page
+    assert "跨批次过程记录索引" in experiment_page
     assert "完成上样并开始电泳" in experiment_page
 
 
@@ -276,11 +301,11 @@ def test_execution_names_counts_and_dashboard_links_follow_research_hierarchy(cl
     plan_page = client.get(f"/experiments/{experiment_id}").get_data(as_text=True)
     assert f'href="/projects/{project_id}"' in plan_page
     assert "返回 层级导航项目" in plan_page
-    assert "执行编号，如 RUN-02" in plan_page
+    assert "批次编号，如 RUN-02" in plan_page
     assert "BATCH-" not in plan_page
 
     project_page = client.get(f"/projects/{project_id}").get_data(as_text=True)
-    assert "<span><small>实验执行</small><b>1</b></span>" in project_page
+    assert "<span><small>实验批次</small><b>1</b></span>" in project_page
     assert "RUN-REMOVED" not in project_page
 
     dashboard = client.get("/").get_data(as_text=True)
@@ -433,6 +458,113 @@ def test_recycle_restore_and_purge_managed_attachment(client, auth, app):
     assert not stored_path.exists()
     with app.app_context():
         assert db.session.get(ExperimentAttachment, attachment_id) is None
+
+
+def test_recycle_bulk_purge_removes_selected_managed_attachments(client, auth, app):
+    auth.register()
+    attachment_ids, stored_paths = _deleted_managed_attachments(client, app)
+    assert all(path.is_file() for path in stored_paths)
+
+    response = client.post("/recycle-bin/attachment/purge-bulk", data={
+        "item_ids": [str(item_id) for item_id in attachment_ids],
+        "confirmation": "永久删除",
+        "q": "raw", "page": "2", "per_page": "50",
+    })
+
+    assert response.status_code == 302
+    assert all(value in response.headers["Location"] for value in (
+        "kind=attachment", "q=raw", "page=2", "per_page=50",
+    ))
+    assert all(not path.exists() for path in stored_paths)
+    with app.app_context():
+        assert all(db.session.get(ExperimentAttachment, item_id) is None for item_id in attachment_ids)
+
+
+def test_recycle_bulk_purge_rejects_missing_or_invalid_confirmation(client, auth, app):
+    auth.register()
+    attachment_ids, stored_paths = _deleted_managed_attachments(client, app)
+
+    response = client.post("/recycle-bin/attachment/purge-bulk", data={
+        "item_ids": [str(item_id) for item_id in attachment_ids],
+        "confirmation": "删除",
+    }, follow_redirects=True)
+    assert "请输入“永久删除”".encode() in response.data
+
+    response = client.post("/recycle-bin/attachment/purge-bulk", data={
+        "confirmation": "永久删除",
+    }, follow_redirects=True)
+    assert "请先勾选至少一个项目".encode() in response.data
+
+    assert client.post("/recycle-bin/attachment/purge-bulk", data={
+        "item_ids": ["not-an-id"], "confirmation": "永久删除",
+    }).status_code == 400
+    assert all(path.is_file() for path in stored_paths)
+    with app.app_context():
+        assert all(db.session.get(ExperimentAttachment, item_id) is not None for item_id in attachment_ids)
+
+
+def test_recycle_bulk_purge_is_atomic_across_user_boundary(client, auth, app):
+    auth.register(email="recycle-owner@example.com")
+    owned_ids, owned_paths = _deleted_managed_attachments(client, app, ("owned.bin",))
+
+    auth.logout()
+    auth.register(email="recycle-foreign@example.com")
+    foreign_ids, foreign_paths = _deleted_managed_attachments(client, app, ("foreign.bin",))
+    auth.logout()
+    auth.login(email="recycle-owner@example.com")
+
+    response = client.post("/recycle-bin/attachment/purge-bulk", data={
+        "item_ids": [str(owned_ids[0]), str(foreign_ids[0])],
+        "confirmation": "永久删除",
+    })
+
+    assert response.status_code == 404
+    assert all(path.is_file() for path in owned_paths + foreign_paths)
+    with app.app_context():
+        assert db.session.get(ExperimentAttachment, owned_ids[0]) is not None
+        assert db.session.get(ExperimentAttachment, foreign_ids[0]) is not None
+
+
+def test_recycle_bulk_purge_keeps_external_source_file(client, auth, app):
+    auth.register()
+    app.config["ALLOW_OPEN_LOCAL_FOLDERS"] = True
+    _project_id, experiment_id, batch_id = _workspace_experiment(client, app)
+    client.post(f"/experiments/{experiment_id}/records", data={
+        "batch_id": batch_id, "content": "批量清理外部链接",
+    })
+    with app.app_context():
+        record_id = ExperimentRecord.query.filter_by(experiment_id=experiment_id).one().id
+        external_path = Path(app.config["ATTACHMENT_UPLOAD_DIR"]).parent / "bulk-external.bin"
+        external_path.write_bytes(b"external-source")
+    client.post(f"/records/{record_id}/attachments/external", data={
+        "external_path": str(external_path), "attachment_category": "原始数据",
+    })
+    with app.app_context():
+        attachment_id = ExperimentAttachment.query.one().id
+    client.post(f"/attachments/{attachment_id}/delete")
+
+    response = client.post("/recycle-bin/attachment/purge-bulk", data={
+        "item_ids": [str(attachment_id)], "confirmation": "永久删除",
+    })
+
+    assert response.status_code == 302
+    assert external_path.is_file()
+    with app.app_context():
+        assert db.session.get(ExperimentAttachment, attachment_id) is None
+
+
+def test_recycle_page_exposes_bulk_purge_controls(client, auth, app):
+    auth.register()
+    attachment_ids, _stored_paths = _deleted_managed_attachments(client, app)
+
+    body = client.get("/recycle-bin?kind=attachment").get_data(as_text=True)
+
+    assert 'id="recycle-bulk-purge-form"' in body
+    assert 'action="/recycle-bin/attachment/purge-bulk"' in body
+    assert "data-bulk-form" in body
+    assert "data-bulk-select-all" in body
+    assert body.count('name="item_ids"') == len(attachment_ids)
+    assert "批量永久删除" in body
 
 
 def test_record_cannot_move_to_another_users_batch(client, auth, app):

@@ -28,7 +28,6 @@ def test_recent_process_record_shows_its_execution(client, auth, app):
         batch_id = batch.id
 
     page = client.get("/").get_data(as_text=True)
-    assert "实验执行" in page
+    assert "实验批次" in page
     assert "RUN-DASHBOARD" in page
     assert f'href="/batches/{batch_id}"' in page
-

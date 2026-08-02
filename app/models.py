@@ -262,6 +262,47 @@ class ResearchProject(SoftDeleteMixin, TimestampMixin, db.Model):
     tasks = db.relationship("Task", backref="project", order_by="Task.deadline")
 
 
+class WeeklyReport(SoftDeleteMixin, TimestampMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    project_id = db.Column(db.Integer, db.ForeignKey("research_project.id"), index=True)
+    title = db.Column(db.String(180), nullable=False)
+    original_name = db.Column(db.String(255), nullable=False, default="")
+    report_date = db.Column(db.Date, nullable=False, default=date.today, index=True)
+    period_start = db.Column(db.Date, index=True)
+    period_end = db.Column(db.Date, index=True)
+    status = db.Column(db.String(20), nullable=False, default="待反馈", index=True)
+    summary = db.Column(db.Text, nullable=False, default="")
+    stored_path = db.Column(db.String(1000), nullable=False, default="")
+    folder_path = db.Column(db.String(1000), nullable=False, default="")
+    mime_type = db.Column(db.String(160), nullable=False, default="application/octet-stream")
+    size_bytes = db.Column(db.BigInteger, nullable=False, default=0)
+    sha256 = db.Column(db.String(64), nullable=False, default="", index=True)
+    project = db.relationship("ResearchProject", backref="weekly_reports")
+    updates = db.relationship(
+        "WeeklyReportUpdate", backref="report", cascade="all, delete-orphan",
+        order_by="WeeklyReportUpdate.entry_date.desc(), WeeklyReportUpdate.created_at.desc()",
+    )
+
+    @property
+    def size_label(self):
+        if self.size_bytes >= 1024 * 1024:
+            return f"{self.size_bytes / (1024 * 1024):.1f} MB"
+        if self.size_bytes >= 1024:
+            return f"{self.size_bytes / 1024:.1f} KB"
+        return f"{self.size_bytes} B"
+
+
+class WeeklyReportUpdate(TimestampMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    report_id = db.Column(db.Integer, db.ForeignKey("weekly_report.id"), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    entry_date = db.Column(db.Date, nullable=False, default=date.today, index=True)
+    kind = db.Column(db.String(20), nullable=False, default="修改日常")
+    status = db.Column(db.String(20), nullable=False, default="待处理")
+    content = db.Column(db.Text, nullable=False, default="")
+
+
 class Task(SoftDeleteMixin, TimestampMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
@@ -512,6 +553,7 @@ class ExperimentAttachment(SoftDeleteMixin, TimestampMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     experiment_id = db.Column(db.Integer, db.ForeignKey("experiment.id"), nullable=False, index=True)
     record_id = db.Column(db.Integer, db.ForeignKey("experiment_record.id"), nullable=False, index=True)
+    experiment = db.relationship("Experiment", backref="attachments")
     original_name = db.Column(db.String(255), nullable=False)
     relative_path = db.Column(db.String(1000), nullable=False)
     stored_path = db.Column(db.String(1000), nullable=False, unique=True)
@@ -590,24 +632,3 @@ class PresentationSkill(SoftDeleteMixin, TimestampMixin, db.Model):
     slide_schema_json = db.Column(db.Text, nullable=False, default="[]")
     theme = db.Column(db.String(40), nullable=False, default="research")
     is_enabled = db.Column(db.Boolean, nullable=False, default=True)
-
-
-class Paper(TimestampMixin, db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
-    title = db.Column(db.String(240), nullable=False)
-    journal = db.Column(db.String(160), default="")
-    status = db.Column(db.String(40), nullable=False, default="准备中")
-    submission_date = db.Column(db.Date)
-    revision_deadline = db.Column(db.Date)
-    notes = db.Column(db.Text, default="")
-    comments = db.relationship("ReviewerComment", backref="paper", cascade="all, delete-orphan", order_by="ReviewerComment.reviewer")
-
-
-class ReviewerComment(TimestampMixin, db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    paper_id = db.Column(db.Integer, db.ForeignKey("paper.id"), nullable=False, index=True)
-    reviewer = db.Column(db.String(40), nullable=False)
-    comment = db.Column(db.Text, nullable=False)
-    response = db.Column(db.Text, default="")
-    status = db.Column(db.String(20), nullable=False, default="待回复")
