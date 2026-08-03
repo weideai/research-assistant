@@ -14,6 +14,13 @@ BUILD_DIR="build/macos"
 ICON_SRC="packaging/linux/research-assistant.svg"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 
+# Pass absolute resource paths to PyInstaller. Relative paths are resolved
+# against --specpath (build/macos/spec), which breaks the CI build.
+TEMPLATES_DIR="$PROJECT_DIR/app/templates"
+STATIC_DIR="$PROJECT_DIR/app/static"
+MIGRATIONS_DIR="$PROJECT_DIR/migrations"
+PRESENTATION_SCRIPT="$PROJECT_DIR/scripts/build_weekly_presentation.mjs"
+
 echo "=== Building macOS .app bundle ==="
 
 # Clean previous builds
@@ -27,10 +34,10 @@ python3 -m PyInstaller \
   --distpath "$DIST_DIR" \
   --workpath "$BUILD_DIR" \
   --specpath "$BUILD_DIR/spec" \
-  --add-data "app/templates:app/templates" \
-  --add-data "app/static:app/static" \
-  --add-data "migrations:migrations" \
-  --add-data "scripts/build_weekly_presentation.mjs:scripts" \
+  --add-data "$TEMPLATES_DIR:app/templates" \
+  --add-data "$STATIC_DIR:app/static" \
+  --add-data "$MIGRATIONS_DIR:migrations" \
+  --add-data "$PRESENTATION_SCRIPT:scripts" \
   --hidden-import app.admin \
   --hidden-import app.auth \
   --hidden-import app.commands \
@@ -43,6 +50,7 @@ python3 -m PyInstaller \
   --hidden-import app.update_service \
   --hidden-import app.version \
   --hidden-import app.workspace \
+  --collect-all reportlab \
   --hidden-import version_info \
   --hidden-import logging.config \
   --osx-bundle-identifier com.researchassistant.app \
