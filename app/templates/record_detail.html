@@ -4,7 +4,7 @@
 <header class="page-head">
   <div>
     <div class="breadcrumb">
-      {% if record.experiment.project %}<a href="{{ url_for('workspace.project_detail', item_id=record.experiment.project.id) }}">{{ record.experiment.project.title }}</a><i data-lucide="chevron-right"></i>{% endif %}
+      <a href="{{ url_for('main.experiments') }}">实验计划</a><i data-lucide="chevron-right"></i>
       <a href="{{ url_for('main.experiment_detail', item_id=record.experiment_id) }}#batches">{{ record.experiment.title }}</a><i data-lucide="chevron-right"></i>
       {% if record.batch %}<a href="{{ url_for('workspace.batch_detail', item_id=record.batch.id) }}#batch-records">{{ record.batch.batch_code or '未编号批次' }}</a><i data-lucide="chevron-right"></i>{% endif %}<span>{{ record.record_date }}</span>
     </div>
@@ -15,9 +15,9 @@
   <div class="page-head-actions"><a class="btn secondary" href="{{ url_for('main.experiment_reports', item_id=record.experiment_id, record_id=record.id) }}"><i data-lucide="notebook-tabs"></i> 报告视图</a><a class="btn primary" href="#record-edit" data-record-tab-link="edit"><i data-lucide="pencil"></i> 编辑记录</a><span class="badge large" data-state="{{ record.lifecycle_status | state_tone }}">{{ record.lifecycle_status }}</span><span class="badge large" data-state="{{ record.result | state_tone }}">{{ record.result }}</span></div>
 </header>
 <nav class="record-workspace-tabs" data-record-tabs role="tablist" aria-orientation="horizontal" aria-label="记录工作区">
-  <a id="record-tab-view" href="#record-view" data-record-tab="view" role="tab" aria-selected="true" aria-controls="record-view" tabindex="0"><i data-lucide="book-open"></i><span><b>阅读</b><small>查看已记录内容</small></span></a>
-  <a id="record-tab-files" href="#record-files" data-record-tab="files" role="tab" aria-selected="false" aria-controls="record-files" tabindex="-1"><i data-lucide="folder-open"></i><span><b>文件与数据</b><small>{{ record.attachments|rejectattr('is_deleted')|list|length }} 个文件</small></span></a>
-  <a id="record-tab-edit" href="#record-edit" data-record-tab="edit" role="tab" aria-selected="false" aria-controls="record-edit" tabindex="-1"><i data-lucide="square-pen"></i><span><b>编辑</b><small>修改记录内容</small></span></a>
+  <a id="record-tab-view" href="#record-view" data-record-tab="view" role="tab" aria-selected="true" aria-controls="record-view" tabindex="0"><i data-lucide="book-open-text"></i><span><b>阅读</b><small>查看已记录内容</small></span></a>
+  <a id="record-tab-files" href="#record-files" data-record-tab="files" role="tab" aria-selected="false" aria-controls="record-files" tabindex="-1"><i data-lucide="folder-search"></i><span><b>文件与数据</b><small>{{ record.attachments|rejectattr('is_deleted')|list|length }} 个文件</small></span></a>
+  <a id="record-tab-edit" href="#record-edit" data-record-tab="edit" role="tab" aria-selected="false" aria-controls="record-edit" tabindex="-1"><i data-lucide="file-pen-line"></i><span><b>编辑</b><small>修改记录内容</small></span></a>
   <a id="record-tab-history" href="#record-history" data-record-tab="history" role="tab" aria-selected="false" aria-controls="record-history record-template-tools" tabindex="-1"><i data-lucide="history"></i><span><b>模板与修订</b><small>{{ record.revisions|length }} 次修订</small></span></a>
 </nav>
 <div class="detail-layout record-detail-layout record-tabbed-layout" data-active-record-tab="view" data-record-workspace>
@@ -28,11 +28,24 @@
         <div class="record-facts"><span><small>实验人员</small><b>{{ record.operator or '未填写' }}</b></span><span><small>记录日期</small><b>{{ record.record_date }}</b></span><span><small>实验结果</small><b>{{ record.result }}</b></span></div>
         <div class="record-parameters-section">
           <div class="record-section-head"><small>结构化参数</small><span>{{ record.parameters|length }} 项</span></div>
+          <form method="get" class="collection-toolbar compact-collection-toolbar" aria-label="筛选记录参数">
+            {% for key, value in request.args.items() %}{% if key not in ['parameter_q', 'parameter_per_page', 'parameter_page'] %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endif %}{% endfor %}
+            <label class="grow"><span>查找参数</span><input name="parameter_q" value="{{ parameter_search }}" placeholder="名称、数值、单位或说明"></label><label><span>每页数量</span><select name="parameter_per_page">{% for value in detail_page_sizes %}<option value="{{ value }}" {{ 'selected' if parameter_page_size == value }}>{{ value }} 项</option>{% endfor %}</select></label><button class="btn secondary"><i data-lucide="search"></i> 筛选</button>
+          </form>
+          <form id="record-parameter-bulk-form" method="post" action="{{ url_for('main.record_parameter_bulk', record_id=record.id) }}" class="resource-bulk-form compact-resource-bulk" data-bulk-form data-bulk-label="记录参数" data-bulk-total="{{ parameter_pagination.total }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ request.full_path }}#record-view"><input type="hidden" name="parameter_q" value="{{ parameter_search }}"><input type="hidden" name="selection_scope" value="page" data-bulk-selection-scope>
+            <details class="resource-bulk-panel"><summary><span><i data-lucide="list-checks"></i><b>批量管理记录参数</b></span><span data-bulk-selected>已选择 0 个</span></summary><div class="resource-bulk-body">
+              <div class="bulk-head"><label class="bulk-select-all"><input type="checkbox" data-bulk-select-all> 全选本页</label><button class="btn ghost select-all-matches" type="button" data-bulk-select-all-matches aria-pressed="false"><i data-lucide="list-checks"></i> 选择当前筛选全部 {{ parameter_pagination.total }} 项</button></div>
+              <div class="bulk-fields bulk-fields-wide"><label>数值操作<select name="value_mode"><option value="keep">保持不变</option><option value="replace">统一替换</option><option value="clear">清空</option></select></label><label>数值<input name="value" maxlength="160"></label><label>单位操作<select name="unit_mode"><option value="keep">保持不变</option><option value="replace">统一替换</option><option value="clear">清空</option></select></label><label>单位<input name="unit" maxlength="40"></label><label>说明操作<select name="notes_mode"><option value="keep">保持不变</option><option value="append">追加</option><option value="replace">替换</option><option value="clear">清空</option></select></label><label class="bulk-grow">说明<input name="notes" maxlength="255"></label></div>
+              <div class="bulk-actions"><button class="btn secondary" name="action" value="update" disabled><i data-lucide="save"></i> 批量保存</button><button class="btn danger" name="action" value="delete" disabled><i data-lucide="trash-2"></i> 批量删除</button></div>
+            </div></details>
+          </form>
           <div class="parameter-list compact-parameter-list">
-            {% for parameter in record.parameters %}
-            <div class="parameter-row"><span><b>{{ parameter.name }}</b><small>{{ parameter.notes or '本次记录值' }}</small></span><strong>{{ parameter.value or '—' }} {{ parameter.unit }}</strong><form method="post" action="{{ url_for('main.record_parameter_delete', item_id=parameter.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-btn danger" title="删除参数"><i data-lucide="trash-2"></i></button></form></div>
+            {% for parameter in record_parameters %}
+            <div class="parameter-row"><label class="resource-select"><input type="checkbox" name="parameter_ids" value="{{ parameter.id }}" form="record-parameter-bulk-form" data-bulk-select aria-label="选择记录参数 {{ parameter.name }}"></label><span><b>{{ parameter.name }}</b><small>{{ parameter.notes or '本次记录值' }}</small></span><strong>{{ parameter.value or '—' }} {{ parameter.unit }}</strong><form method="post" action="{{ url_for('main.record_parameter_delete', item_id=parameter.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-btn danger" title="删除参数"><i data-lucide="trash-2"></i></button></form></div>
             {% else %}<p class="muted">尚无结构化参数。</p>{% endfor %}
           </div>
+          {% set pagination = parameter_pagination %}{% set page_param = 'parameter_page' %}{% set pagination_label = '记录参数翻页' %}{% set page_item_label = '项参数' %}{% include '_pagination.html' %}
           <form method="post" action="{{ url_for('main.record_parameter_add', record_id=record.id) }}" class="parameter-form inline-parameter-form" data-parameter-builder>
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="parameter-rows" data-parameter-rows><div class="parameter-input-row"><input name="record_parameter_name" placeholder="参数名" required><input name="record_parameter_value" placeholder="数值"><input name="record_parameter_unit" placeholder="单位"><input name="record_parameter_notes" placeholder="说明"><button class="icon-btn" type="button" data-remove-parameter title="移除此行"><i data-lucide="x"></i></button></div></div>
@@ -79,9 +92,13 @@
       </form>
       {% if config.ALLOW_OPEN_LOCAL_FOLDERS %}<details class="external-link-panel"><summary><span><i data-lucide="folder-symlink"></i><b>链接外部大文件或文件夹</b></span><small>不复制、不限大小</small></summary><form method="post" action="{{ url_for('main.attachment_external_link', record_id=record.id) }}" class="external-link-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label class="grow">本地完整路径<input name="external_path" placeholder="例如：D:\实验数据\WB\2026-07-23" required><small>可以是文件或文件夹；应用只保存路径索引，不移动或删除原始内容。</small></label><label>逻辑分类<select name="attachment_category"><option>自动分类</option>{% for category in attachment_categories %}<option>{{ category }}</option>{% endfor %}</select></label><label>记录内文件夹<input name="attachment_folder" placeholder="例如：原始数据 / 第三次重复"></label><button class="btn secondary"><i data-lucide="link-2"></i> 添加外部链接</button></form></details>{% endif %}
       <div class="attachment-storage-note"><i data-lucide="hard-drive"></i><span><b>本地原始文件，不加密、不限大小</b><small title="{{ attachment_storage_path }}">{{ attachment_storage_path }}</small></span></div>
-      <form id="attachment-bulk-form" class="attachment-bulk-form" method="post" action="{{ url_for('main.attachment_bulk_update', record_id=record.id) }}" data-attachment-bulk>
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <div class="bulk-head"><label class="bulk-select-all"><input type="checkbox" data-attachment-select-all> <b>全选文件</b></label><span data-attachment-selected>已选择 0 个</span></div>
+      <form method="get" class="collection-toolbar" aria-label="筛选记录文件">
+        {% for key, value in request.args.items() %}{% if key not in ['file_q', 'file_category', 'file_per_page', 'file_page'] %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endif %}{% endfor %}
+        <label class="grow"><span>查找文件</span><input name="file_q" value="{{ file_search }}" placeholder="文件名、路径、分类、标签或说明"></label><label><span>文件分类</span><select name="file_category"><option>全部</option>{% for category in attachment_categories %}<option {{ 'selected' if file_category == category }}>{{ category }}</option>{% endfor %}</select></label><label><span>每页数量</span><select name="file_per_page">{% for value in detail_page_sizes %}<option value="{{ value }}" {{ 'selected' if file_page_size == value }}>{{ value }} 个</option>{% endfor %}</select></label><button class="btn secondary"><i data-lucide="search"></i> 筛选</button>
+      </form>
+      <form id="attachment-bulk-form" class="attachment-bulk-form" method="post" action="{{ url_for('main.attachment_bulk_update', record_id=record.id) }}" data-attachment-bulk data-total="{{ attachment_pagination.total }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ request.full_path }}#record-files"><input type="hidden" name="file_q" value="{{ file_search }}"><input type="hidden" name="file_category" value="{{ file_category }}"><input type="hidden" name="selection_scope" value="page" data-attachment-selection-scope>
+        <div class="bulk-head"><label class="bulk-select-all"><input type="checkbox" data-attachment-select-page> <b>全选本页</b></label><button class="btn ghost select-all-matches" type="button" data-attachment-select-all-matches aria-pressed="false"><i data-lucide="list-checks"></i> 选择当前筛选全部 {{ attachment_pagination.total }} 个</button><span data-attachment-selected>已选择本页 0 个</span></div>
         <div class="bulk-fields">
           <label>批量分类<select name="category"><option value="__keep__">不修改分类</option>{% for category in attachment_metadata_categories %}<option value="{{ category }}">{{ category }}</option>{% endfor %}</select></label>
           <label>自定义分类<input name="custom_attachment_category" maxlength="20" placeholder="覆盖为自定义分类"></label>
@@ -129,6 +146,7 @@
         <div class="empty compact-empty"><i data-lucide="folder-open"></i><p>尚无实验结果或数据文件</p></div>
         {% endfor %}
       </div>
+      {% set pagination = attachment_pagination %}{% set page_param = 'file_page' %}{% set pagination_label = '记录文件翻页' %}{% set page_item_label = '个文件' %}{% include '_pagination.html' %}
       <datalist id="attachment-category-options">{% for value in attachment_metadata_categories %}<option value="{{ value }}">{% endfor %}</datalist>
     </section>
   </div>
@@ -144,7 +162,17 @@
           <p class="muted small-text">保存实验条件、过程、备注和结构化参数，不保存日期、人员、结果或附件。</p>
           <button class="btn primary full"><i data-lucide="copy-plus"></i> 保存记录模板</button>
         </form>
-        {% if record_templates %}<div class="saved-template-list"><small>已保存记录模板</small>{% for template in record_templates %}<a href="{{ url_for('main.record_template_detail', item_id=template.id) }}"><span><b>{{ template.name }}</b><small>{{ template.parameters|length }} 个参数</small></span><i data-lucide="arrow-right"></i></a>{% endfor %}</div>{% endif %}
+        <div class="saved-template-directory">
+          <div class="saved-template-directory-head"><span><b>已保存记录模板</b><small>{{ template_pagination.total }} 个</small></span><a href="{{ url_for('main.template_center', kind='records') }}"><i data-lucide="settings-2"></i> 管理全部</a></div>
+          <form method="get" class="saved-template-filter">
+            {% for key, value in request.args.items() %}{% if key not in ['template_q', 'template_page', 'template_per_page'] %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endif %}{% endfor %}
+            <label><i data-lucide="search"></i><input name="template_q" value="{{ template_search }}" placeholder="查找模板名称或内容" aria-label="查找已保存记录模板"></label>
+            <select name="template_per_page" aria-label="每页记录模板数量">{% for value in detail_page_sizes %}<option value="{{ value }}" {{ 'selected' if template_page_size == value }}>{{ value }} / 页</option>{% endfor %}</select>
+            <button class="icon-btn" title="筛选模板" aria-label="筛选模板"><i data-lucide="search"></i></button>
+          </form>
+          <div class="saved-template-list">{% for template in record_templates %}<a href="{{ url_for('main.record_template_detail', item_id=template.id) }}"><span><b>{{ template.name }}</b><small>{{ template.parameters|length }} 个参数 · 最后编辑 {{ template.updated_at|edited_at }}</small></span><i data-lucide="arrow-right"></i></a>{% else %}<div class="empty compact-empty"><p>当前筛选条件下没有记录模板</p></div>{% endfor %}</div>
+          {% set pagination = template_pagination %}{% set page_param = 'template_page' %}{% set pagination_label = '已保存记录模板翻页' %}{% set page_item_label = '个模板' %}{% include '_pagination.html' %}
+        </div>
       </div>
     </details>
     <section class="panel sticky-panel record-edit-panel" id="record-edit" data-record-panel="edit" role="tabpanel" aria-labelledby="record-tab-edit" tabindex="0">
@@ -160,7 +188,7 @@
         <button class="btn primary full"><i data-lucide="save"></i> 保存修改</button>
       </form>
       <hr>
-      {% if record.lifecycle_status == '草稿' %}<form method="post" action="{{ url_for('workspace.record_move_batch', item_id=record.id) }}" class="stack-form compact-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>所属实验批次<select name="batch_id">{% for batch in record.experiment.batches if not batch.is_deleted %}<option value="{{ batch.id }}" {{ 'selected' if record.batch_id == batch.id }}>{{ batch.batch_code or ('批次 ' ~ loop.index) }}</option>{% endfor %}</select></label><button class="btn ghost full"><i data-lucide="move-right"></i> 调整批次归属</button></form>{% else %}<div class="notice inline-notice"><i data-lucide="lock-keyhole"></i><span>记录定稿后批次归属锁定；如需更正，请在上方编辑并填写修订原因。</span></div>{% endif %}
+      {% if record.lifecycle_status == '草稿' %}<form method="post" action="{{ url_for('workspace.record_move_batch', item_id=record.id) }}" class="stack-form compact-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>所属实验批次<select name="batch_id" data-filterable-select data-select-search-placeholder="查找批次编号">{% for batch in record.experiment.batches if not batch.is_deleted %}<option value="{{ batch.id }}" {{ 'selected' if record.batch_id == batch.id }}>{{ batch.batch_code or ('批次 ' ~ loop.index) }}</option>{% endfor %}</select></label><button class="btn ghost full"><i data-lucide="move-right"></i> 调整批次归属</button></form>{% else %}<div class="notice inline-notice"><i data-lucide="lock-keyhole"></i><span>记录定稿后批次归属锁定；如需更正，请在上方编辑并填写修订原因。</span></div>{% endif %}
     </section>
   </aside>
 </div>

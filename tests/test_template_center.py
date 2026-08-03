@@ -14,7 +14,7 @@ def test_template_center_creates_previews_and_duplicates_step_templates(client, 
     empty_center = client.get("/templates")
     assert empty_center.status_code == 200
     assert "模板中心".encode() in empty_center.data
-    assert "还没有步骤模板".encode() in empty_center.data
+    assert "还没有方案模板".encode() in empty_center.data
 
     created = client.post("/templates/new", data={
         "kind": "steps",

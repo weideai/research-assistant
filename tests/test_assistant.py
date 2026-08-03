@@ -1,6 +1,9 @@
 import io
 import json
 from datetime import date, datetime
+from pathlib import Path
+
+import pytest
 
 from app import db
 from app.ai_service import AIConfig
@@ -125,94 +128,95 @@ def test_assistant_can_create_a_complete_experiment_plan(client, auth, app, monk
         assert len(experiment.steps) == 2
 
 
-def test_assistant_creates_project_only_after_confirmation_and_can_revert(client, auth, app, monkeypatch):
+def test_assistant_creates_experiment_only_after_confirmation_and_can_revert(client, auth, app, monkeypatch):
+    """create_project removed; verify create_experiment still works end-to-end."""
     auth.register()
     monkeypatch.setattr("app.main.current_ai_config", lambda: AIConfig(
         api_url="https://api.example.test/v1", api_key="test", model="project-model", enabled=True,
     ))
     monkeypatch.setattr("app.main.chat_with_assistant", lambda *_args, **_kwargs: {
-        "reply": "项目草案已准备好，请确认后创建。",
+        "reply": "实验计划草案已准备好，请确认后创建。",
         "proposal": {
-            "action": "create_project",
+            "action": "create_experiment",
             "changes": {
                 "title": "骨肉瘤耐药机制研究", "code": "OS-RES-01",
-                "objective": "验证候选耐药机制", "status": "规划中",
+                "objective": "验证候选耐药机制", "status": "未开始",
                 "start_date": "2026-07-24", "end_date": "2026-12-31",
-                "notes": "先完成体外验证。",
             },
         },
         "references": [], "web_requested": False, "web_used": False,
     })
 
-    response = client.post("/assistant/chat", data={"message": "创建一个耐药机制科研项目"})
+    response = client.post("/assistant/chat", data={"message": "创建一个耐药机制实验计划"})
     assert response.status_code == 200
     payload = response.get_json()
     proposal = payload["assistant_message"]["proposal"]
-    assert proposal["action"] == "create_project"
-    assert any(row["field"] == "项目名称" for row in proposal["diff"])
+    assert proposal["action"] == "create_experiment"
+    assert any(row["field"] == "实验计划名称" for row in proposal["diff"])
     with app.app_context():
-        assert ResearchProject.query.count() == 0
+        assert Experiment.query.filter_by(code="OS-RES-01").count() == 0
 
     applied = client.post(f"/assistant/proposals/{payload['assistant_message']['id']}/apply")
     assert applied.status_code == 200
     with app.app_context():
-        project = ResearchProject.query.filter_by(code="OS-RES-01").one()
-        project_id = project.id
-        assert project.title == "骨肉瘤耐药机制研究"
-        assert project.status == "规划中"
-        assert project.start_date.isoformat() == "2026-07-24"
-    assert applied.get_json()["redirect_url"].endswith(f"/projects/{project_id}")
+        experiment = Experiment.query.filter_by(code="OS-RES-01").one()
+        experiment_id = experiment.id
+        assert experiment.title == "骨肉瘤耐药机制研究"
+        assert experiment.status == "未开始"
+        assert experiment.start_date.isoformat() == "2026-07-24"
+    assert f"/experiments/{experiment_id}" in applied.get_json()["redirect_url"]
 
     reverted = client.post(f"/assistant/proposals/{payload['assistant_message']['id']}/revert")
     assert reverted.status_code == 200
     with app.app_context():
-        assert db.session.get(ResearchProject, project_id) is None
+        assert db.session.get(Experiment, experiment_id) is None
 
 
-def test_assistant_manages_current_project_after_confirmation_and_can_revert(client, auth, app, monkeypatch):
+def test_assistant_manages_current_experiment_after_confirmation_and_can_revert(client, auth, app, monkeypatch):
+    """manage_project removed; verify manage_experiment still works."""
     auth.register()
-    client.post("/projects", data={
-        "title": "原始科研项目", "code": "PROJECT-01", "status": "规划中",
-        "objective": "原始目标",
-    })
+    experiment_id = create_experiment(client, app)
     with app.app_context():
-        project_id = ResearchProject.query.filter_by(code="PROJECT-01").one().id
+        experiment = db.session.get(Experiment, experiment_id)
+        experiment.objective = "原始目标"
+        experiment.status = "未开始"
+        db.session.commit()
     monkeypatch.setattr("app.main.current_ai_config", lambda: AIConfig(
         api_url="https://api.example.test/v1", api_key="test", model="project-model", enabled=True,
     ))
     monkeypatch.setattr("app.main.chat_with_assistant", lambda *_args, **_kwargs: {
-        "reply": "项目更新草案已生成。",
+        "reply": "实验计划更新草案已生成。",
         "proposal": {
-            "action": "manage_project",
+            "action": "manage_experiment",
             "changes": {"objective": "验证新的研究假设", "status": "进行中"},
         },
         "references": [], "web_requested": False, "web_used": False,
     })
 
     proposed = client.post("/assistant/chat", data={
-        "message": "更新当前科研项目", "page_type": "project", "page_id": project_id,
+        "message": "更新当前实验计划", "page_type": "experiment", "page_id": experiment_id,
     }).get_json()
     message_id = proposed["assistant_message"]["id"]
-    assert proposed["assistant_message"]["proposal"]["action"] == "manage_project"
+    assert proposed["assistant_message"]["proposal"]["action"] == "manage_experiment"
     with app.app_context():
-        assert db.session.get(ResearchProject, project_id).objective == "原始目标"
+        assert db.session.get(Experiment, experiment_id).objective == "原始目标"
 
     applied = client.post(f"/assistant/proposals/{message_id}/apply")
     assert applied.status_code == 200, applied.get_json()
     with app.app_context():
-        project = db.session.get(ResearchProject, project_id)
-        assert project.objective == "验证新的研究假设"
-        assert project.status == "进行中"
+        experiment = db.session.get(Experiment, experiment_id)
+        assert experiment.objective == "验证新的研究假设"
+        assert experiment.status == "进行中"
 
     reverted = client.post(f"/assistant/proposals/{message_id}/revert")
     assert reverted.status_code == 200, reverted.get_json()
     with app.app_context():
-        project = db.session.get(ResearchProject, project_id)
-        assert project.objective == "原始目标"
-        assert project.status == "规划中"
+        experiment = db.session.get(Experiment, experiment_id)
+        assert experiment.objective == "原始目标"
+        assert experiment.status == "未开始"
 
 
-def test_assistant_creates_execution_for_current_plan_and_can_revert(client, auth, app, monkeypatch):
+def test_assistant_creates_empty_execution_step_list_and_can_revert(client, auth, app, monkeypatch):
     auth.register()
     experiment_id = create_experiment(client, app)
     monkeypatch.setattr("app.main.current_ai_config", lambda: AIConfig(
@@ -249,6 +253,7 @@ def test_assistant_creates_execution_for_current_plan_and_can_revert(client, aut
         assert execution.batch_code == "RUN-AI-01"
         assert execution.status == "进行中"
         assert execution.start_date == date(2026, 7, 24)
+        assert execution.steps == []
     assert applied.get_json()["redirect_url"].endswith(f"/batches/{execution_id}")
 
     reverted = client.post(f"/assistant/proposals/{message_id}/revert")
@@ -257,6 +262,7 @@ def test_assistant_creates_execution_for_current_plan_and_can_revert(client, aut
         assert db.session.get(ExperimentBatch, execution_id) is None
 
 
+@pytest.mark.skip(reason="create_project action removed in hierarchy flattening")
 def test_assistant_requires_project_choice_when_multiple_projects_exist(client, auth, app, monkeypatch):
     auth.register()
     with app.app_context():
@@ -291,6 +297,7 @@ def test_assistant_requires_project_choice_when_multiple_projects_exist(client, 
         assert experiment.project_id == second_id
 
 
+@pytest.mark.skip(reason="create_project action removed in hierarchy flattening")
 def test_assistant_rejects_invalid_project_fields(client, auth, app, monkeypatch):
     auth.register()
     proposals = iter((
@@ -327,6 +334,7 @@ def test_assistant_rejects_invalid_project_fields(client, auth, app, monkeypatch
         assert ResearchProject.query.count() == 0
 
 
+@pytest.mark.skip(reason="project actions removed")
 def test_project_proposal_is_private_to_conversation_owner(client, auth, app, monkeypatch):
     auth.register(email="project-owner@example.com")
     monkeypatch.setattr("app.main.current_ai_config", lambda: AIConfig(
@@ -353,6 +361,7 @@ def test_project_proposal_is_private_to_conversation_owner(client, auth, app, mo
         assert ResearchProject.query.filter_by(title="私有科研项目").one()
 
 
+@pytest.mark.skip(reason="project actions removed")
 def test_project_context_receives_new_experiment_and_blocks_unsafe_project_revert(client, auth, app, monkeypatch):
     auth.register()
     client.post("/projects", data={"title": "当前项目", "code": "CURRENT-PROJECT"})
@@ -458,7 +467,7 @@ def test_experiment_and_batch_details_expose_planning_and_record_tools(client, a
     assert response.status_code == 200
     assert b'data-disclosure-key="experiment-' in response.data
     assert b'id="step-templates"' in response.data
-    assert "保存步骤模板".encode() in response.data
+    assert "保存方案模板".encode() in response.data
     batch_response = client.get(f"/batches/{batch_id}")
     assert batch_response.status_code == 200
     assert "添加过程记录".encode() in batch_response.data
@@ -506,6 +515,7 @@ def test_assistant_context_preview_lists_outgoing_research_scope(client, auth, a
     assert preview["requires_confirmation"] is True
 
 
+@pytest.mark.skip(reason="project page_type removed")
 def test_existing_conversation_uses_current_page_context_for_preview_and_generation(client, auth, app, monkeypatch):
     auth.register()
     client.post("/projects", data={"title": "旧页面项目", "code": "OLD-PAGE"})
@@ -559,6 +569,7 @@ def test_existing_conversation_uses_current_page_context_for_preview_and_generat
         assert page_snapshot["page_id"] == current_project_id
 
 
+@pytest.mark.skip(reason="project page_type removed")
 def test_assistant_rejects_page_context_owned_by_another_user(client, auth, app, monkeypatch):
     auth.register(email="page-owner@example.com")
     client.post("/projects", data={"title": "私有页面", "code": "PRIVATE-PAGE"})
@@ -645,6 +656,7 @@ def test_assistant_state_exposes_execution_metadata_and_current_page_scope(clien
         "project_id": project_id,
         "experiment_id": experiment_id,
         "batch_id": second_batch_id,
+        "record_id": None,
     }
     batches = {item["id"]: item for item in state["batches"]}
     assert {first_batch_id, second_batch_id}.issubset(batches)
@@ -661,6 +673,89 @@ def test_assistant_state_exposes_execution_metadata_and_current_page_scope(clien
     ).get_json()
     assert record_state["page_scope"]["experiment_id"] == experiment_id
     assert record_state["page_scope"]["batch_id"] == second_batch_id
+    assert record_state["page_scope"]["record_id"] == record_id
+    assert {item["id"] for item in record_state["records"]} == {record_id}
+
+
+def test_assistant_scope_catalog_sorts_by_latest_descendant_edit(client, auth, app):
+    auth.register()
+    first_experiment_id = create_experiment(client, app)
+    first_batch_id = create_batch(client, app, first_experiment_id)
+    client.post("/experiments", data={"title": "Later descendant", "code": "AI-002"})
+    with app.app_context():
+        second_experiment_id = Experiment.query.filter_by(code="AI-002").one().id
+    second_batch_id = create_batch(client, app, second_experiment_id)
+    client.post(f"/batches/{first_batch_id}/records", data={
+        "batch_id": str(first_batch_id), "content": "older record",
+    })
+    client.post(f"/batches/{second_batch_id}/records", data={
+        "batch_id": str(second_batch_id), "content": "newest descendant record",
+    })
+    with app.app_context():
+        first_experiment = db.session.get(Experiment, first_experiment_id)
+        second_experiment = db.session.get(Experiment, second_experiment_id)
+        first_batch = db.session.get(ExperimentBatch, first_batch_id)
+        second_batch = db.session.get(ExperimentBatch, second_batch_id)
+        first_record = ExperimentRecord.query.filter_by(batch_id=first_batch_id).one()
+        second_record = ExperimentRecord.query.filter_by(batch_id=second_batch_id).one()
+        first_experiment.updated_at = datetime(2026, 8, 3, 9, 0)
+        first_batch.updated_at = datetime(2026, 8, 3, 9, 0)
+        first_record.updated_at = datetime(2026, 8, 3, 9, 0)
+        second_experiment.updated_at = datetime(2026, 8, 1, 9, 0)
+        second_batch.updated_at = datetime(2026, 8, 1, 9, 0)
+        second_record.updated_at = datetime(2026, 8, 4, 9, 0)
+        second_record_id = second_record.id
+        db.session.commit()
+
+    state = client.get("/assistant/state").get_json()
+    assert state["experiments"][0]["id"] == second_experiment_id
+    assert state["batches"][0]["id"] == second_batch_id
+    assert state["records"][0]["id"] == second_record_id
+    assert state["batches"][0]["record_count"] == 1
+    assert state["experiments"][0]["updated_title"] == "2026-08-04 09:00:00"
+
+
+def test_assistant_record_scope_persists_and_excludes_sibling_records(client, auth, app, monkeypatch):
+    auth.register()
+    experiment_id = create_experiment(client, app)
+    batch_id = create_batch(client, app, experiment_id)
+    client.post(f"/batches/{batch_id}/records", data={
+        "batch_id": str(batch_id), "content": "SELECTED RECORD ONLY",
+    })
+    client.post(f"/batches/{batch_id}/records", data={
+        "batch_id": str(batch_id), "content": "SIBLING RECORD MUST STAY OUT",
+    })
+    with app.app_context():
+        selected_record = ExperimentRecord.query.filter_by(content="SELECTED RECORD ONLY").one()
+        selected_record_id = selected_record.id
+
+    captured = {}
+
+    def fake_chat(_messages, system_prompt, _config, **_kwargs):
+        captured["prompt"] = system_prompt
+        return {
+            "reply": "已仅分析所选记录。", "proposal": None,
+            "references": [], "web_requested": False, "web_used": False,
+        }
+
+    monkeypatch.setattr("app.main.current_ai_config", lambda: AIConfig(
+        api_url="https://api.example.test/v1", api_key="test",
+        model="record-scope-model", enabled=True,
+    ))
+    monkeypatch.setattr("app.main.chat_with_assistant", fake_chat)
+    response = client.post("/assistant/chat", data={
+        "message": "分析这条实验记录",
+        "experiment_scope_present": "1", "batch_scope_present": "1",
+        "record_scope_present": "1", "record_ids": str(selected_record_id),
+    })
+    assert response.status_code == 200
+    assert "SELECTED RECORD ONLY" in captured["prompt"]
+    assert "SIBLING RECORD MUST STAY OUT" not in captured["prompt"]
+
+    state = client.get(
+        f"/assistant/state?conversation_id={response.get_json()['conversation_id']}"
+    ).get_json()
+    assert state["conversation"]["selected_record_ids"] == [selected_record_id]
 
 
 def test_assistant_execution_scope_separates_repeats_and_cites_execution_parameters(client, auth, app, monkeypatch):
@@ -820,6 +915,136 @@ def test_user_can_build_private_knowledge_base_and_reset_prompt(client, auth, ap
     assert client.post(f"/assistant/knowledge-bases/{base_id}", data={"action": "delete"}).status_code == 404
 
 
+def test_assistant_knowledge_bases_support_pagination_search_and_bulk_actions(client, auth, app):
+    auth.register(email="knowledge-bulk@example.com")
+    base_ids = []
+    for index in range(10):
+        name = f"目标知识库 {index + 1:02d}" if index < 2 else f"普通知识库 {index + 1:02d}"
+        created = client.post("/assistant/knowledge-bases", data={
+            "name": name, "description": f"原说明 {index + 1:02d}",
+        })
+        assert created.status_code == 200
+        base_ids.append(created.get_json()["id"])
+
+    client.post(f"/assistant/knowledge-bases/{base_ids[2]}/documents", data={
+        "title": "离心条件索引", "text_content": "仅用于验证知识文档反向搜索。",
+    })
+
+    state = client.get("/assistant/state?knowledge_page=2&knowledge_per_page=8").get_json()
+    assert state["knowledge_pagination"] == {
+        "page": 2, "pages": 2, "per_page": 8, "total": 10,
+        "has_prev": True, "has_next": False, "page_sizes": [8, 16, 32],
+    }
+    assert {item["id"] for item in state["knowledge_bases"]} == set(base_ids[:2])
+
+    filtered = client.get("/assistant/state?knowledge_q=目标知识库").get_json()
+    assert filtered["knowledge_pagination"]["total"] == 2
+    assert {item["name"] for item in filtered["knowledge_bases"]} == {"目标知识库 01", "目标知识库 02"}
+
+    document_match = client.get("/assistant/state?knowledge_q=离心条件索引").get_json()
+    assert document_match["knowledge_pagination"]["total"] == 1
+    assert document_match["knowledge_bases"][0]["id"] == base_ids[2]
+
+    updated = client.post("/assistant/knowledge-bases/bulk", data={
+        "selection_scope": "all", "knowledge_q": "目标知识库", "action": "update",
+        "bulk_enabled": "disabled", "description_mode": "append",
+        "description": "已复核", "instruction_mode": "replace",
+        "custom_instructions": "仅引用已复核内容。",
+    })
+    assert updated.status_code == 200
+    assert set(updated.get_json()["ids"]) == set(base_ids[:2])
+    with app.app_context():
+        targets = AIKnowledgeBase.query.filter(AIKnowledgeBase.id.in_(base_ids[:2])).all()
+        assert all(not item.is_enabled for item in targets)
+        assert all(item.description.endswith("已复核") for item in targets)
+        assert {item.custom_instructions for item in targets} == {"仅引用已复核内容。"}
+        assert db.session.get(AIKnowledgeBase, base_ids[2]).is_enabled is True
+
+    outside_filter = client.post("/assistant/knowledge-bases/bulk", data={
+        "selection_scope": "page", "knowledge_q": "目标知识库",
+        "knowledge_base_item_ids": str(base_ids[2]), "action": "delete",
+    })
+    assert outside_filter.status_code == 404
+
+    auth.logout()
+    auth.register(email="knowledge-bulk-other@example.com")
+    assert client.post("/assistant/knowledge-bases/bulk", data={
+        "selection_scope": "page", "knowledge_base_item_ids": str(base_ids[0]),
+        "action": "delete",
+    }).status_code == 404
+
+
+def test_assistant_knowledge_documents_have_independent_pagination_and_safe_bulk_deletion(client, auth, app):
+    auth.register(email="knowledge-documents@example.com")
+    first_base = client.post("/assistant/knowledge-bases", data={"name": "文档目录 A"}).get_json()["id"]
+    second_base = client.post("/assistant/knowledge-bases", data={"name": "文档目录 B"}).get_json()["id"]
+    for index in range(9):
+        title = f"目标文档 {index + 1:02d}" if index < 2 else f"普通文档 {index + 1:02d}"
+        assert client.post(f"/assistant/knowledge-bases/{first_base}/documents", data={
+            "title": title, "text_content": f"知识内容 {index + 1:02d}",
+        }).status_code == 200
+    uploaded = client.post(
+        f"/assistant/knowledge-bases/{first_base}/documents",
+        data={"files": (io.BytesIO(b"uploaded knowledge"), "待删除文件.txt")},
+        content_type="multipart/form-data",
+    )
+    assert uploaded.status_code == 200
+    foreign_document = client.post(f"/assistant/knowledge-bases/{second_base}/documents", data={
+        "title": "其他目录文档", "text_content": "不能由目录 A 批量操作。",
+    })
+    assert foreign_document.status_code == 200
+
+    page = client.get(f"/assistant/knowledge-bases/{first_base}/documents?page=2&per_page=8").get_json()
+    assert page["pagination"] == {
+        "page": 2, "pages": 2, "per_page": 8, "total": 10,
+        "has_prev": True, "has_next": False, "page_sizes": [8, 16, 32],
+    }
+    assert len(page["documents"]) == 2
+
+    filtered = client.get(f"/assistant/knowledge-bases/{first_base}/documents?q=目标文档").get_json()
+    assert filtered["pagination"]["total"] == 2
+    updated = client.post(f"/assistant/knowledge-bases/{first_base}/documents/bulk", data={
+        "selection_scope": "all", "q": "目标文档", "action": "update",
+        "title_mode": "suffix", "title_value": " · 已复核",
+    })
+    assert updated.status_code == 200
+    with app.app_context():
+        titles = {item.title for item in AIKnowledgeDocument.query.filter_by(knowledge_base_id=first_base).all()}
+        assert {"目标文档 01 · 已复核", "目标文档 02 · 已复核"}.issubset(titles)
+        assert "普通文档 03" in titles
+        uploaded_document = AIKnowledgeDocument.query.filter_by(
+            knowledge_base_id=first_base, original_name="待删除文件.txt",
+        ).one()
+        uploaded_id = uploaded_document.id
+        uploaded_path = Path(app.config["KNOWLEDGE_UPLOAD_DIR"]) / uploaded_document.stored_path
+        other_document_id = AIKnowledgeDocument.query.filter_by(knowledge_base_id=second_base).one().id
+    assert uploaded_path.is_file()
+
+    cross_base = client.post(f"/assistant/knowledge-bases/{first_base}/documents/bulk", data={
+        "selection_scope": "page", "document_ids": str(other_document_id), "action": "delete",
+    })
+    assert cross_base.status_code == 404
+    removed = client.post(f"/assistant/knowledge-bases/{first_base}/documents/bulk", data={
+        "selection_scope": "page", "document_ids": str(uploaded_id), "action": "delete",
+    })
+    assert removed.status_code == 200
+    assert not uploaded_path.exists()
+
+    second_upload = client.post(
+        f"/assistant/knowledge-bases/{second_base}/documents",
+        data={"files": (io.BytesIO(b"remove directory"), "目录删除.txt")},
+        content_type="multipart/form-data",
+    )
+    assert second_upload.status_code == 200
+    second_directory = Path(app.config["KNOWLEDGE_UPLOAD_DIR"]) / f"user-1" / f"base-{second_base}"
+    assert second_directory.is_dir()
+    deleted_base = client.post("/assistant/knowledge-bases/bulk", data={
+        "selection_scope": "page", "knowledge_base_item_ids": str(second_base), "action": "delete",
+    })
+    assert deleted_base.status_code == 200
+    assert not second_directory.exists()
+
+
 def test_assistant_applies_selected_diff_only_and_can_revert(client, auth, app, monkeypatch):
     auth.register()
     experiment_id = create_experiment(client, app)
@@ -864,6 +1089,14 @@ def test_assistant_ui_exposes_window_knowledge_and_message_controls(client, auth
     for control_id in (
         "ai-maximize", "ai-close", "ai-resize-handle",
         "ai-knowledge-create-form", "ai-prompt-form", "ai-prompt-reset", "ai-stop",
+        "ai-history-search", "ai-history-level", "ai-history-results",
+        "ai-context-page", "ai-experiment-source-open", "ai-knowledge-source-open",
+        "ai-context-page-close", "ai-context-page-title",
+        "ai-knowledge-search", "ai-knowledge-per-page",
+        "ai-knowledge-select-page", "ai-knowledge-select-matches",
+        "ai-knowledge-bulk-save", "ai-knowledge-bulk-delete",
+        "ai-knowledge-prev", "ai-knowledge-next",
+        "ai-history-per-page", "ai-history-prev", "ai-history-next", "ai-history-page",
     ):
         assert f'id="{control_id}"'.encode() in response.data
     assert b'id="ai-dock-left"' not in response.data
@@ -875,8 +1108,14 @@ def test_assistant_ui_exposes_window_knowledge_and_message_controls(client, auth
     assert b"dockAiWindow" not in script
     assert b"selected_change_ids" in script
     assert b"syncExperimentScopeControls" in script
+    assert b"historyInputsMatchingFilter" in script
+    assert b"aiHistoryPage" in script
     assert b"parent.indeterminate" in script
     assert b'batch_scope_present' in script
+    assert b'record_scope_present' in script
+    assert b'/assistant/knowledge-bases/bulk' in script
+    assert b'data-knowledge-document-bulk-action' in script
+    assert b'input[name="record_ids"]' in script
     assert b"navigator.clipboard.writeText" in script
 
 
@@ -904,6 +1143,50 @@ def test_assistant_conversations_can_be_listed_renamed_and_deleted_privately(cli
     assert deleted.get_json()["next_conversation_id"] == second["id"]
     with app.app_context():
         assert db.session.get(AIConversation, first["id"]) is None
+
+
+def test_assistant_conversations_support_server_pagination_and_filtered_bulk_actions(client, auth, app):
+    auth.register(email="conversation-bulk@example.com")
+    conversation_ids = []
+    for index in range(10):
+        item = client.post("/assistant/conversations", data={}).get_json()
+        title = f"目标会话 {index + 1:02d}" if index < 2 else f"普通会话 {index + 1:02d}"
+        client.post(f"/assistant/conversations/{item['id']}", data={
+            "action": "rename", "title": title,
+        })
+        conversation_ids.append(item["id"])
+
+    state = client.get("/assistant/state?conversation_page=2&conversation_per_page=8").get_json()
+    assert state["conversation_pagination"] == {
+        "page": 2, "pages": 2, "per_page": 8, "total": 10,
+        "has_prev": True, "has_next": False, "page_sizes": [8, 16, 32],
+    }
+    assert {item["id"] for item in state["conversations"]} == set(conversation_ids[:2])
+
+    filtered = client.get("/assistant/state?conversation_q=目标会话").get_json()
+    assert filtered["conversation_pagination"]["total"] == 2
+    assert {item["title"] for item in filtered["conversations"]} == {"目标会话 01", "目标会话 02"}
+
+    updated = client.post("/assistant/conversations/bulk", data={
+        "selection_scope": "all", "conversation_q": "目标会话",
+        "action": "update", "title_mode": "suffix", "title_value": " · 已复核",
+    })
+    assert updated.status_code == 200
+    with app.app_context():
+        target_titles = {
+            item.title for item in AIConversation.query.filter(
+                AIConversation.id.in_(conversation_ids[:2])
+            ).all()
+        }
+        assert target_titles == {"目标会话 01 · 已复核", "目标会话 02 · 已复核"}
+        assert db.session.get(AIConversation, conversation_ids[2]).title == "普通会话 03"
+
+    assert client.post("/assistant/conversations/bulk", data={
+        "conversation_ids": str(conversation_ids[2]), "action": "delete",
+        "selection_scope": "page",
+    }).status_code == 200
+    with app.app_context():
+        assert db.session.get(AIConversation, conversation_ids[2]) is None
 
 
 def test_assistant_can_edit_final_prompt_and_regenerate_final_reply(client, auth, app, monkeypatch):
@@ -973,6 +1256,9 @@ def test_assistant_ui_exposes_chat_history_and_cherry_style_shortcuts(client, au
     for control_id in (
         "ai-sidebar-toggle", "ai-new-chat", "ai-new-chat-side",
         "ai-conversation-search", "ai-conversation-list",
+        "ai-conversation-select-page", "ai-conversation-select-matches",
+        "ai-conversation-per-page", "ai-conversation-bulk-save",
+        "ai-conversation-bulk-delete", "ai-conversation-prev", "ai-conversation-next",
     ):
         assert f'id="{control_id}"'.encode() in page
     script = client.get("/static/js/app.js").data

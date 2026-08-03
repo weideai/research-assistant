@@ -59,8 +59,8 @@ def test_project_workspace_creates_plan_then_explicit_execution(client, auth, ap
     auth.register()
     project_id, experiment_id, batch_id = _workspace_experiment(client, app)
 
-    assert client.get("/projects").status_code == 200
-    assert client.get(f"/projects/{project_id}").status_code == 200
+    assert client.get("/projects").status_code == 301
+    assert client.get(f"/projects/{project_id}").status_code == 301
     assert client.get(f"/batches/{batch_id}").status_code == 200
     with app.app_context():
         experiment = db.session.get(Experiment, experiment_id)
@@ -299,14 +299,13 @@ def test_execution_names_counts_and_dashboard_links_follow_research_hierarchy(cl
         db.session.commit()
 
     plan_page = client.get(f"/experiments/{experiment_id}").get_data(as_text=True)
-    assert f'href="/projects/{project_id}"' in plan_page
-    assert "返回 层级导航项目" in plan_page
+    assert "返回实验计划" in plan_page
     assert "批次编号，如 RUN-02" in plan_page
     assert "BATCH-" not in plan_page
 
-    project_page = client.get(f"/projects/{project_id}").get_data(as_text=True)
-    assert "<span><small>实验批次</small><b>1</b></span>" in project_page
-    assert "RUN-REMOVED" not in project_page
+    # Project page now redirects to experiments with project filter
+    project_redirect = client.get(f"/projects/{project_id}")
+    assert project_redirect.status_code == 301
 
     dashboard = client.get("/").get_data(as_text=True)
     assert f'href="/batches/{execution_id}"' in dashboard
@@ -316,7 +315,6 @@ def test_execution_names_counts_and_dashboard_links_follow_research_hierarchy(cl
     plan_index = client.get("/experiments").get_data(as_text=True)
     assert "<h1>实验计划</h1>" in plan_index
     assert "打开实验计划" in plan_index
-    assert "新建实验</a>" not in plan_index
 
 
 def test_batch_record_create_requires_matching_explicit_batch(client, auth, app):
@@ -451,9 +449,7 @@ def test_recycle_restore_and_purge_managed_attachment(client, auth, app):
         assert db.session.get(ExperimentAttachment, attachment_id).is_deleted is False
 
     client.post(f"/attachments/{attachment_id}/delete")
-    response = client.post(f"/recycle-bin/attachment/{attachment_id}/purge", data={
-        "confirmation": "永久删除",
-    })
+    response = client.post(f"/recycle-bin/attachment/{attachment_id}/purge")
     assert response.status_code == 302
     assert not stored_path.exists()
     with app.app_context():
@@ -467,36 +463,35 @@ def test_recycle_bulk_purge_removes_selected_managed_attachments(client, auth, a
 
     response = client.post("/recycle-bin/attachment/purge-bulk", data={
         "item_ids": [str(item_id) for item_id in attachment_ids],
-        "confirmation": "永久删除",
-        "q": "raw", "page": "2", "per_page": "50",
+        "selection_scope": "page",
+        "q": "bin", "page": "2", "per_page": "50",
     })
 
     assert response.status_code == 302
     assert all(value in response.headers["Location"] for value in (
-        "kind=attachment", "q=raw", "page=2", "per_page=50",
+        "kind=attachment", "q=bin", "page=2", "per_page=50",
     ))
     assert all(not path.exists() for path in stored_paths)
     with app.app_context():
         assert all(db.session.get(ExperimentAttachment, item_id) is None for item_id in attachment_ids)
 
 
-def test_recycle_bulk_purge_rejects_missing_or_invalid_confirmation(client, auth, app):
+def test_recycle_bulk_purge_rejects_missing_or_invalid_selection(client, auth, app):
     auth.register()
     attachment_ids, stored_paths = _deleted_managed_attachments(client, app)
 
     response = client.post("/recycle-bin/attachment/purge-bulk", data={
-        "item_ids": [str(item_id) for item_id in attachment_ids],
-        "confirmation": "删除",
-    }, follow_redirects=True)
-    assert "请输入“永久删除”".encode() in response.data
-
-    response = client.post("/recycle-bin/attachment/purge-bulk", data={
-        "confirmation": "永久删除",
+        "selection_scope": "page",
     }, follow_redirects=True)
     assert "请先勾选至少一个项目".encode() in response.data
 
     assert client.post("/recycle-bin/attachment/purge-bulk", data={
-        "item_ids": ["not-an-id"], "confirmation": "永久删除",
+        "selection_scope": "invalid",
+        "item_ids": [str(item_id) for item_id in attachment_ids],
+    }).status_code == 400
+
+    assert client.post("/recycle-bin/attachment/purge-bulk", data={
+        "selection_scope": "page", "item_ids": ["not-an-id"],
     }).status_code == 400
     assert all(path.is_file() for path in stored_paths)
     with app.app_context():
@@ -515,7 +510,7 @@ def test_recycle_bulk_purge_is_atomic_across_user_boundary(client, auth, app):
 
     response = client.post("/recycle-bin/attachment/purge-bulk", data={
         "item_ids": [str(owned_ids[0]), str(foreign_ids[0])],
-        "confirmation": "永久删除",
+        "selection_scope": "page",
     })
 
     assert response.status_code == 404
@@ -544,7 +539,7 @@ def test_recycle_bulk_purge_keeps_external_source_file(client, auth, app):
     client.post(f"/attachments/{attachment_id}/delete")
 
     response = client.post("/recycle-bin/attachment/purge-bulk", data={
-        "item_ids": [str(attachment_id)], "confirmation": "永久删除",
+        "item_ids": [str(attachment_id)], "selection_scope": "page",
     })
 
     assert response.status_code == 302
@@ -563,8 +558,43 @@ def test_recycle_page_exposes_bulk_purge_controls(client, auth, app):
     assert 'action="/recycle-bin/attachment/purge-bulk"' in body
     assert "data-bulk-form" in body
     assert "data-bulk-select-all" in body
+    assert "data-bulk-select-all-matches" in body
+    assert 'name="selection_scope" value="page"' in body
+    assert f"全选全部 {len(attachment_ids)} 个实验文件" in body
     assert body.count('name="item_ids"') == len(attachment_ids)
+    assert body.count('name="action" value="delete"') == 1
     assert "批量永久删除" in body
+    assert 'name="confirmation"' not in body
+    assert "输入“永久删除”" not in body
+
+
+def test_recycle_select_all_matches_purges_every_filtered_page(client, auth, app):
+    auth.register()
+    matching_names = tuple(f"match-{index:02d}.bin" for index in range(21))
+    attachment_ids, stored_paths = _deleted_managed_attachments(
+        client, app, (*matching_names, "keep.bin"),
+    )
+
+    body = client.get(
+        "/recycle-bin?kind=attachment&q=match-&per_page=20",
+    ).get_data(as_text=True)
+    assert body.count('name="item_ids"') == 20
+    assert "全选全部 21 个实验文件" in body
+    assert "第 1 / 2 页" in body
+
+    response = client.post("/recycle-bin/attachment/purge-bulk", data={
+        "selection_scope": "all", "q": "match-", "page": "1", "per_page": "20",
+    })
+
+    assert response.status_code == 302
+    assert all(not path.exists() for path in stored_paths[:-1])
+    assert stored_paths[-1].is_file()
+    with app.app_context():
+        assert all(
+            db.session.get(ExperimentAttachment, item_id) is None
+            for item_id in attachment_ids[:-1]
+        )
+        assert db.session.get(ExperimentAttachment, attachment_ids[-1]) is not None
 
 
 def test_record_cannot_move_to_another_users_batch(client, auth, app):
@@ -642,5 +672,5 @@ def test_external_link_is_never_deleted(client, auth, app):
         assert attachment.storage_mode == "external"
 
     client.post(f"/attachments/{attachment_id}/delete")
-    client.post(f"/recycle-bin/attachment/{attachment_id}/purge", data={"confirmation": "永久删除"})
+    client.post(f"/recycle-bin/attachment/{attachment_id}/purge")
     assert external_path.is_file()

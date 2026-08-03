@@ -3,11 +3,13 @@ from html import unescape
 import re
 from urllib.parse import parse_qs, urlsplit
 
+import pytest
+
 from app import db
 from app.models import (
     BatchParameter, BatchSample, BatchStep, Experiment, ExperimentBatch,
     ExperimentParameter, ExperimentRecord, ExperimentSample, ExperimentStep,
-    ResearchProject, Sample, Task, User,
+    RecordTemplate, ResearchProject, Sample, Task, User, WeeklyReport, WeeklyReportUpdate,
 )
 
 
@@ -20,6 +22,7 @@ def _page_link_queries(body, page_key="page", page_number="2"):
     return queries
 
 
+@pytest.mark.skip(reason="projects page removed in hierarchy flattening")
 def test_project_pages_do_not_repeat_items_and_keep_filters(client, auth, app):
     auth.register()
     with app.app_context():
@@ -196,6 +199,7 @@ def test_detail_page_paginators_are_independent(client, auth, app):
 
         batches = []
         samples = []
+        records = []
         for index in range(9):
             batch = ExperimentBatch(
                 experiment_id=experiment.id, batch_code=f"PAGE-BATCH-{index:02d}",
@@ -223,11 +227,13 @@ def test_detail_page_paginators_are_independent(client, auth, app):
                 experiment_id=experiment.id, sample_id=samples[index].id,
                 role=f"PAGE ROLE {position:02d}",
             ))
-            db.session.add(ExperimentRecord(
+            record = ExperimentRecord(
                 experiment_id=experiment.id, batch_id=batches[0].id,
                 record_date=date(2026, 7, 1) + timedelta(days=index),
                 content=f"PAGE RECORD {index:02d}",
-            ))
+            )
+            db.session.add(record)
+            records.append(record)
             db.session.add(BatchStep(
                 batch_id=batches[0].id, position=position,
                 title=f"BATCH STEP {position:02d}",
@@ -240,9 +246,14 @@ def test_detail_page_paginators_are_independent(client, auth, app):
                 batch_id=batches[0].id, sample_id=samples[index].id,
                 role=f"BATCH ROLE {position:02d}",
             ))
+            db.session.add(RecordTemplate(
+                user_id=user_id, name=f"PAGE TEMPLATE {position:02d}",
+                description="分页记录模板",
+            ))
         db.session.commit()
         experiment_id = experiment.id
         batch_id = batches[0].id
+        record_id = records[0].id
 
     experiment_body = client.get(
         f"/experiments/{experiment_id}?batch_page=2&record_page=2&step_page=2"
@@ -264,3 +275,84 @@ def test_detail_page_paginators_are_independent(client, auth, app):
         "BATCH STEP 09", "PAGE RECORD 00", "BATCH PARAM 09", "BATCH ROLE 09",
     ):
         assert label in batch_body
+
+    record_body = client.get(
+        f"/records/{record_id}?template_page=2&template_per_page=8"
+    ).get_data(as_text=True)
+    assert "PAGE TEMPLATE 09" in record_body
+    assert "PAGE TEMPLATE 08" not in record_body
+    assert "第 2 / 2 页" in record_body
+    assert "管理全部" in record_body
+
+
+def test_weekly_update_pagination_is_independent_from_weekly_report_list(client, auth, app):
+    auth.register()
+    with app.app_context():
+        user_id = User.query.one().id
+        report = WeeklyReport(
+            user_id=user_id, title="内部记录分页周报", original_name="weekly.pptx",
+            report_date=date(2026, 8, 1),
+        )
+        db.session.add(report)
+        db.session.flush()
+        for index in range(9):
+            db.session.add(WeeklyReportUpdate(
+                report_id=report.id, user_id=user_id,
+                entry_date=date(2026, 7, 1) + timedelta(days=index),
+                kind="修改日常", status="待处理",
+                content=f"WEEKLY UPDATE {index + 1:02d}",
+            ))
+        db.session.commit()
+        report_id = report.id
+
+    body = client.get(
+        f"/reports/presentation?report_id={report_id}&page=1&per_page=10"
+        "&update_page=2&update_per_page=8"
+    ).get_data(as_text=True)
+    assert "WEEKLY UPDATE 01" in body
+    assert "WEEKLY UPDATE 09" not in body
+    assert "第 2 / 2 页" in body
+    assert "选择当前筛选全部 9 条" in body
+    assert 'name="update_per_page"' in body
+
+
+def test_sample_trace_plan_and_actual_usage_have_independent_pagination(client, auth, app):
+    auth.register()
+    with app.app_context():
+        user_id = User.query.one().id
+        sample = Sample(user_id=user_id, sample_code="TRACE-PAGE", status="可用")
+        db.session.add(sample)
+        db.session.flush()
+        for index in range(9):
+            experiment = Experiment(
+                user_id=user_id, title=f"TRACE PLAN {index + 1:02d}",
+                code=f"TRACE-EXP-{index + 1:02d}",
+            )
+            db.session.add(experiment)
+            db.session.flush()
+            batch = ExperimentBatch(
+                experiment_id=experiment.id, batch_code=f"TRACE RUN {index + 1:02d}",
+            )
+            db.session.add(batch)
+            db.session.flush()
+            db.session.add(ExperimentSample(
+                experiment_id=experiment.id, sample_id=sample.id,
+                role=f"PLAN ROLE {index + 1:02d}",
+            ))
+            db.session.add(BatchSample(
+                batch_id=batch.id, sample_id=sample.id,
+                role=f"ACTUAL ROLE {index + 1:02d}",
+            ))
+        db.session.commit()
+        sample_id = sample.id
+
+    body = client.get(
+        f"/samples/{sample_id}/edit?plan_usage_page=2&plan_usage_per_page=8"
+        "&batch_usage_page=2&batch_usage_per_page=8"
+    ).get_data(as_text=True)
+    assert "TRACE PLAN 01" in body
+    assert "TRACE RUN 01" in body
+    assert "TRACE PLAN 09" not in body
+    assert "TRACE RUN 09" not in body
+    assert body.count("第 2 / 2 页") == 2
+    assert "选择当前筛选全部 9 条" in body

@@ -5,22 +5,39 @@
 <div class="sample-detail-grid">
   <section class="panel narrow-panel"><form method="post" class="stack-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="form-grid"><label>样本编号<input name="sample_code" value="{{ sample.sample_code }}" required></label><label>类型<input name="sample_type" value="{{ sample.sample_type }}"></label><label>来源<input name="source" value="{{ sample.source }}"></label><label>数量<input name="quantity" value="{{ sample.quantity }}"></label><label>状态<select name="status">{% for value in ['可用','使用中','耗尽','异常'] %}<option {{ 'selected' if sample.status == value }}>{{ value }}</option>{% endfor %}</select></label></div><label>存放位置<input name="location" value="{{ sample.location }}"></label><label>备注<textarea name="notes" rows="5">{{ sample.notes }}</textarea></label><div class="form-actions"><button class="btn primary"><i data-lucide="save"></i> 保存修改</button></div></form></section>
   <section class="panel sample-usage-panel">
-    <div class="panel-head"><div><p class="eyebrow">TRACEABILITY</p><h2>样本使用追溯</h2></div><span class="count-label">{{ (sample.experiment_usages|length) + (sample.batch_usages|length) }} 条</span></div>
-    <div class="sample-usage-list">
-      {% for usage in sample.batch_usages %}
-      <a class="sample-usage-row" href="{{ url_for('workspace.batch_detail', item_id=usage.batch_id) }}">
-        <span><b>{{ usage.batch.experiment.title }}</b><small>实际使用 · {{ usage.batch.batch_code or '未编号批次' }}</small></span>
-        <span><b>{{ usage.role }}</b><small>{{ usage.amount_used or '用量未填' }}</small></span><i data-lucide="arrow-right"></i>
-      </a>
-      {% endfor %}
-      {% for usage in sample.experiment_usages %}
-      <a class="sample-usage-row" href="{{ url_for('main.experiment_detail', item_id=usage.experiment_id) }}#protocol">
-        <span><b>{{ usage.experiment.title }}</b><small>计划用途 · {{ usage.experiment.code or '未设置实验编号' }}</small></span>
-        <span><b>{{ usage.role }}</b><small>{{ usage.amount_used or '用量未填' }}</small></span><i data-lucide="arrow-right"></i>
-      </a>
-      {% endfor %}
-      {% if not sample.batch_usages and not sample.experiment_usages %}<div class="empty"><i data-lucide="unlink"></i><p>该样本尚未关联实验计划或实验批次</p></div>{% endif %}
-    </div>
+    <div class="panel-head"><div><p class="eyebrow">TRACEABILITY</p><h2>样本使用追溯</h2></div><span class="count-label">{{ plan_usage_pagination.total + batch_usage_pagination.total }} 条</span></div>
+
+    <section class="sample-usage-section" id="sample-plan-usages">
+      <div class="section-title-row"><div><h3>计划用途</h3><small>实验计划中预先定义的样本需求</small></div><span class="count-label">{{ plan_usage_pagination.total }} 条匹配</span></div>
+      <form method="get" class="sample-usage-filter">
+        {% for key, value in request.args.items() %}{% if key not in ['plan_usage_q', 'plan_usage_page', 'plan_usage_per_page'] %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endif %}{% endfor %}
+        <label class="grow"><span>查找计划用途</span><input name="plan_usage_q" value="{{ plan_usage_search }}" placeholder="计划、编号、用途或说明"></label><label><span>每页数量</span><select name="plan_usage_per_page">{% for value in detail_page_sizes %}<option value="{{ value }}" {{ 'selected' if plan_usage_page_size == value }}>{{ value }} 条</option>{% endfor %}</select></label><button class="btn secondary"><i data-lucide="search"></i> 筛选</button>
+      </form>
+      <form id="sample-plan-usage-bulk-form" method="post" action="{{ url_for('main.sample_plan_usage_bulk', item_id=sample.id) }}" class="resource-bulk-form compact-resource-bulk sample-usage-bulk" data-bulk-form data-bulk-label="计划用途" data-bulk-total="{{ plan_usage_pagination.total }}" data-bulk-delete-message="确定解除选中的 {count} 条计划用途关联吗？样本和实验计划本身不会被删除。">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ request.full_path }}#sample-plan-usages"><input type="hidden" name="plan_usage_q" value="{{ plan_usage_search }}"><input type="hidden" name="selection_scope" value="page" data-bulk-selection-scope>
+        <details class="resource-bulk-panel"><summary><span><i data-lucide="list-checks"></i><b>批量管理计划用途</b></span><span data-bulk-selected>已选择 0 条</span></summary><div class="resource-bulk-body"><div class="bulk-head"><label class="bulk-select-all"><input type="checkbox" data-bulk-select-all> 全选本页</label><button class="btn ghost select-all-matches" type="button" data-bulk-select-all-matches aria-pressed="false"><i data-lucide="list-checks"></i> 选择当前筛选全部 {{ plan_usage_pagination.total }} 条</button></div><div class="bulk-fields"><label>用途操作<select name="role_mode"><option value="keep">保持不变</option><option value="replace">统一替换</option><option value="clear">清空</option></select></label><label>用途<input name="role" maxlength="80"></label><label>计划用量操作<select name="amount_mode"><option value="keep">保持不变</option><option value="replace">统一替换</option><option value="clear">清空</option></select></label><label>计划用量<input name="amount_used" maxlength="80"></label><label>说明操作<select name="notes_mode"><option value="keep">保持不变</option><option value="append">追加</option><option value="replace">替换</option><option value="clear">清空</option></select></label><label class="bulk-grow">说明<input name="notes" maxlength="255"></label></div><div class="bulk-actions"><button class="btn secondary" name="action" value="update" disabled><i data-lucide="save"></i> 批量保存</button><button class="btn danger" name="action" value="delete" disabled><i data-lucide="unlink"></i> 批量解除</button></div></div></details>
+      </form>
+      <div class="sample-usage-list">
+        {% for usage in plan_usages %}<div class="sample-usage-managed-row"><label class="resource-select"><input type="checkbox" name="usage_ids" value="{{ usage.id }}" form="sample-plan-usage-bulk-form" data-bulk-select aria-label="选择计划用途 {{ usage.experiment.title }}"></label><a class="sample-usage-row" href="{{ url_for('main.experiment_detail', item_id=usage.experiment_id) }}#protocol"><span><b>{{ usage.experiment.title }}</b><small>计划用途 · {{ usage.experiment.code or '未设置实验编号' }}</small></span><span><b>{{ usage.role or '未填写用途' }}</b><small>{{ usage.amount_used or '用量未填' }}{% if usage.notes %} · {{ usage.notes }}{% endif %}</small></span><i data-lucide="arrow-right"></i></a></div>{% else %}<div class="empty compact-empty"><i data-lucide="clipboard-list"></i><p>当前筛选条件下没有计划用途</p></div>{% endfor %}
+      </div>
+      {% set pagination = plan_usage_pagination %}{% set page_param = 'plan_usage_page' %}{% set pagination_label = '样本计划用途翻页' %}{% set page_item_label = '条计划用途' %}{% include '_pagination.html' %}
+    </section>
+
+    <section class="sample-usage-section" id="sample-batch-usages">
+      <div class="section-title-row"><div><h3>实际使用</h3><small>具体实验批次中已经登记的真实使用</small></div><span class="count-label">{{ batch_usage_pagination.total }} 条匹配</span></div>
+      <form method="get" class="sample-usage-filter">
+        {% for key, value in request.args.items() %}{% if key not in ['batch_usage_q', 'batch_usage_page', 'batch_usage_per_page'] %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endif %}{% endfor %}
+        <label class="grow"><span>查找实际使用</span><input name="batch_usage_q" value="{{ batch_usage_search }}" placeholder="计划、批次、分组、用途或说明"></label><label><span>每页数量</span><select name="batch_usage_per_page">{% for value in detail_page_sizes %}<option value="{{ value }}" {{ 'selected' if batch_usage_page_size == value }}>{{ value }} 条</option>{% endfor %}</select></label><button class="btn secondary"><i data-lucide="search"></i> 筛选</button>
+      </form>
+      <form id="sample-batch-usage-bulk-form" method="post" action="{{ url_for('main.sample_batch_usage_bulk', item_id=sample.id) }}" class="resource-bulk-form compact-resource-bulk sample-usage-bulk" data-bulk-form data-bulk-label="实际使用" data-bulk-total="{{ batch_usage_pagination.total }}" data-bulk-delete-message="确定解除选中的 {count} 条实际使用关联吗？样本和实验批次本身不会被删除。">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ request.full_path }}#sample-batch-usages"><input type="hidden" name="batch_usage_q" value="{{ batch_usage_search }}"><input type="hidden" name="selection_scope" value="page" data-bulk-selection-scope>
+        <details class="resource-bulk-panel"><summary><span><i data-lucide="list-checks"></i><b>批量管理实际使用</b></span><span data-bulk-selected>已选择 0 条</span></summary><div class="resource-bulk-body"><div class="bulk-head"><label class="bulk-select-all"><input type="checkbox" data-bulk-select-all> 全选本页</label><button class="btn ghost select-all-matches" type="button" data-bulk-select-all-matches aria-pressed="false"><i data-lucide="list-checks"></i> 选择当前筛选全部 {{ batch_usage_pagination.total }} 条</button></div><div class="bulk-fields"><label>用途操作<select name="role_mode"><option value="keep">保持不变</option><option value="replace">统一替换</option><option value="clear">清空</option></select></label><label>用途<input name="role" maxlength="80"></label><label>实际用量操作<select name="amount_mode"><option value="keep">保持不变</option><option value="replace">统一替换</option><option value="clear">清空</option></select></label><label>实际用量<input name="amount_used" maxlength="80"></label><label>说明操作<select name="notes_mode"><option value="keep">保持不变</option><option value="append">追加</option><option value="replace">替换</option><option value="clear">清空</option></select></label><label class="bulk-grow">说明<input name="notes" maxlength="255"></label></div><div class="bulk-actions"><button class="btn secondary" name="action" value="update" disabled><i data-lucide="save"></i> 批量保存</button><button class="btn danger" name="action" value="delete" disabled><i data-lucide="unlink"></i> 批量解除</button></div></div></details>
+      </form>
+      <div class="sample-usage-list">
+        {% for usage in batch_usages %}<div class="sample-usage-managed-row"><label class="resource-select"><input type="checkbox" name="usage_ids" value="{{ usage.id }}" form="sample-batch-usage-bulk-form" data-bulk-select aria-label="选择实际使用 {{ usage.batch.batch_code or usage.batch.id }}"></label><a class="sample-usage-row" href="{{ url_for('workspace.batch_detail', item_id=usage.batch_id) }}"><span><b>{{ usage.batch.experiment.title }}</b><small>实际使用 · {{ usage.batch.batch_code or '未编号批次' }}</small></span><span><b>{{ usage.role or '未填写用途' }}</b><small>{{ usage.amount_used or '用量未填' }}{% if usage.notes %} · {{ usage.notes }}{% endif %}</small></span><i data-lucide="arrow-right"></i></a></div>{% else %}<div class="empty compact-empty"><i data-lucide="flask-conical"></i><p>当前筛选条件下没有实际使用记录</p></div>{% endfor %}
+      </div>
+      {% set pagination = batch_usage_pagination %}{% set page_param = 'batch_usage_page' %}{% set pagination_label = '样本实际使用翻页' %}{% set page_item_label = '条实际使用' %}{% include '_pagination.html' %}
+    </section>
   </section>
 </div>
 {% endblock %}

@@ -50,6 +50,13 @@ def test_report_toolbar_keeps_the_result_count_on_one_line():
     assert count_rule and "white-space: nowrap" in count_rule.group(1)
 
 
+def test_report_form_tables_can_shrink_inside_the_reader_column():
+    css = APP_CSS.read_text(encoding="utf-8")
+    form_table_rule = re.search(r"\.report-form-table\s*\{([^}]*)\}", css)
+
+    assert form_table_rule and "min-width:0" in form_table_rule.group(1).replace(" ", "")
+
+
 def test_retired_layout_rules_are_not_left_in_the_stylesheet():
     css = APP_CSS.read_text(encoding="utf-8")
     retired = (

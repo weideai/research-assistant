@@ -1,11 +1,13 @@
 import io
+from datetime import date
 from pathlib import Path
 
 from app import db
 from app.ai_service import AIConfig
 from app.models import (
-    AIMessage, BatchStep, Experiment, ExperimentAttachment, ExperimentBatch, ExperimentParameter, ExperimentRecord,
-    ExperimentSample, ExperimentStep, RecordParameter, Sample,
+    AIMessage, BatchSample, BatchStep, Experiment, ExperimentAttachment, ExperimentBatch, ExperimentParameter, ExperimentRecord,
+    ExperimentSample, ExperimentStep, RecordParameter, Sample, User, WeeklyReport,
+    WeeklyReportUpdate,
 )
 
 
@@ -138,20 +140,153 @@ def test_record_bulk_delete_removes_local_attachments(client, auth, app):
         assert attachment.is_deleted is True
 
 
+def test_weekly_update_bulk_scope_filters_and_rejects_cross_report_ids(client, auth, app):
+    auth.register()
+    with app.app_context():
+        user_id = User.query.one().id
+        first_report = WeeklyReport(
+            user_id=user_id, title="批量周报 A", original_name="a.pptx",
+            report_date=date(2026, 7, 31),
+        )
+        second_report = WeeklyReport(
+            user_id=user_id, title="批量周报 B", original_name="b.pptx",
+            report_date=date(2026, 8, 1),
+        )
+        db.session.add_all((first_report, second_report))
+        db.session.flush()
+        matching = WeeklyReportUpdate(
+            report_id=first_report.id, user_id=user_id, entry_date=date(2026, 7, 20),
+            kind="反馈", status="待处理", content="筛选目标 A",
+        )
+        wrong_status = WeeklyReportUpdate(
+            report_id=first_report.id, user_id=user_id, entry_date=date(2026, 7, 21),
+            kind="反馈", status="已完成", content="筛选目标 B",
+        )
+        wrong_content = WeeklyReportUpdate(
+            report_id=first_report.id, user_id=user_id, entry_date=date(2026, 7, 22),
+            kind="反馈", status="待处理", content="不应修改",
+        )
+        foreign = WeeklyReportUpdate(
+            report_id=second_report.id, user_id=user_id, entry_date=date(2026, 7, 23),
+            kind="反馈", status="待处理", content="筛选目标 C",
+        )
+        db.session.add_all((matching, wrong_status, wrong_content, foreign))
+        db.session.commit()
+        first_report_id = first_report.id
+        matching_id, wrong_status_id, wrong_content_id, foreign_id = (
+            matching.id, wrong_status.id, wrong_content.id, foreign.id,
+        )
+
+    response = client.post(f"/reports/weekly/{first_report_id}/updates/bulk", data={
+        "selection_scope": "all", "update_q": "筛选目标",
+        "return_update_kind": "反馈", "return_update_status": "待处理",
+        "action": "update", "bulk_update_kind": "修改日常",
+        "bulk_update_status": "已完成", "date_mode": "shift", "shift_days": "2",
+        "content_mode": "append", "content": "批量复核",
+    })
+    assert response.status_code == 302
+    with app.app_context():
+        matching = db.session.get(WeeklyReportUpdate, matching_id)
+        assert (matching.kind, matching.status, matching.entry_date) == (
+            "修改日常", "已完成", date(2026, 7, 22),
+        )
+        assert matching.content.endswith("批量复核")
+        assert db.session.get(WeeklyReportUpdate, wrong_status_id).content == "筛选目标 B"
+        assert db.session.get(WeeklyReportUpdate, wrong_content_id).status == "待处理"
+        assert db.session.get(WeeklyReportUpdate, foreign_id).content == "筛选目标 C"
+
+    assert client.post(f"/reports/weekly/{first_report_id}/updates/bulk", data={
+        "update_ids": [str(wrong_status_id), str(foreign_id)], "action": "delete",
+        "return_update_kind": "全部", "return_update_status": "全部",
+    }).status_code == 404
+    with app.app_context():
+        assert db.session.get(WeeklyReportUpdate, wrong_status_id) is not None
+        assert db.session.get(WeeklyReportUpdate, foreign_id) is not None
+
+    assert client.post(f"/reports/weekly/{first_report_id}/updates/bulk", data={
+        "update_ids": str(wrong_status_id), "action": "delete",
+        "return_update_kind": "全部", "return_update_status": "全部",
+    }).status_code == 302
+    with app.app_context():
+        assert db.session.get(WeeklyReportUpdate, wrong_status_id) is None
+        assert db.session.get(WeeklyReportUpdate, foreign_id) is not None
+
+
+def test_sample_trace_bulk_management_keeps_plan_and_actual_usage_separate(client, auth, app):
+    auth.register()
+    with app.app_context():
+        user_id = User.query.one().id
+        first_sample = Sample(user_id=user_id, sample_code="TRACE-A", status="可用")
+        second_sample = Sample(user_id=user_id, sample_code="TRACE-B", status="可用")
+        first_experiment = Experiment(user_id=user_id, title="筛选目标计划")
+        second_experiment = Experiment(user_id=user_id, title="另一个计划")
+        db.session.add_all((first_sample, second_sample, first_experiment, second_experiment))
+        db.session.flush()
+        first_batch = ExperimentBatch(experiment_id=first_experiment.id, batch_code="TRACE-RUN-A")
+        second_batch = ExperimentBatch(experiment_id=second_experiment.id, batch_code="TRACE-RUN-B")
+        db.session.add_all((first_batch, second_batch))
+        db.session.flush()
+        plan_usage = ExperimentSample(
+            experiment_id=first_experiment.id, sample_id=first_sample.id,
+            role="计划处理组", amount_used="1 管", notes="原计划",
+        )
+        foreign_plan_usage = ExperimentSample(
+            experiment_id=second_experiment.id, sample_id=second_sample.id,
+            role="其他计划", amount_used="1 管",
+        )
+        actual_usage = BatchSample(
+            batch_id=first_batch.id, sample_id=first_sample.id,
+            role="实际处理组", amount_used="0.5 管", notes="原记录",
+        )
+        foreign_actual_usage = BatchSample(
+            batch_id=second_batch.id, sample_id=second_sample.id,
+            role="其他实际使用", amount_used="1 管",
+        )
+        db.session.add_all((plan_usage, foreign_plan_usage, actual_usage, foreign_actual_usage))
+        db.session.commit()
+        sample_id = first_sample.id
+        plan_usage_id, foreign_plan_id = plan_usage.id, foreign_plan_usage.id
+        actual_usage_id, foreign_actual_id = actual_usage.id, foreign_actual_usage.id
+
+    assert client.post(f"/samples/{sample_id}/plan-usages/bulk", data={
+        "selection_scope": "all", "plan_usage_q": "筛选目标",
+        "action": "update", "role_mode": "replace", "role": "统一计划用途",
+        "amount_mode": "keep", "notes_mode": "append", "notes": "批量复核",
+    }).status_code == 302
+    with app.app_context():
+        usage = db.session.get(ExperimentSample, plan_usage_id)
+        assert usage.role == "统一计划用途"
+        assert usage.notes.endswith("批量复核")
+        assert db.session.get(BatchSample, actual_usage_id).role == "实际处理组"
+
+    assert client.post(f"/samples/{sample_id}/plan-usages/bulk", data={
+        "usage_ids": str(foreign_plan_id), "action": "delete",
+    }).status_code == 404
+    assert client.post(f"/samples/{sample_id}/batch-usages/bulk", data={
+        "usage_ids": [str(actual_usage_id), str(foreign_actual_id)], "action": "delete",
+    }).status_code == 404
+    assert client.post(f"/samples/{sample_id}/batch-usages/bulk", data={
+        "usage_ids": str(actual_usage_id), "action": "delete",
+    }).status_code == 302
+    with app.app_context():
+        assert db.session.get(BatchSample, actual_usage_id) is None
+        assert db.session.get(BatchSample, foreign_actual_id) is not None
+
 def test_experiment_and_batch_pages_expose_scoped_bulk_management_controls(client, auth, app):
     auth.register()
     experiment_id = _experiment(client, app)
-    client.post(f"/experiments/{experiment_id}/steps", data={"title": "执行前计划步骤"})
+    client.post(f"/experiments/{experiment_id}/steps", data={"title": "方案阶段"})
     batch_id = _batch(client, app, experiment_id)
+    client.post(f"/batches/{batch_id}/steps", data={"title": "本批次加样"})
     response = client.get(f"/experiments/{experiment_id}")
     assert response.status_code == 200
     for form_id in ("step-bulk-form", "sample-bulk-form", "parameter-bulk-form"):
         assert f'id="{form_id}"'.encode() in response.data
-    assert "批量管理步骤".encode() in response.data
+    assert "批量管理方案阶段".encode() in response.data
     batch_response = client.get(f"/batches/{batch_id}")
     assert batch_response.status_code == 200
     assert b'id="batch-step-bulk-form"' in batch_response.data
-    assert "本批次步骤".encode() in batch_response.data
+    assert "本批次实验步骤".encode() in batch_response.data
     assert b'id="batch-record-bulk-form"' in batch_response.data
     assert "过程记录时间线".encode() in batch_response.data
 
@@ -221,6 +356,9 @@ def test_ai_manages_execution_step_status_without_mutating_plan(client, auth, ap
         "title": "计划加药", "description": "计划定义",
     })
     batch_id = _batch(client, app, experiment_id)
+    client.post(f"/batches/{batch_id}/steps", data={
+        "title": "本批次加药", "description": "实际执行定义",
+    })
     with app.app_context():
         plan_step = ExperimentStep.query.filter_by(experiment_id=experiment_id).one()
         batch_step = BatchStep.query.filter_by(batch_id=batch_id).one()
@@ -252,6 +390,8 @@ def test_ai_manages_execution_step_status_without_mutating_plan(client, auth, ap
         plan_step = db.session.get(ExperimentStep, plan_step_id)
         execution_step = db.session.get(BatchStep, batch_step_id)
         assert not hasattr(plan_step, "is_done")
+        assert plan_step.title == "计划加药"
+        assert execution_step.title == "本批次加药"
         assert execution_step.is_done is True
         assert execution_step.completed_date.isoformat() == "2026-07-24"
 

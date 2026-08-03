@@ -44,16 +44,16 @@ def _seed_execution_steps(auth, app):
             project_id=project.id,
             title="执行步骤导出实验",
             code="EXP-STEP-EXPORT",
-            objective="验证计划定义与执行状态分离。",
+            objective="验证方案阶段与批次实验步骤分离。",
         )
         db.session.add(experiment)
         db.session.flush()
         plan_step = ExperimentStep(
             experiment_id=experiment.id,
             position=1,
-            title="计划步骤定义",
-            description="计划层只保存定义",
-            operator="计划负责人",
+            title="方案阶段定义",
+            description="方案层只保存研究目标与验收要求",
+            operator="方案负责人",
             planned_date=date(2026, 7, 20),
         )
         db.session.add(plan_step)
@@ -62,12 +62,17 @@ def _seed_execution_steps(auth, app):
         batch_b = ExperimentBatch(experiment_id=experiment.id, batch_code="RUN-B")
         db.session.add_all((batch_a, batch_b))
         db.session.flush()
-        step_a = BatchStep.from_plan_step(batch_a.id, plan_step)
-        step_a.title = "执行快照 A"
-        step_a.is_done = True
-        step_a.completed_date = date(2026, 7, 21)
-        step_b = BatchStep.from_plan_step(batch_b.id, plan_step)
-        step_b.title = "执行快照 B"
+        step_a = BatchStep(
+            batch_id=batch_a.id, position=1, title="本批次操作 A",
+            description="RUN-A 实际操作", operator="实验人员 A",
+            planned_date=date(2026, 7, 21), completed_date=date(2026, 7, 21),
+            is_done=True,
+        )
+        step_b = BatchStep(
+            batch_id=batch_b.id, position=1, title="本批次操作 B",
+            description="RUN-B 实际操作", operator="实验人员 B",
+            planned_date=date(2026, 7, 22),
+        )
         db.session.add_all((step_a, step_b))
         db.session.commit()
         return user.id, project.id, experiment.id
@@ -84,10 +89,10 @@ def test_json_and_markdown_export_separate_plan_definitions_from_execution_statu
             "id", "position", "title", "description", "operator", "planned_date",
         }
         executions = {batch["batch_code"]: batch for batch in payload["batches"]}
-        assert executions["RUN-A"]["steps"][0]["title"] == "执行快照 A"
+        assert executions["RUN-A"]["steps"][0]["title"] == "本批次操作 A"
         assert executions["RUN-A"]["steps"][0]["is_done"] is True
         assert executions["RUN-A"]["steps"][0]["completed_date"] == "2026-07-21"
-        assert executions["RUN-B"]["steps"][0]["title"] == "执行快照 B"
+        assert executions["RUN-B"]["steps"][0]["title"] == "本批次操作 B"
         assert executions["RUN-B"]["steps"][0]["is_done"] is False
 
         json_payload = json.loads(build_json_export(experiment))
@@ -95,12 +100,12 @@ def test_json_and_markdown_export_separate_plan_definitions_from_execution_statu
         assert json_payload["batches"][0]["steps"]
 
         markdown = build_markdown_export(experiment)
-        assert "## 计划步骤定义" in markdown
-        assert "#### 批次步骤" in markdown
-        assert "执行快照 A" in markdown
+        assert "## 方案阶段" in markdown
+        assert "#### 本批次实验步骤" in markdown
+        assert "本批次操作 A" in markdown
         assert "已完成" in markdown
-        assert "执行快照 B" in markdown
-        assert "待完成" in markdown
+        assert "本批次操作 B" in markdown
+        assert "待执行" in markdown
 
 
 def test_word_excel_and_zip_exports_include_execution_scoped_steps(auth, app):
@@ -110,22 +115,29 @@ def test_word_excel_and_zip_exports_include_execution_scoped_steps(auth, app):
 
         with zipfile.ZipFile(io.BytesIO(build_docx_export(experiment))) as document:
             document_xml = document.read("word/document.xml").decode("utf-8")
-        assert "计划步骤定义" in document_xml
-        assert "批次步骤" in document_xml
-        assert "执行快照 A" in document_xml
+        assert "方案阶段" in document_xml
+        assert "本批次实验步骤" in document_xml
+        assert "负责人 / 目标日期" in document_xml
+        assert "状态与人员" in document_xml
+        assert "日期记录" in document_xml
+        assert "本批次操作 A" in document_xml
         assert "已完成" in document_xml
+        assert '<w:tblLayout w:type="fixed"' in document_xml
+        assert 'w:color="D7DEE3"' in document_xml
 
         workbook = load_workbook(io.BytesIO(build_xlsx_export(experiment)), read_only=True, data_only=True)
         try:
-            assert "批次步骤" in workbook.sheetnames
-            plan_rows = list(workbook["实验步骤"].iter_rows(values_only=True))
-            execution_rows = list(workbook["批次步骤"].iter_rows(values_only=True))
+            assert "方案阶段" in workbook.sheetnames
+            assert "实验步骤" in workbook.sheetnames
+            plan_rows = list(workbook["方案阶段"].iter_rows(values_only=True))
+            execution_rows = list(workbook["实验步骤"].iter_rows(values_only=True))
         finally:
             workbook.close()
-        assert plan_rows[0] == ("序号", "步骤", "计划执行人", "计划日期", "说明")
+        assert plan_rows[0] == ("序号", "阶段", "负责人", "目标日期", "阶段目标与验收要求")
         assert "完成日期" not in plan_rows[0]
         assert {row[1] for row in execution_rows[1:]} == {"RUN-A", "RUN-B"}
-        assert {row[6] for row in execution_rows[1:]} == {"执行快照 A", "执行快照 B"}
+        assert "来源计划步骤 ID" not in execution_rows[0]
+        assert {row[5] for row in execution_rows[1:]} == {"本批次操作 A", "本批次操作 B"}
 
         archive_file = build_archive_export(experiment, lambda _attachment: None)
         try:
@@ -136,8 +148,8 @@ def test_word_excel_and_zip_exports_include_execution_scoped_steps(auth, app):
             archive_file.close()
         assert archive_payload["schema_version"] == 3
         assert archive_payload["batches"][0]["steps"]
-        assert "执行快照 A" in report
-        assert "执行快照 B" in report
+        assert "本批次操作 A" in report
+        assert "本批次操作 B" in report
 
 
 def test_project_package_round_trip_preserves_execution_steps(auth, app):
@@ -167,10 +179,10 @@ def test_project_package_round_trip_preserves_execution_steps(auth, app):
                 )
             imported_experiment = Experiment.query.filter_by(project_id=imported_project.id).one()
             imported_batches = {batch.batch_code: batch for batch in imported_experiment.batches}
-            assert imported_batches["RUN-A"].steps[0].title == "执行快照 A"
+            assert imported_batches["RUN-A"].steps[0].title == "本批次操作 A"
             assert imported_batches["RUN-A"].steps[0].is_done is True
-            assert imported_batches["RUN-A"].steps[0].source_step_id == imported_experiment.steps[0].id
-            assert imported_batches["RUN-B"].steps[0].title == "执行快照 B"
+            assert imported_batches["RUN-A"].steps[0].source_step_id is None
+            assert imported_batches["RUN-B"].steps[0].title == "本批次操作 B"
             assert imported_batches["RUN-B"].steps[0].is_done is False
     finally:
         if package_path:

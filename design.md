@@ -11,8 +11,8 @@
 **KEYWORDS** — Grid System · Typography First · Clarity · Functionality · Objectivity · Minimalism
 
 **产品** R/LAB Research Assistant · 单人科研工作台
-**载体** 桌面优先的 Flask + Jinja2 多页应用，4 套主题 + 暗色模式
-**版本** v1.0 · 2026-08-01
+**载体** 桌面固定画布的 Flask + Jinja2 多页应用，唯一 Swiss 研究主题
+**版本** v1.1 · 2026-08-02
 
 ---
 
@@ -24,38 +24,38 @@
 
 ## 02 · COLOR PALETTE
 
-### 主色 PRIMARY
+### 信号色 PRIMARY
 
 | 色卡 | Token | 值 | 用途 |
 |---|---|---|---|
-| ██ | `--blue` | `#2166f3` | 主按钮、链接、聚焦环、eyebrow、「进行中」状态 |
-| ██ | `--blue-ink` | `#174eb9` | 浅蓝底上的文字 |
-| ░░ | `--blue-soft` | `#e9f0ff` | 信息底色、选中态 |
+| ██ | `--blue` | `#d71920` | 主按钮、链接、聚焦环、eyebrow、活动指示 |
+| ██ | `--blue-ink` | `#a51218` | 浅红底上的文字，实测 7.03:1 |
+| ░░ | `--blue-soft` | `#fff0f1` | 信息底色、选中态 |
+
+> `--blue` 是为兼容现有组件保留的语义令牌名；默认 `research` 主题中它映射为 Swiss Style 信号红。状态成功、警告与危险仍使用各自语义令牌。
 
 ### 强调色 ACCENT
 
 | 色卡 | Token | 值 | 用途 |
 |---|---|---|---|
-| ██ | `--brand-accent` | `#d9ff43` | 品牌方块、头像、侧栏活动指示条 |
+| ██ | `--brand-accent` | `#d71920` | 品牌方块、侧栏活动指示条 |
 
-> **硬规则：`--brand-accent` 只允许出现在深色底（`--sidebar #17242b`）上。**
-> 它在白底上的对比度约 **1.2:1**，作文字或大面积浅底填充一律禁止。
+> 品牌红上的文字统一使用 `--on-accent #fff`，实测对比度 **5.19:1**。信号红只承担品牌、主操作和活动指示，不作为大面积页面底色。
 
 ### 中性色 NEUTRAL
 
 | 色卡 | Token | 值 | 用途 |
 |---|---|---|---|
-| ░░ | `--bg` | `#f2f4f6` | 页面底色 |
+| ░░ | `--bg` | `#f2f2ef` | 页面底色 |
 | ░░ | `--surface` | `#ffffff` | 面板、卡片、输入框 |
-| ░░ | `--surface-soft` | `#f7f8f9` | 表头、次级填充 |
-| ▒▒ | `--line` | `#dfe4e8` | 所有 1px 描边 |
-| ▓▓ | `--muted` | **`#5b6874`** | 次要文字、说明文案（原 `#697581` 仅 4.27:1） |
-| ██ | `--ink` | `#17202a` | 正文与标题 |
-| ██ | `--sidebar` | `#17242b` | 侧栏底色 |
+| ░░ | `--surface-soft` | `#f7f7f4` | 表头、次级填充 |
+| ▒▒ | `--line` | `#d8d8d3` | 所有 1px 描边 |
+| ▓▓ | `--muted` | **`#5f5f5b`** | 次要文字、说明文案 |
+| ██ | `--ink` | `#111111` | 正文与标题 |
+| ░░ | `--sidebar` | `#f7f7f4` | 浅色侧栏底色 |
+| ██ | `--sidebar-ink` | `#111111` | 侧栏主文字 |
 
-> **变更点：`--muted` 由 `#697581` 提亮为 `#5b6874`。**
-> 原值在 `--bg` 上实测 **4.27:1**，未达 WCAG AA 的 4.5:1；而 `.muted` 承载了几乎所有页面说明文字与表格次要信息。新值 **5.18:1**。
-> `cute` 主题的 `#687983`（4.23:1）同样未达标，一并改为 `#5b6874`（5.35:1）。其余 6 个主题原本已达标。
+> 默认主题的 `--muted` 在 `--bg` 上实测 **5.72:1**、在白色面板上 **6.41:1**。侧栏文字独立使用 `--sidebar-ink`，避免浅色侧栏继续继承白字。
 
 ### 语义色 SEMANTIC —— 双档制
 
@@ -66,7 +66,7 @@
 | 成功 | `--green` `#008a62` | 4.36:1 ❌ | `--green-ink` `#006b4b` | `#e3f7ef` |
 | 危险 | `--red` `#e5484d` | 3.91:1 ❌ | `--red-ink` `#b4232a` | `#ffeaec` |
 | 警告 | `--yellow` `#c77c02` | 3.31:1 ❌ | `--yellow-ink` `#8b5903` | `#fff3d6` |
-| 信息 | `--blue` `#2166f3` | 4.60:1 ✅ | `--blue-ink` `#174eb9` | `#e9f0ff` |
+| 信息 / 主操作 | `--blue` `#d71920` | 5.19:1 ✅ | `--blue-ink` `#a51218` | `#fff0f1` |
 
 ```css
 /* ✅ 正确 */
@@ -79,12 +79,12 @@
 
 代码里 `.result-成功`、`.priority-高` 已经自发用了 `-ink` 值，本规范把这个做法固化为制度。
 
-### 主题约束
+### 固定界面约束
 
-软件有 4 套主题（`research` / `tech` / `minimal` / `cute`）+ 暗色模式，全部通过 `html[data-theme]` 与 `html[data-mode]` 切换。
+软件只保留一套黑白灰 + 信号红的 Swiss 桌面界面，不提供皮肤、暗色模式或自定义背景。
 
 > **所有组件只能引用 `var(--token)`，禁止硬编码 hex。**
-> 现状 `app.css` 中有 **72 个裸色值**，切主题必然穿帮。
+> 调色板集中在 `tokens.css`；`app.css` 与 `assistant.css` 中保持 **0 个裸色值**。
 
 ---
 
@@ -213,13 +213,11 @@
 > 其中两处位移最大：`5→6`（22 处，输入框与小磁贴）、`7→8`（17 处，弹层与卡片）。
 > AI dock 的 `10→12` 有 1 处；旧响应布局中的另一处声明已随该布局删除。
 >
-> **两个例外，都在 tokens.css 里：** `tech` 主题 `--radius-panel: 3px`、
-> `minimal` 主题 `2px`。近乎直角就是这两个主题的全部识别度，抹平等于抹掉主题。
-> 唯一允许写字面值的地方是主题选择器里的 `.theme-preview` 缩略图 ——
-> 它要在别的主题激活时画出自己那套圆角，与裸色值同一条豁免。
+> 固定界面使用 `--radius-panel: 2px` 与 `--radius-control: 2px`；不设置主题例外，
+> 组件也不允许单独写像素圆角。
 >
 > 静态校验见 `tests/test_design_tokens.py`：`test_no_literal_pixel_radius_outside_the_token_layer`
-> 守住 0 硬编码，`test_themes_do_not_restate_component_radius` 防止主题重新逐组件声明圆角。
+> 守住 0 硬编码，`test_retired_theme_stylesheet_is_not_restored` 防止旧皮肤层回流。
 
 ---
 
@@ -227,7 +225,7 @@
 
 ```css
 --border:   1px solid var(--line);
---shadow-1: 0 1px  2px rgba(20, 30, 36, .06);   /* panel 常驻 */
+--shadow-1: 0 1px  2px rgba(20, 30, 36, .06);   /* 小型浮层 */
 --shadow-2: 0 8px 24px rgba( 9, 18, 24, .10);   /* popover · dropdown */
 --shadow-3: 0 14px 36px rgba( 9, 18, 24, .24);  /* dialog · AI dock */
 ```
@@ -244,7 +242,7 @@
 
 | 级别 | 规格 |
 |---|---|
-| `primary` | `--blue` 底 / 白字 · hover `#1556d8` |
+| `primary` | `--blue` 底 / 当前主题高对比前景色 · hover `--blue-hover` |
 | `secondary` | `--surface` 底 / `--line` 边 · hover 边框加深 |
 | `ghost` | 透明 · hover `--surface-soft` |
 | `danger` | `--red-soft` 底 / `--red-ink` 字 / `--red` 边 |
@@ -256,22 +254,22 @@
 .icon-btn::after { content: ""; position: absolute; inset: -4px; }
 ```
 
-> 现状 `.icon-btn` 为 34×34 且无命中区扩展，低于 WCAG 2.5.5 建议的 44×44。
+> `.icon-btn` 通过视觉尺寸与伪元素扩展共同保证 44×44 命中区。
 
 ### INPUT FIELD · SELECT
 
-高 `40` · 内边距 `9 11` · 圆角 `6` · 边框 `1px #cfd6db`
-聚焦：`border-color: var(--blue); box-shadow: 0 0 0 3px rgba(33,102,243,.35)`
+高 `40` · 内边距 `9 11` · 圆角取 `--radius-control` · 边框 `1px --line-strong`
+聚焦：`border-color: var(--blue); box-shadow: var(--focus-ring)`
 
 ### PANEL
 
-`--surface` + `1px --line` + 圆角 `8` + `--shadow-1`
+`--surface` + `1px --line` + 圆角取 `--radius-panel`。默认 `research` 主题使用 `2px` 且无常驻阴影；其他主题可通过令牌调整圆角与层级。
 面板头 `20 24`，底部 `1px --line` 分隔。
 
 ### METRIC 指标卡
 
-最小高 **96px**（现状 135px，见 §11 规则 3）· 左侧 `4px` 语义色条 · 数字 `32px` + `tabular-nums`
-**应可点击下钻**到对应筛选列表，否则降低视觉权重。
+总览使用连续四列栅格、`112px` 最小高、细分隔线与 `3px` 信号红强调；数字使用 `tabular-nums`。
+**每项必须可点击下钻**到对应筛选列表。
 
 ### BADGE
 
@@ -318,7 +316,7 @@
 | 项 | 要求 |
 |---|---|
 | 正文对比度 | ≥ 4.5:1（大字 ≥18px/700 时 ≥ 3:1） |
-| 焦点环 | 全局可见 `0 0 0 3px rgba(33,102,243,.35)`；禁止 `outline: none` 无替代 |
+| 焦点环 | 全局可见 `var(--focus-ring)`，随主题主色变化；禁止 `outline: none` 无替代 |
 | 触控目标 | ≥ 44×44 |
 | 状态传达 | 不可仅靠颜色 —— 徽章带文字，状态点旁必须有文本 |
 | 表单错误 | 紧邻出错字段，不只在顶部 flash |
@@ -349,7 +347,7 @@
 | `experiment_report_index.html` | 图片区固定占 42%，无图时全是空白占位框 | 7 |
 | `.experiment-card > p` | `height: 44px; overflow: hidden` 硬裁剪 | 6 |
 | `.empty` | `min-height: 220px` | 5 |
-| `.metric` | `min-height: 135px` 且不可点击 | 8 |
+| `.metric` | 已改为连续栅格并全部可点击下钻 | 8 · 已修复 |
 
 ---
 
@@ -357,8 +355,8 @@
 
 1. **禁止中文业务值作 CSS 类名** —— `.priority-高` `.status-进行中` `.result-成功` `.state-暂停` `.sample-可用` 改为 `data-state="high|in-progress|success"` + 属性选择器。改文案会静默破坏样式，不报错
 2. **禁止 < 11px 字号**
-3. **禁止 `--brand-accent` 出现在浅色底**
-4. **禁止硬编码 hex** —— 现有 72 个裸色值须收敛为 token
+3. **禁止把 `--brand-accent` 用作大面积页面底色或无文字的状态表达**
+4. **禁止硬编码 hex** —— 组件样式统一使用 token；仅主题预览色块豁免
 5. **禁止 emoji 作 UI 图标**
 6. **禁止非交互元素伪装成输入框** —— 顶栏 `.topbar-search` 现为 `<a>` 却长得像搜索框且带 `⌘K` 角标
 7. **禁止单页堆叠 4 个以上区块** —— 超过必须分标签页，参照 `record_detail.html` 的四标签页做法

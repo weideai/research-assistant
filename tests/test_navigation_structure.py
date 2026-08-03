@@ -21,26 +21,30 @@ def _primary_nav():
 def test_primary_navigation_has_exactly_eight_destinations():
     nav = _primary_nav()
     assert len(re.findall(r"<a\s", nav)) == 8
-    for label in ("总览", "实验台", "任务", "报告与文件", "周报", "模板中心", "物品管理", "回收站"):
+    for label in ("总览", "实验计划", "任务", "报告与文件", "周报", "模板中心", "物品管理", "回收站"):
         assert f"<span>{label}</span>" in nav
 
 
 def test_absorbed_routes_are_not_duplicated_in_primary_navigation():
     nav = _primary_nav()
-    assert "<span>实验计划</span>" not in nav
+    assert "<span>实验台</span>" not in nav
     assert "<span>实验报告</span>" not in nav
     assert "<span>文件中心</span>" not in nav
     assert "<span>API 设置</span>" not in nav
 
 
-def test_experiment_and_evidence_views_have_two_way_tabs():
+def test_project_switcher_is_not_duplicated_on_the_experiment_list():
     projects = _template("projects.html")
     experiments = _template("experiments.html")
+    assert 'class="section-tabs"' in projects
+    assert "workspace.projects" in projects and "main.experiments" in projects
+    assert 'aria-label="实验台视图"' not in experiments
+    assert "按课题组织" not in experiments
+
+
+def test_evidence_views_have_two_way_tabs():
     reports = _template("experiment_report_index.html")
     files = _template("file_center.html")
-    for html in (projects, experiments):
-        assert 'class="section-tabs"' in html
-        assert "workspace.projects" in html and "main.experiments" in html
     for html in (reports, files):
         assert 'class="section-tabs"' in html
         assert "main.experiment_report_index" in html and "main.file_center" in html

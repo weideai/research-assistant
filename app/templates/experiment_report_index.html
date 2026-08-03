@@ -16,11 +16,35 @@
   <div class="evidence-browser-content">
 <section class="report-feed-toolbar"><form method="get" class="report-feed-search">{% if selected_project_id %}<input type="hidden" name="project_id" value="{{ selected_project_id }}">{% endif %}{% if selected_experiment_id %}<input type="hidden" name="experiment_id" value="{{ selected_experiment_id }}">{% endif %}{% if selected_batch_id %}<input type="hidden" name="batch_id" value="{{ selected_batch_id }}">{% endif %}<label><i data-lucide="search"></i><input name="q" value="{{ search }}" placeholder="搜索实验、批次编号、结果或记录内容" aria-label="搜索实验报告"></label><select name="per_page" aria-label="每页报告数量">{% for value in page_sizes %}<option value="{{ value }}" {{ 'selected' if page_size == value }}>每页 {{ value }} 条</option>{% endfor %}</select><button class="btn primary"><i data-lucide="search"></i> 搜索</button></form><span class="count-label">{{ pagination.total }} 条记录</span></section>
 
+{% if pagination.total %}
+<form id="report-export-selection-form" method="post" action="{{ url_for('main.experiment_report_export_preview') }}" class="report-selection-bar" data-bulk-form data-bulk-label="实验报告" data-bulk-counter="份报告" data-bulk-total="{{ pagination.total }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  {% if selected_project_id %}<input type="hidden" name="project_id" value="{{ selected_project_id }}">{% endif %}
+  {% if selected_experiment_id %}<input type="hidden" name="experiment_id" value="{{ selected_experiment_id }}">{% endif %}
+  {% if selected_batch_id %}<input type="hidden" name="batch_id" value="{{ selected_batch_id }}">{% endif %}
+  <input type="hidden" name="q" value="{{ search }}">
+  <input type="hidden" name="page" value="{{ pagination.page }}">
+  <input type="hidden" name="per_page" value="{{ page_size }}">
+  <input type="hidden" name="selection_scope" value="page" data-bulk-selection-scope>
+  <div class="report-selection-copy"><i data-lucide="files"></i><span><b>批量自选导出</b><small>先选择报告并预览，再确认生成文件</small></span></div>
+  <div class="report-selection-actions">
+    <label class="select-all-control"><input type="checkbox" data-bulk-select-all><span>全选本页</span></label>
+    <button class="btn ghost select-all-matches" type="button" data-bulk-select-all-matches aria-pressed="false"><i data-lucide="list-checks"></i> 选择当前筛选全部 {{ pagination.total }} 份</button>
+    <span class="bulk-selection-count" data-bulk-selected aria-live="polite">已选择 0 份报告</span>
+    <button class="btn primary" type="submit" name="action" value="preview" disabled><i data-lucide="scan-search"></i> 预览所选报告</button>
+  </div>
+</form>
+{% endif %}
+
 <section class="report-feed">
   {% for record in records %}
   {% set images = record.attachments|rejectattr('is_deleted')|selectattr('is_previewable_image')|list %}
   <article class="report-feed-card">
-    <header class="report-feed-card-head"><div><p class="eyebrow">{{ record.record_date }} · {{ record.batch.batch_code if record.batch else '历史记录' }}</p><h2>{{ record.experiment.title }}</h2><p>{{ record.experiment.project.title if record.experiment.project else '未归类项目' }} · {{ record.operator or '未填写实验人员' }}</p></div><span class="badge" data-state="{{ record.result | state_tone }}">{{ record.result }}</span></header>
+    <header class="report-feed-card-head">
+      <label class="report-card-select"><input form="report-export-selection-form" type="checkbox" name="record_ids" value="{{ record.id }}" data-bulk-select aria-label="选择 {{ record.experiment.title }} {{ record.record_date }} 的实验报告"><span>选择</span></label>
+      <div class="report-feed-card-title"><p class="eyebrow">{{ record.record_date }} · {{ record.batch.batch_code if record.batch else '历史记录' }}</p><h2>{{ record.experiment.title }}</h2><p>{{ record.experiment.project.title if record.experiment.project else '未归类项目' }} · {{ record.operator or '未填写实验人员' }}</p></div>
+      <span class="badge" data-state="{{ record.result | state_tone }}">{{ record.result }}</span>
+    </header>
     <div class="report-feed-card-body{% if images %} has-thumbnail{% endif %}">
       <div class="report-feed-conclusion"><small>结论与备注</small><p>{{ (record.remark or record.content)|truncate(260, True) }}</p></div>
       {% if images %}<a class="report-feed-thumbnail" href="{{ url_for('main.attachment_preview', item_id=images[0].id) }}" target="_blank" rel="noopener"><img src="{{ url_for('main.attachment_preview', item_id=images[0].id) }}" alt="{{ images[0].original_name }}" loading="lazy">{% if images|length > 1 %}<span>+{{ images|length - 1 }} 张</span>{% endif %}</a>{% endif %}

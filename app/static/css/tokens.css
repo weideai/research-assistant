@@ -1,6 +1,6 @@
 /* R/LAB design tokens — the single source of truth for design.md.
  *
- * Load order: tokens.css -> app.css -> themes.css -> assistant.css
+ * Load order: tokens.css -> app.css -> assistant.css
  * Rules elsewhere must reference var(--token); no literal hex values.
  *
  * Semantic colours come in two grades:
@@ -43,18 +43,16 @@
   --space-12: 48px; --space-16: 64px;
   --page-inline: clamp(24px, 4vw, 56px);
 
-  /* Radius — 4 steps plus a pill. The stylesheets had grown 11 distinct values
-   * (2..16px); at that density a 1px difference is noise, not intent. The three
-   * steps are the ones design.md 05 pins down. --radius-panel / --radius-control
-   * are the theme-facing aliases: a theme retunes corner softness by overriding
-   * those two, never by restating border-radius per component. */
+  /* Radius — 3 scale steps plus a pill. The stylesheets had grown 11 distinct values
+   * (2..16px); at that density a 1px difference is noise, not intent. Panels and
+   * controls stay near-square in the fixed desktop design. */
   --radius-sm: 6px;          /* buttons, inputs, chips, small tiles */
   --radius-md: 8px;          /* panels, cards, dialogs */
   --radius-lg: 12px;         /* floating docks and bottom sheets */
   --radius-full: 999px;      /* pills; circles keep 50% */
 
-  --radius-panel: var(--radius-md);
-  --radius-control: var(--radius-sm);
+  --radius-panel: 2px;
+  --radius-control: 2px;
 
   /* Elevation */
   --shadow-1: 0 1px 2px rgba(20, 30, 36, .06);
@@ -70,135 +68,34 @@
   --control-height: 40px;
   --icon-button-size: 40px;
   --hit-area-inset: 2px;     /* ::after expansion to reach 44x44 */
-  --focus-ring: 0 0 0 3px rgba(33, 102, 243, .35);
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--blue) 30%, transparent);
 }
 
-/* ── research (default, light) ─────────────────────────────────────────── */
+/* ── fixed Swiss research palette ─────────────────────────────────────── */
 :root {
-  --bg: #f2f4f6;
+  --bg: #f2f2ef;
   --surface: #fff;
-  --surface-soft: #f7f8f9;
-  --surface-hover: #fafbfc;
-  --line: #dfe4e8;
-  --line-strong: #cfd6db;
-  --ink: #17202a;
-  --muted: #5b6874;              /* 5.18:1 on --bg */
+  --surface-soft: #f7f7f4;
+  --surface-hover: #fafaf8;
+  --line: #d8d8d3;
+  --line-strong: #bdbdb7;
+  --ink: #111;
+  --muted: #5f5f5b;
 
-  --sidebar: #17242b;
-  --sidebar-muted: #9cadb5;
-  --sidebar-hover: #22343d;
-  --sidebar-line: #30414a;
-  --sidebar-active-bg: #fff;
-  --sidebar-active-ink: #17242b;
-  --brand-accent: #d9ff43;       /* dark surfaces only — 1.2:1 on white */
-  --on-accent: #17242b;
-  --on-fill: #fff;
+  --sidebar: #f7f7f4;
+  --sidebar-ink: #111;
+  --sidebar-muted: #5f5f5b;
+  --sidebar-hover: #ecece8;
+  --sidebar-line: #d8d8d3;
+  --sidebar-active-bg: #111;
+  --sidebar-active-ink: #fff;
+  --brand-accent: #d71920;
+  --on-accent: #fff;
 
-  --blue: #2166f3;   --blue-ink: #145df2;   --blue-soft: #e9f0ff;   --blue-hover: #1556d8;
+  --blue: #d71920;   --blue-ink: #a51218;   --blue-soft: #fff0f1;   --blue-hover: #b81219;
   --red: #e5484d;    --red-ink: #d31e24;    --red-soft: #ffeaec;
   --green: #008a62;  --green-ink: #007c58;  --green-soft: #e3f7ef;
   --yellow: #c77c02; --yellow-ink: #955d01; --yellow-soft: #fff3d6;
 
-  --workspace-overlay: rgba(242, 244, 246, .86);
-  --scrim: rgba(9, 18, 24, .45);
-}
-
-/* ── tech ──────────────────────────────────────────────────────────────── */
-html[data-theme="tech"] {
-  --bg: #edf4f3; --surface: #fbfffe; --surface-soft: #edf6f4; --surface-hover: #f3faf8;
-  --line: #bfd1cf; --line-strong: #a8bfbc; --ink: #102225; --muted: #587075;
-  --sidebar: #092226; --sidebar-muted: #88a9ab; --sidebar-hover: #12363b; --sidebar-line: #1d4247;
-  --sidebar-active-bg: #55e6d0; --sidebar-active-ink: #092226;
-  --brand-accent: #55e6d0; --on-accent: #092226;
-  --blue: #007f85;   --blue-ink: #007278;   --blue-soft: #d9f1ef;   --blue-hover: #00666b;
-  --red: #d9485f;    --red-ink: #cb2a44;    --red-soft: #ffe7ec;
-  --green: #008d68;  --green-ink: #007858;  --green-soft: #dcf6ed;
-  --yellow: #ad7100; --yellow-ink: #936000; --yellow-soft: #fff0c9;
-  --workspace-overlay: rgba(237, 244, 243, .87);
-  /* tech and minimal deliberately sit below --radius-sm: near-square corners are
-   * the whole look. They are the only values outside the 3-step scale. */
-  --radius-panel: 3px; --radius-control: 3px;
-}
-
-/* ── minimal ───────────────────────────────────────────────────────────── */
-html[data-theme="minimal"] {
-  --bg: #f4f4f3; --surface: #fff; --surface-soft: #f4f4f4; --surface-hover: #f7f7f7;
-  --line: #d4d4d4; --line-strong: #bcbcbc; --ink: #171717; --muted: #6b6b6b;
-  --sidebar: #fafafa; --sidebar-muted: #686868; --sidebar-hover: #efefef; --sidebar-line: #d4d4d4;
-  --sidebar-active-bg: #171717; --sidebar-active-ink: #fff;
-  --brand-accent: #171717; --on-accent: #fff;
-  --blue: #171717;   --blue-ink: #171717;   --blue-soft: #e8e8e8;   --blue-hover: #000;
-  --red: #c9363e;    --red-ink: #bf333b;    --red-soft: #fbeaec;
-  --green: #087a5b;  --green-ink: #087a5b;  --green-soft: #e4f3ed;
-  --yellow: #946200; --yellow-ink: #946200; --yellow-soft: #f8efda;
-  --workspace-overlay: rgba(244, 244, 243, .9);
-  --radius-panel: 2px; --radius-control: 2px;
-}
-
-/* ── cute ──────────────────────────────────────────────────────────────── */
-html[data-theme="cute"] {
-  --bg: #fff5f7; --surface: #fff; --surface-soft: #f5fafb; --surface-hover: #fff8fa;
-  --line: #d8e3e7; --line-strong: #c2d2d8; --ink: #26323a; --muted: #5b6874;
-  --sidebar: #26424d; --sidebar-muted: #b7cbd2; --sidebar-hover: #325665; --sidebar-line: #3d6070;
-  --sidebar-active-bg: #ffd84d; --sidebar-active-ink: #26323a;
-  --brand-accent: #ffd84d; --on-accent: #26323a;
-  --blue: #e85473;   --blue-ink: #d11c42;   --blue-soft: #ffebf0;   --blue-hover: #d63e5f;
-  --red: #dc4658;    --red-ink: #cf273b;    --red-soft: #ffe9ed;
-  --green: #169a7c;  --green-ink: #127b63;  --green-soft: #e0f7ef;
-  --yellow: #b87800; --yellow-ink: #936000; --yellow-soft: #fff0c7;
-  --workspace-overlay: rgba(255, 245, 247, .87);
-  /* cute rounds controls as much as panels — softness is the point. */
-  --radius-panel: var(--radius-md); --radius-control: var(--radius-md);
-}
-
-/* ── dark mode ─────────────────────────────────────────────────────────── */
-html[data-mode="dark"] {
-  color-scheme: dark;
-  --bg: #111719; --surface: #1b2428; --surface-soft: #222e33; --surface-hover: #253238;
-  --line: #344349; --line-strong: #445359; --ink: #edf3f4; --muted: #9cacb2;
-  --sidebar: #0b1215; --sidebar-muted: #91a3aa; --sidebar-hover: #1a252a; --sidebar-line: #253338;
-  --sidebar-active-bg: #edf3f4; --sidebar-active-ink: #111719;
-  --brand-accent: #d9ff43; --on-accent: #17242b;
-  --blue: #70a2ff;   --blue-ink: #70a2ff;   --blue-soft: #233751;   --blue-hover: #8ab5ff;
-  --red: #ff747d;    --red-ink: #ff747d;    --red-soft: #4a272d;
-  --green: #43c69d;  --green-ink: #43c69d;  --green-soft: #173c33;
-  --yellow: #e7ae42; --yellow-ink: #e7ae42; --yellow-soft: #493a1d;
-  --workspace-overlay: rgba(17, 23, 25, .88);
-  --scrim: rgba(3, 8, 10, .62);
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, .3);
-  --shadow-2: 0 8px 24px rgba(0, 0, 0, .42);
-  --shadow-3: 0 14px 36px rgba(0, 0, 0, .55);
-}
-
-html[data-theme="tech"][data-mode="dark"] {
-  --bg: #071416; --surface: #0d2225; --surface-soft: #102c30; --surface-hover: #153438;
-  --line: #285055; --line-strong: #366468; --ink: #e1fbf7; --muted: #8db2b2;
-  --sidebar: #050d0f; --sidebar-hover: #0f2a2e; --sidebar-line: #1c3f43;
-  --sidebar-active-bg: #50e0d1; --sidebar-active-ink: #061315;
-  --brand-accent: #50e0d1; --on-accent: #061315;
-  --blue: #50e0d1;  --blue-ink: #50e0d1;  --blue-soft: #173d3d;  --blue-hover: #6ee8db;
-  --green: #66d6a9; --green-ink: #66d6a9;
-  --workspace-overlay: rgba(7, 20, 22, .89);
-}
-
-html[data-theme="minimal"][data-mode="dark"] {
-  --bg: #101010; --surface: #181818; --surface-soft: #222; --surface-hover: #272727;
-  --line: #3a3a3a; --line-strong: #4d4d4d; --ink: #f5f5f5; --muted: #a3a3a3;
-  --sidebar: #111; --sidebar-muted: #aaa; --sidebar-hover: #1e1e1e; --sidebar-line: #2e2e2e;
-  --sidebar-active-bg: #f5f5f5; --sidebar-active-ink: #111;
-  --brand-accent: #f5f5f5; --on-accent: #111;
-  --blue: #f5f5f5; --blue-ink: #f5f5f5; --blue-soft: #303030; --blue-hover: #fff;
-  --workspace-overlay: rgba(16, 16, 16, .9);
-}
-
-html[data-theme="cute"][data-mode="dark"] {
-  --bg: #19171d; --surface: #25232a; --surface-soft: #302b32; --surface-hover: #352e36;
-  --line: #493d44; --line-strong: #5d4e56; --ink: #fff3f6; --muted: #b9aab0;
-  --sidebar: #151c20; --sidebar-muted: #aebfc4; --sidebar-hover: #212b30; --sidebar-line: #2f3c42;
-  --sidebar-active-bg: #ffd75c; --sidebar-active-ink: #2b2528;
-  --brand-accent: #ffd75c; --on-accent: #2b2528;
-  --blue: #ff8099;   --blue-ink: #ff8099;   --blue-soft: #4b2933;   --blue-hover: #ff9aae;
-  --green: #50c7a8;  --green-ink: #50c7a8;  --green-soft: #1f443b;
-  --yellow: #f0b64c; --yellow-ink: #f0b64c; --yellow-soft: #4b3a1d;
-  --workspace-overlay: rgba(25, 23, 29, .89);
+  --scrim: rgba(17, 17, 17, .5);
 }

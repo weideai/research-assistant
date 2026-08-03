@@ -78,7 +78,7 @@ def test_step_template_only_reuses_experiment_steps(client, auth, app):
 
     detail = client.get(f"/templates/{template_id}")
     assert detail.status_code == 200
-    assert "步骤模板".encode() in detail.data
+    assert "方案模板".encode() in detail.data
     assert "加药".encode() in detail.data
     assert "样本角色要求".encode() not in detail.data
     assert "默认实验过程".encode() not in detail.data
@@ -172,6 +172,36 @@ def test_weekly_presentation_download_uses_selected_experiments(client, auth, ap
     assert response.mimetype == "application/vnd.openxmlformats-officedocument.presentationml.presentation"
     assert captured["payload"]["metrics"]["record_count"] == 1
     assert captured["payload"]["experiments"][0]["title"] == "周报实验"
+
+
+def test_weekly_presentation_does_not_truncate_selection_after_twenty_experiments(
+        client, auth, app, monkeypatch):
+    auth.register()
+    with app.app_context():
+        user_id = User.query.one().id
+        experiments = [
+            Experiment(user_id=user_id, title=f"批量周报实验 {index:02d}", code=f"BULK-{index:02d}")
+            for index in range(21)
+        ]
+        db.session.add_all(experiments)
+        db.session.commit()
+        selected_ids = [str(item.id) for item in experiments]
+
+    captured = {}
+
+    def fake_build(payload):
+        captured["payload"] = payload
+        return b"all-selected"
+
+    monkeypatch.setattr("app.presentation_service.build_weekly_presentation", fake_build)
+    response = client.post("/reports/presentation", data={
+        "title": "完整实验周报", "start_date": "2026-07-20", "end_date": "2026-07-26",
+        "experiment_ids": selected_ids,
+    })
+    assert response.status_code == 200
+    assert response.data == b"all-selected"
+    assert captured["payload"]["metrics"]["experiment_count"] == 21
+    assert len(captured["payload"]["experiments"]) == 21
 
 
 def test_record_parameters_attachment_metadata_and_archive(client, auth, app):

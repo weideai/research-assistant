@@ -87,6 +87,22 @@
         </tbody>
       </table>
 
+      {% if selected_record.batch %}
+      {% set report_steps = selected_record.batch.steps %}
+      {% set completed_report_steps = report_steps|selectattr('is_done')|list|length %}
+      {% else %}
+      {% set report_steps = experiment.steps %}
+      {% set completed_report_steps = 0 %}
+      {% endif %}
+      <section class="report-table-section report-steps-section" data-step-source="{{ 'batch' if selected_record.batch else 'protocol' }}">
+        <div class="report-section-title"><div><h3>{{ '本批次实验步骤' if selected_record.batch else '方案阶段（历史记录参考）' }}</h3><small>{{ ('批次：' ~ (selected_record.batch.batch_code or '未编号批次') ~ ' · 实际执行记录') if selected_record.batch else '历史记录未关联批次，以下仅展示当前研究方案大纲' }}</small></div><span>{{ ('%d/%d 完成'|format(completed_report_steps, report_steps|length)) if selected_record.batch else ('%d 个阶段'|format(report_steps|length)) }}</span></div>
+        <table class="report-data-table report-step-table"><thead><tr><th>序号</th><th>状态</th><th>{{ '实验步骤' if selected_record.batch else '方案阶段' }}</th><th>{{ '实验人员' if selected_record.batch else '负责人' }}</th><th>{{ '日期记录' if selected_record.batch else '目标日期' }}</th><th>{{ '操作要求与备注' if selected_record.batch else '阶段目标与验收要求' }}</th></tr></thead><tbody>
+          {% for step in report_steps %}
+          <tr><td>{{ '%02d'|format(step.position) }}</td><td>{% if selected_record.batch %}<span class="report-step-status" data-state="{{ 'success' if step.is_done else 'neutral' }}">{{ '已完成' if step.is_done else '待执行' }}</span>{% else %}<span class="report-step-status">方案阶段</span>{% endif %}</td><td><b>{{ step.title }}</b></td><td>{{ step.operator or selected_record.operator or '未填写' }}</td><td><span>{{ step.planned_date or '未设置' }}</span>{% if selected_record.batch %}<small class="table-subtext">{{ ('完成 ' ~ step.completed_date|string) if step.completed_date else '尚未完成' }}</small>{% endif %}</td><td>{{ step.description or '-' }}</td></tr>
+          {% else %}<tr><td colspan="6" class="table-empty">{{ '当前批次没有实验步骤' if selected_record.batch else '实验方案尚未定义阶段' }}</td></tr>{% endfor %}
+        </tbody></table>
+      </section>
+
       <section class="report-table-section">
         <div class="report-section-title"><h3>结构化参数</h3><span>{{ selected_record.parameters|length }} 项</span></div>
         <table class="report-data-table"><thead><tr><th>参数</th><th>数值</th><th>单位</th><th>说明</th></tr></thead><tbody>

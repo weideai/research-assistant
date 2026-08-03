@@ -35,7 +35,7 @@ from .export_service import (
 )
 from .models import (
     AIAssistantPreference, AIChatAttachment, AIConversation, AIKnowledgeBase, AIKnowledgeDocument,
-    AIMessage, AppearanceSetting, ApiPreset, ApiSetting, BatchParameter, BatchSample, BatchStep, Experiment, ExperimentBatch,
+    AIMessage, ApiPreset, ApiSetting, BatchParameter, BatchSample, BatchStep, Experiment, ExperimentBatch,
     ExperimentAttachment, ExperimentParameter, ExperimentRecord, ExperimentSample, ExperimentStep,
     ExperimentTemplate, ExperimentTemplateParameter, ExperimentTemplateStep, RecordParameter,
     PresentationSkill, RecordRevision, RecordTemplate, RecordTemplateParameter, ResearchProject, Sample, Task,
@@ -45,8 +45,6 @@ from .secrets import SecretDecryptionError
 
 
 bp = Blueprint("main", __name__)
-APPEARANCE_THEMES = {"research", "tech", "minimal", "cute"}
-MAX_BACKGROUND_BYTES = 5 * 1024 * 1024
 DATA_EXTENSIONS = {".csv", ".tsv", ".xls", ".xlsx", ".json", ".xml", ".txt", ".dat", ".sav", ".rds"}
 DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".ppt", ".pptx", ".md", ".rtf"}
 ARCHIVE_EXTENSIONS = {".zip", ".rar", ".7z", ".gz", ".tar", ".bz2", ".xz"}
@@ -56,8 +54,10 @@ ATTACHMENT_CATEGORY_MAX_LENGTH = 20
 FILE_PAGE_SIZES = (20, 50, 100)
 LIST_PAGE_SIZES = (12, 24, 48)
 DETAIL_PAGE_SIZE = 8
+DETAIL_PAGE_SIZES = (8, 16, 32)
 REPEAT_KINDS = ("独立实验", "预实验", "生物学重复", "技术重复")
 EXPERIMENT_STATUSES = ("未开始", "进行中", "完成", "暂停")
+BATCH_STATUSES = ("未开始", "进行中", "已完成", "暂停")
 TASK_STATUSES = ("待办", "完成")
 TASK_CATEGORIES = ("实验", "学习", "会议", "行政")
 TASK_PRIORITIES = ("高", "中", "低")
@@ -67,6 +67,7 @@ WEEKLY_REPORT_UPDATE_KINDS = ("反馈", "修改日常", "其他")
 WEEKLY_REPORT_UPDATE_STATUSES = ("待处理", "已完成", "仅记录")
 WEEKLY_REPORT_EXTENSIONS = {".ppt", ".pptx", ".pdf", ".odp", ".key"}
 WEEKLY_REPORT_PAGE_SIZES = (10, 20, 50)
+ASSISTANT_LIST_PAGE_SIZES = (8, 16, 32)
 ASSISTANT_TEXT_EXTENSIONS = {
     ".txt", ".md", ".csv", ".tsv", ".json", ".xml", ".yaml", ".yml", ".log", ".py", ".r", ".html", ".css", ".js",
 }
@@ -126,7 +127,7 @@ STEP_AI_FIELDS = {"title", "description", "operator", "planned_date"}
 BATCH_STEP_AI_FIELDS = {
     "title", "description", "operator", "planned_date", "completed_date", "is_done",
 }
-BATCH_STEP_SNAPSHOT_FIELDS = {*BATCH_STEP_AI_FIELDS, "source_step_id"}
+BATCH_STEP_SNAPSHOT_FIELDS = set(BATCH_STEP_AI_FIELDS)
 PARAMETER_AI_FIELDS = {"name", "value", "unit", "notes"}
 SAMPLE_USAGE_AI_FIELDS = {"sample_id", "role", "amount_used", "notes"}
 ATTACHMENT_AI_FIELDS = {"category", "folder", "tags", "description"}
@@ -134,7 +135,7 @@ AI_FIELD_LABELS = {
     "title": "实验计划名称", "code": "实验计划编号", "objective": "实验计划目的", "owner": "负责人",
     "status": "状态", "start_date": "开始日期", "end_date": "结束日期", "record_date": "记录日期",
     "operator": "实验人员", "conditions": "实验条件", "content": "实验过程", "result": "实验结果",
-    "remark": "结论与备注", "steps": "新增实验步骤", "batch_code": "批次编号",
+    "remark": "结论与备注", "steps": "新增方案阶段", "batch_code": "批次编号",
     "repeat_kind": "重复类型", "repeat_number": "重复序号", "group_name": "实验分组",
     "summary": "批次摘要", "conclusion": "批次结论", "requires_repeat": "建议重复",
     "record_conditions_template": "记录条件模板", "record_content_template": "记录过程模板",
@@ -187,7 +188,7 @@ class AIProposalConflict(ValueError):
 @bp.before_request
 def enforce_read_only_role():
     personal_endpoints = {
-        "main.appearance_settings", "main.assistant_new", "main.assistant_chat",
+        "main.assistant_new", "main.assistant_chat",
         "main.assistant_conversation_update", "main.assistant_message_update",
         "main.assistant_message_regenerate",
         "main.assistant_context_preview",
@@ -200,10 +201,6 @@ def enforce_read_only_role():
             and request.method not in {"GET", "HEAD", "OPTIONS"}
             and request.endpoint not in personal_endpoints):
         abort(403)
-
-
-def _appearance_upload_dir():
-    return Path(current_app.config["APPEARANCE_UPLOAD_DIR"])
 
 
 def _background_extension(data):
@@ -510,22 +507,6 @@ def _move_record_attachment_files(record, new_date):
         shutil.rmtree(old_dir, ignore_errors=True)
 
 
-def _remove_backgrounds(user_id):
-    upload_dir = _appearance_upload_dir()
-    if not upload_dir.exists():
-        return
-    for item in upload_dir.glob(f"user-{user_id}.*"):
-        if item.is_file():
-            item.unlink(missing_ok=True)
-
-
-def _appearance_return_url():
-    next_url = request.form.get("next", "")
-    if next_url.startswith("/") and not next_url.startswith("//"):
-        return next_url
-    return url_for("main.dashboard")
-
-
 RELATIVE_TIME_CUTOFF_DAYS = 7
 
 # Chinese business values are the stored values; they are not stylable identifiers.
@@ -607,24 +588,6 @@ def edited_at_title_filter(value):
 
 
 @bp.app_context_processor
-def inject_appearance():
-    appearance = {"theme": "research", "color_mode": "light", "background_url": ""}
-    if not current_user.is_authenticated:
-        return {"appearance": appearance}
-    setting = AppearanceSetting.query.filter_by(user_id=current_user.id).first()
-    if not setting:
-        return {"appearance": appearance}
-    appearance["theme"] = setting.theme if setting.theme in APPEARANCE_THEMES else "research"
-    appearance["color_mode"] = setting.color_mode if setting.color_mode in {"light", "dark"} else "light"
-    background_path = _appearance_upload_dir() / (setting.background_filename or "")
-    if setting.background_filename and background_path.is_file():
-        appearance["background_url"] = url_for(
-            "main.appearance_background", version=int(setting.updated_at.timestamp())
-        )
-    return {"appearance": appearance}
-
-
-@bp.app_context_processor
 def inject_page_url():
     def page_url(page, page_param="page", **changes):
         values = request.args.to_dict(flat=True)
@@ -660,6 +623,29 @@ def _form_ids(name):
         return {int(value) for value in request.form.getlist(name)}
     except (TypeError, ValueError):
         abort(400)
+
+
+def _bulk_scope_items(model, query, field_name):
+    selection_scope = request.form.get("selection_scope", "page").strip().lower()
+    if selection_scope == "all":
+        return query.all()
+    if selection_scope != "page":
+        abort(400)
+    selected_ids = _form_ids(field_name)
+    if not selected_ids:
+        return []
+    items = query.filter(model.id.in_(selected_ids)).all()
+    if {item.id for item in items} != selected_ids:
+        abort(404)
+    return items
+
+
+def _local_return_url(default_endpoint, anchor=None, **route_values):
+    target = request.form.get("next", "").strip()
+    parsed = urlparse(target)
+    if target.startswith("/") and not target.startswith("//") and not parsed.scheme and not parsed.netloc and "\\" not in target:
+        return target
+    return url_for(default_endpoint, _anchor=anchor, **route_values)
 
 
 def _parameter_rows(prefix):
@@ -771,12 +757,13 @@ def _selected_experiment_ids(values, limit=20):
             selected.append(item_id)
     if not selected:
         return []
+    candidates = selected if limit is None else selected[:limit]
     owned_ids = {
         row[0] for row in db.session.query(Experiment.id).filter(
-            Experiment.user_id == current_user.id, Experiment.id.in_(selected[:limit])
+            Experiment.user_id == current_user.id, Experiment.id.in_(candidates)
         ).all()
     }
-    return [item_id for item_id in selected[:limit] if item_id in owned_ids]
+    return [item_id for item_id in candidates if item_id in owned_ids]
 
 
 def _selected_batch_ids(values, limit=60):
@@ -796,6 +783,31 @@ def _selected_batch_ids(values, limit=60):
             Experiment.is_deleted.is_(False),
             ExperimentBatch.is_deleted.is_(False),
             ExperimentBatch.id.in_(selected[:limit]),
+        ).all()
+    }
+    return [item_id for item_id in selected[:limit] if item_id in owned_ids]
+
+
+def _selected_record_ids(values, limit=120):
+    selected = []
+    for value in values:
+        try:
+            item_id = int(value)
+        except (TypeError, ValueError):
+            continue
+        if item_id > 0 and item_id not in selected:
+            selected.append(item_id)
+    if not selected:
+        return []
+    owned_ids = {
+        row[0] for row in db.session.query(ExperimentRecord.id).join(Experiment).join(
+            ExperimentBatch, ExperimentRecord.batch_id == ExperimentBatch.id,
+        ).filter(
+            Experiment.user_id == current_user.id,
+            Experiment.is_deleted.is_(False),
+            ExperimentBatch.is_deleted.is_(False),
+            ExperimentRecord.is_deleted.is_(False),
+            ExperimentRecord.id.in_(selected[:limit]),
         ).all()
     }
     return [item_id for item_id in selected[:limit] if item_id in owned_ids]
@@ -1020,9 +1032,7 @@ def inject_assistant_page():
     page_id = None
     view_args = request.view_args or {}
     endpoint = request.endpoint or ""
-    if endpoint == "workspace.project_detail":
-        page_type, page_id = "project", view_args.get("item_id")
-    elif endpoint == "main.experiment_detail":
+    if endpoint == "main.experiment_detail":
         page_type, page_id = "experiment", view_args.get("item_id")
     elif endpoint == "workspace.batch_detail":
         page_type, page_id = "batch", view_args.get("item_id")
@@ -1077,24 +1087,6 @@ def _assistant_batch_record_context(record, full_snapshot=False):
 
 
 def _assistant_page_context(page_type, page_id, full_snapshot=False):
-    if page_type == "project" and page_id:
-        item = owned_or_404(ResearchProject, page_id)
-        return {
-            "page_type": "project", "page_id": item.id,
-            "fields": {field: _serialize_value(getattr(item, field)) for field in PROJECT_AI_FIELDS},
-            "experiments": [
-                {"id": value.id, "title": value.title, "code": value.code, "status": value.status}
-                for value in item.experiments[:100] if not value.is_deleted
-            ],
-            "tasks": [
-                {"id": value.id, "title": value.title, "status": value.status}
-                for value in item.tasks[:100] if not value.is_deleted
-            ],
-            "child_state": {
-                "experiment_ids": [value.id for value in item.experiments],
-                "task_ids": [value.id for value in item.tasks],
-            },
-        }
     if page_type == "experiment" and page_id:
         item = owned_or_404(Experiment, page_id)
         fields = {field: _serialize_value(getattr(item, field)) for field in EXPERIMENT_AI_FIELDS}
@@ -1139,8 +1131,7 @@ def _assistant_page_context(page_type, page_id, full_snapshot=False):
             "fields": {field: _serialize_batch_field(item, field) for field in BATCH_AI_FIELDS},
             "steps": [
                 {
-                    "id": step.id, "source_step_id": step.source_step_id,
-                    "position": step.position, "title": step.title,
+                    "id": step.id, "position": step.position, "title": step.title,
                     "description": step.description, "operator": step.operator,
                     "planned_date": _serialize_value(step.planned_date),
                     "completed_date": _serialize_value(step.completed_date),
@@ -1212,12 +1203,12 @@ def _assistant_request_page_context():
 
 
 def _assistant_page_scope(page_type, page_id):
-    if page_type == "project":
-        item = owned_or_404(ResearchProject, page_id)
-        return {"project_id": item.id, "experiment_id": None, "batch_id": None}
     if page_type == "experiment":
         item = owned_or_404(Experiment, page_id)
-        return {"project_id": item.project_id, "experiment_id": item.id, "batch_id": None}
+        return {
+            "project_id": item.project_id, "experiment_id": item.id,
+            "batch_id": None, "record_id": None,
+        }
     if page_type == "batch":
         item = db.session.get(ExperimentBatch, page_id)
         if not item or item.is_deleted or item.experiment.is_deleted or item.experiment.user_id != current_user.id:
@@ -1226,6 +1217,7 @@ def _assistant_page_scope(page_type, page_id):
             "project_id": item.experiment.project_id,
             "experiment_id": item.experiment_id,
             "batch_id": item.id,
+            "record_id": None,
         }
     if page_type == "record":
         item = experiment_child_or_404(ExperimentRecord, page_id)
@@ -1233,8 +1225,9 @@ def _assistant_page_scope(page_type, page_id):
             "project_id": item.experiment.project_id,
             "experiment_id": item.experiment_id,
             "batch_id": item.batch_id,
+            "record_id": item.id,
         }
-    return {"project_id": None, "experiment_id": None, "batch_id": None}
+    return {"project_id": None, "experiment_id": None, "batch_id": None, "record_id": None}
 
 
 def _short_ai_text(value, limit=700):
@@ -1242,18 +1235,47 @@ def _short_ai_text(value, limit=700):
     return text[:limit]
 
 
-def _assistant_research_context(page_context, query, selected_ids=None, selected_batch_ids=None):
+def _assistant_research_context(
+        page_context, query, selected_ids=None, selected_batch_ids=None,
+        selected_record_ids=None):
     current_experiment_id = page_context.get("page_id") if page_context.get("page_type") == "experiment" else page_context.get("experiment_id")
     current_batch_id = page_context.get("page_id") if page_context.get("page_type") == "batch" else page_context.get("batch_id")
+    current_record_id = page_context.get("page_id") if page_context.get("page_type") == "record" else page_context.get("record_id")
     research_requested = any(term in query for term in AI_RESEARCH_TERMS)
-    explicit_scope = selected_ids is not None or selected_batch_ids is not None
+    explicit_scope = any(value is not None for value in (
+        selected_ids, selected_batch_ids, selected_record_ids,
+    ))
     selected_ids = selected_ids or []
     selected_batch_ids = selected_batch_ids or []
-    if not current_experiment_id and not current_batch_id and not research_requested and not selected_ids and not selected_batch_ids:
+    selected_record_ids = selected_record_ids or []
+    if (not current_experiment_id and not current_batch_id and not current_record_id
+            and not research_requested and not selected_ids and not selected_batch_ids
+            and not selected_record_ids):
         return {
             "period": None, "experiments": [], "records": [],
             "instructions": "当前问题未请求科研数据库上下文，因此没有附加实验数据。",
         }, []
+
+    selected_record_items = []
+    if selected_record_ids:
+        selected_record_items = ExperimentRecord.query.join(Experiment).join(
+            ExperimentBatch, ExperimentRecord.batch_id == ExperimentBatch.id,
+        ).filter(
+            Experiment.user_id == current_user.id,
+            Experiment.is_deleted.is_(False),
+            ExperimentBatch.is_deleted.is_(False),
+            ExperimentRecord.is_deleted.is_(False),
+            ExperimentRecord.id.in_(selected_record_ids),
+        ).all()
+        record_order = {item_id: index for index, item_id in enumerate(selected_record_ids)}
+        selected_record_items.sort(key=lambda item: record_order.get(item.id, len(record_order)))
+    selected_record_ids = [item.id for item in selected_record_items]
+    selected_record_batch_ids = list(dict.fromkeys(
+        item.batch_id for item in selected_record_items
+    ))
+    selected_record_experiment_ids = list(dict.fromkeys(
+        item.experiment_id for item in selected_record_items
+    ))
 
     selected_batches = []
     if selected_batch_ids:
@@ -1270,7 +1292,9 @@ def _assistant_research_context(page_context, query, selected_ids=None, selected
 
     experiments = []
     if explicit_scope:
-        scoped_experiment_ids = list(dict.fromkeys([*selected_ids, *selected_batch_experiment_ids]))
+        scoped_experiment_ids = list(dict.fromkeys([
+            *selected_ids, *selected_batch_experiment_ids, *selected_record_experiment_ids,
+        ]))
         experiments = Experiment.query.filter(
             Experiment.user_id == current_user.id,
             Experiment.is_deleted.is_(False),
@@ -1299,6 +1323,8 @@ def _assistant_research_context(page_context, query, selected_ids=None, selected
             scope_filters.append(ExperimentRecord.experiment_id.in_(selected_ids))
         if selected_batch_ids:
             scope_filters.append(ExperimentRecord.batch_id.in_(selected_batch_ids))
+        if selected_record_ids:
+            scope_filters.append(ExperimentRecord.id.in_(selected_record_ids))
         record_query = record_query.filter(or_(*scope_filters)) if scope_filters else record_query.filter(ExperimentRecord.id == -1)
     elif current_batch_id and not research_requested:
         record_query = record_query.filter(ExperimentRecord.batch_id == current_batch_id)
@@ -1311,15 +1337,16 @@ def _assistant_research_context(page_context, query, selected_ids=None, selected
         end = start + timedelta(days=6)
         record_query = record_query.filter(ExperimentRecord.record_date.between(start, end))
         period = {"start": start.isoformat(), "end": end.isoformat()}
-    records = record_query.order_by(ExperimentRecord.record_date.desc(), ExperimentRecord.updated_at.desc()).limit(16).all()
-    if page_context.get("page_type") == "record":
-        current_record = db.session.get(ExperimentRecord, page_context.get("page_id"))
+    records = record_query.order_by(ExperimentRecord.updated_at.desc(), ExperimentRecord.id.desc()).limit(16).all()
+    if current_record_id and not explicit_scope:
+        current_record = db.session.get(ExperimentRecord, current_record_id)
         if current_record and current_record.experiment.user_id == current_user.id and not current_record.is_deleted:
             records = [current_record, *[item for item in records if item.id != current_record.id]][:16]
 
     references = []
     experiment_rows = []
     selected_batch_id_set = set(selected_batch_ids)
+    selected_execution_id_set = selected_batch_id_set | set(selected_record_batch_ids)
     for item in experiments:
         citation = f"R{len(references) + 1}"
         references.append({
@@ -1330,8 +1357,8 @@ def _assistant_research_context(page_context, query, selected_ids=None, selected
         })
         execution_rows = []
         active_batches = [batch for batch in item.batches if not batch.is_deleted]
-        if explicit_scope and selected_batch_id_set and item.id not in selected_ids:
-            active_batches = [batch for batch in active_batches if batch.id in selected_batch_id_set]
+        if explicit_scope and selected_execution_id_set and item.id not in selected_ids:
+            active_batches = [batch for batch in active_batches if batch.id in selected_execution_id_set]
         for batch in active_batches[:12]:
             actual_parameters = [
                 {
@@ -1341,7 +1368,7 @@ def _assistant_research_context(page_context, query, selected_ids=None, selected
                 for parameter in batch.actual_parameters[:20]
             ]
             execution_reference = ""
-            if batch.id in selected_batch_id_set or batch.id == current_batch_id:
+            if batch.id in selected_execution_id_set or batch.id == current_batch_id:
                 execution_citation = f"R{len(references) + 1}"
                 parameter_excerpt = "；".join(
                     f"{parameter['name']}={parameter['value']} {parameter['unit']}".strip()
@@ -1497,17 +1524,15 @@ def _assistant_system_prompt(page_context, file_context, research_context, knowl
 
 你可以根据历史实验生成下一次计划、对比多个实验批次的参数和结果、整理 CSV/文档节选及图片的已有说明、生成实验周报，并检索过程记录。
 引用实验资料时使用 [R编号]，引用用户知识库时使用 [K编号]。
-你可以规划实验、分析记录、整理附件，并在用户明确要求时生成结构化页面修改提案。生成“下一次实验计划”时使用新建实验计划提案。当前页面是科研项目时，新建实验计划必须归入当前项目。
+你可以规划实验、分析记录、整理附件，并在用户明确要求时生成结构化页面修改提案。
 始终只输出一个合法 JSON 对象，格式为：
-{{"reply":"给用户的中文回答","proposal":null}}
+{{“reply”:”给用户的中文回答”,”proposal”:null}}
 proposal 只允许以下格式之一：
-1. 管理当前科研项目：{{"action":"manage_project","changes":{{"title":"","code":"","objective":"","status":"规划中/进行中/已完成/已暂停","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD","notes":""}}}}
-2. 管理当前实验计划：{{"action":"manage_experiment","changes":{{"title":"","code":"","objective":"","owner":"","status":"未开始/进行中/完成/暂停","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD","record_conditions_template":"","record_content_template":"","record_remark_template":""}},"step_operations":[{{"operation":"create/update/delete","id":1,"changes":{{"title":"","description":"","operator":"","planned_date":"YYYY-MM-DD"}}}}],"parameter_operations":[{{"operation":"create/update/delete","id":1,"changes":{{"name":"","value":"","unit":"","notes":""}}}}],"sample_operations":[{{"operation":"create/update/delete","id":1,"changes":{{"sample_id":"1","role":"","amount_used":"","notes":""}}}}]}}
-3. 管理当前实验批次：{{"action":"manage_batch","changes":{{"batch_code":"","repeat_kind":"独立实验/预实验/生物学重复/技术重复","repeat_number":"1","group_name":"","operator":"","status":"未开始/进行中/已完成/暂停","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD","summary":"","conclusion":"","requires_repeat":"true/false"}},"step_operations":[{{"operation":"update","id":1,"changes":{{"title":"","description":"","operator":"","planned_date":"YYYY-MM-DD","completed_date":"YYYY-MM-DD","is_done":"true/false"}}}}],"parameter_operations":[{{"operation":"create/update/delete","id":1,"changes":{{"name":"","value":"","unit":"","notes":""}}}}],"record_operations":[{{"operation":"create/update/delete","id":1,"changes":{{"record_date":"YYYY-MM-DD","operator":"","conditions":"","content":"","result":"待确认/成功/失败","remark":""}}}}]}}
-4. 管理当前过程记录：{{"action":"manage_record","changes":{{"record_date":"YYYY-MM-DD","operator":"","conditions":"","content":"","result":"待确认/成功/失败","remark":""}},"parameter_operations":[{{"operation":"create/update/delete","id":1,"changes":{{"name":"","value":"","unit":"","notes":""}}}}],"attachment_operations":[{{"operation":"update/delete","id":1,"changes":{{"category":"","folder":"","tags":"","description":""}}}}]}}
-5. 新建完整实验计划：{{"action":"create_experiment","project_id":1,"changes":{{"title":"","code":"","objective":"","owner":"","status":"未开始/进行中/完成/暂停","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"}},"steps":[{{"title":"","description":"","operator":"","planned_date":"YYYY-MM-DD"}}]}}
-6. 为当前实验计划新建实验批次：{{"action":"create_execution","changes":{{"batch_code":"","repeat_kind":"独立实验/预实验/生物学重复/技术重复","repeat_number":"1","group_name":"","operator":"","status":"未开始/进行中/已完成/暂停","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD","summary":"","conclusion":"","requires_repeat":"true/false"}}}}
-7. 新建科研项目：{{"action":"create_project","changes":{{"title":"","code":"","objective":"","status":"规划中/进行中/已完成/已暂停","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD","notes":""}}}}
+1. 管理当前实验计划：{{“action”:”manage_experiment”,”changes”:{{“title”:””,”code”:””,”objective”:””,”owner”:””,”status”:”未开始/进行中/完成/暂停”,”start_date”:”YYYY-MM-DD”,”end_date”:”YYYY-MM-DD”,”record_conditions_template”:””,”record_content_template”:””,”record_remark_template”:””}},”step_operations”:[{{“operation”:”create/update/delete”,”id”:1,”changes”:{{“title”:””,”description”:””,”operator”:””,”planned_date”:”YYYY-MM-DD”}}}}],”parameter_operations”:[{{“operation”:”create/update/delete”,”id”:1,”changes”:{{“name”:””,”value”:””,”unit”:””,”notes”:””}}}}],”sample_operations”:[{{“operation”:”create/update/delete”,”id”:1,”changes”:{{“sample_id”:”1”,”role”:””,”amount_used”:””,”notes”:””}}}}]}}
+2. 管理当前实验批次：{{“action”:”manage_batch”,”changes”:{{“batch_code”:””,”repeat_kind”:”独立实验/预实验/生物学重复/技术重复”,”repeat_number”:”1”,”group_name”:””,”operator”:””,”status”:”未开始/进行中/已完成/暂停”,”start_date”:”YYYY-MM-DD”,”end_date”:”YYYY-MM-DD”,”summary”:””,”conclusion”:””,”requires_repeat”:”true/false”}},”step_operations”:[{{“operation”:”update”,”id”:1,”changes”:{{“title”:””,”description”:””,”operator”:””,”planned_date”:”YYYY-MM-DD”,”completed_date”:”YYYY-MM-DD”,”is_done”:”true/false”}}}}],”parameter_operations”:[{{“operation”:”create/update/delete”,”id”:1,”changes”:{{“name”:””,”value”:””,”unit”:””,”notes”:””}}}}],”record_operations”:[{{“operation”:”create/update/delete”,”id”:1,”changes”:{{“record_date”:”YYYY-MM-DD”,”operator”:””,”conditions”:””,”content”:””,”result”:”待确认/成功/失败”,”remark”:””}}}}]}}
+3. 管理当前过程记录：{{“action”:”manage_record”,”changes”:{{“record_date”:”YYYY-MM-DD”,”operator”:””,”conditions”:””,”content”:””,”result”:”待确认/成功/失败”,”remark”:””}},”parameter_operations”:[{{“operation”:”create/update/delete”,”id”:1,”changes”:{{“name”:””,”value”:””,”unit”:””,”notes”:””}}}}],”attachment_operations”:[{{“operation”:”update/delete”,”id”:1,”changes”:{{“category”:””,”folder”:””,”tags”:””,”description”:””}}}}]}}
+4. 新建完整实验计划：{{“action”:”create_experiment”,”changes”:{{“title”:””,”code”:””,”objective”:””,”owner”:””,”status”:”未开始/进行中/完成/暂停”,”start_date”:”YYYY-MM-DD”,”end_date”:”YYYY-MM-DD”}},”steps”:[{{“title”:””,”description”:””,”operator”:””,”planned_date”:”YYYY-MM-DD”}}]}}
+5. 为当前实验计划新建实验批次：{{“action”:”create_execution”,”changes”:{{“batch_code”:””,”repeat_kind”:”独立实验/预实验/生物学重复/技术重复”,”repeat_number”:”1”,”group_name”:””,”operator”:””,”status”:”未开始/进行中/已完成/暂停”,”start_date”:”YYYY-MM-DD”,”end_date”:”YYYY-MM-DD”,”summary”:””,”conclusion”:””,”requires_repeat”:”true/false”}}}}
 兼容旧格式 update_experiment 和 update_record，但优先使用复合管理格式。update/delete 必须使用当前页面上下文中真实存在的 id；不得猜测 id。只有用户明确要求添加、修改、删除或整理页面内容时才返回 proposal。删除也只生成提案，页面写入前仍需用户确认。
 当前页面上下文：{json.dumps(page_context, ensure_ascii=False)}
 用户上传文件信息与可读取节选：{json.dumps(file_context, ensure_ascii=False)}
@@ -1628,8 +1653,6 @@ def _normalize_assistant_proposal(raw, page_context):
         allowed = EXPERIMENT_AI_FIELDS
     elif action == "update_record" and page_context.get("page_type") == "record":
         allowed = RECORD_AI_FIELDS
-    elif action == "manage_project" and page_context.get("page_type") == "project":
-        allowed = PROJECT_AI_FIELDS
     elif action == "manage_experiment" and page_context.get("page_type") == "experiment":
         allowed = EXPERIMENT_AI_FIELDS
     elif action == "manage_batch" and page_context.get("page_type") == "batch":
@@ -1638,23 +1661,16 @@ def _normalize_assistant_proposal(raw, page_context):
         allowed = RECORD_AI_FIELDS
     elif action == "create_experiment":
         allowed = EXPERIMENT_AI_FIELDS
-    elif action == "create_project":
-        allowed = PROJECT_AI_FIELDS
     elif action == "create_execution" and page_context.get("page_type") == "experiment":
         allowed = BATCH_AI_FIELDS
     else:
         return None, {}
 
-    changes = _clean_ai_changes(
-        raw.get("changes"), allowed,
-        PROJECT_AI_FIELD_LIMITS if action in {"create_project", "manage_project"} else None,
-    )
-    if action in {"create_experiment", "create_project", "create_execution"}:
+    changes = _clean_ai_changes(raw.get("changes"), allowed, None)
+    if action in {"create_experiment", "create_execution"}:
         changes = {key: value for key, value in changes.items() if value != ""}
-    if action == "create_project" and not changes.get("status"):
-        changes.pop("status", None)
-    create_action = action in {"create_experiment", "create_project", "create_execution"}
-    if action in {"create_experiment", "create_project"} and not changes.get("title"):
+    create_action = action in {"create_experiment", "create_execution"}
+    if action == "create_experiment" and not changes.get("title"):
         return None, {}
     current_fields = page_context.get("fields", {})
     if not create_action:
@@ -1665,13 +1681,13 @@ def _normalize_assistant_proposal(raw, page_context):
     operation_specs = []
     if action == "manage_experiment":
         operation_specs = [
-            ("step_operations", page_context.get("steps", []), STEP_AI_FIELDS, "实验步骤", "title", True),
+            ("step_operations", page_context.get("steps", []), STEP_AI_FIELDS, "方案阶段", "title", True),
             ("parameter_operations", page_context.get("plan_parameters", []), PARAMETER_AI_FIELDS, "计划参数", "name", True),
             ("sample_operations", page_context.get("sample_usages", []), SAMPLE_USAGE_AI_FIELDS, "样本关联", "sample_id", True),
         ]
     elif action == "manage_batch":
         operation_specs = [
-            ("step_operations", page_context.get("steps", []), BATCH_STEP_AI_FIELDS, "批次步骤", None, False),
+            ("step_operations", page_context.get("steps", []), BATCH_STEP_AI_FIELDS, "批次实验步骤", None, False),
             ("parameter_operations", page_context.get("actual_parameters", []), PARAMETER_AI_FIELDS, "实际参数", "name", True),
             ("record_operations", page_context.get("records", []), RECORD_AI_FIELDS, "过程记录", "content", True),
         ]
@@ -1739,7 +1755,7 @@ def _normalize_assistant_proposal(raw, page_context):
         {"fields": field_before, "resources": resource_before}
         if action in {"manage_experiment", "manage_batch", "manage_record"} else field_before
     )
-    field_labels = PROJECT_AI_FIELD_LABELS if action in {"create_project", "manage_project"} else AI_FIELD_LABELS
+    field_labels = AI_FIELD_LABELS
     diff = [
         {"id": f"field:{key}", "field": field_labels.get(key, key), "before": field_before.get(key, "（新建）"), "after": value}
         for key, value in changes.items()
@@ -1779,6 +1795,43 @@ def _knowledge_document_or_404(document_id):
     if not item or item.knowledge_base.user_id != current_user.id:
         abort(404)
     return item
+
+
+def _knowledge_base_query(search=""):
+    query = AIKnowledgeBase.query.filter_by(user_id=current_user.id)
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(or_(
+            AIKnowledgeBase.name.ilike(pattern),
+            AIKnowledgeBase.description.ilike(pattern),
+            AIKnowledgeBase.custom_instructions.ilike(pattern),
+            AIKnowledgeBase.documents.any(or_(
+                AIKnowledgeDocument.title.ilike(pattern),
+                AIKnowledgeDocument.original_name.ilike(pattern),
+            )),
+        ))
+    return query.order_by(AIKnowledgeBase.updated_at.desc(), AIKnowledgeBase.id.desc())
+
+
+def _knowledge_document_query(base, search=""):
+    query = AIKnowledgeDocument.query.filter_by(knowledge_base_id=base.id)
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(or_(
+            AIKnowledgeDocument.title.ilike(pattern),
+            AIKnowledgeDocument.original_name.ilike(pattern),
+            AIKnowledgeDocument.text_content.ilike(pattern),
+        ))
+    return query.order_by(AIKnowledgeDocument.updated_at.desc(), AIKnowledgeDocument.id.desc())
+
+
+def _knowledge_document_payload(document):
+    return {
+        "id": document.id, "title": document.title,
+        "name": document.original_name, "size": document.size_label,
+        "readable": bool(document.text_content),
+        "updated_at": document.updated_at.strftime("%Y-%m-%d %H:%M"),
+    }
 
 
 def _save_knowledge_upload(base, uploaded_file):
@@ -1914,6 +1967,7 @@ def _assistant_conversation_payload(conversation, include_messages=False):
         payload.update({
             "selected_experiment_ids": _json_list(conversation.selected_experiment_ids_json),
             "selected_batch_ids": _json_list(conversation.selected_batch_ids_json),
+            "selected_record_ids": _json_list(conversation.selected_record_ids_json),
             "selected_knowledge_base_ids": _json_list(conversation.selected_knowledge_base_ids_json),
             "messages": rendered,
         })
@@ -1933,6 +1987,9 @@ def _generate_assistant_message(conversation, user_message, web_access=False, pa
         page_context = _assistant_page_context(conversation.page_type, conversation.page_id)
     selected_ids = _selected_experiment_ids(_json_list(conversation.selected_experiment_ids_json)) or None
     selected_batch_ids = _selected_batch_ids(_json_list(conversation.selected_batch_ids_json)) or None
+    selected_record_ids = _selected_record_ids(
+        _json_list(conversation.selected_record_ids_json)
+    ) or None
     selected_knowledge_ids = _selected_knowledge_base_ids(
         _json_list(conversation.selected_knowledge_base_ids_json)
     )
@@ -1949,7 +2006,7 @@ def _generate_assistant_message(conversation, user_message, web_access=False, pa
     ]
     content = user_message.content
     research_context, internal_references = _assistant_research_context(
-        page_context, content, selected_ids, selected_batch_ids,
+        page_context, content, selected_ids, selected_batch_ids, selected_record_ids,
     )
     knowledge_context, knowledge_references = _assistant_knowledge_context(selected_knowledge_ids)
     preference = _assistant_preference()
@@ -1997,80 +2054,6 @@ def _generate_assistant_message(conversation, user_message, web_access=False, pa
     if error:
         payload["error"] = error
     return payload, status
-
-
-@bp.post("/settings/appearance")
-@login_required
-def appearance_settings():
-    setting = AppearanceSetting.query.filter_by(user_id=current_user.id).first()
-    if not setting:
-        setting = AppearanceSetting(user_id=current_user.id)
-        db.session.add(setting)
-
-    action = request.form.get("action", "save")
-    if action == "reset":
-        _remove_backgrounds(current_user.id)
-        setting.theme = "research"
-        setting.color_mode = "light"
-        setting.background_filename = ""
-        db.session.commit()
-        flash("外观已恢复默认。", "success")
-        return redirect(_appearance_return_url())
-
-    if action == "clear_background":
-        _remove_backgrounds(current_user.id)
-        setting.background_filename = ""
-        db.session.commit()
-        flash("自定义背景已移除。", "success")
-        return redirect(_appearance_return_url())
-
-    theme = request.form.get("theme", "research")
-    color_mode = "dark" if request.form.get("dark_mode") else "light"
-    if theme not in APPEARANCE_THEMES:
-        abort(400)
-    setting.theme = theme
-    setting.color_mode = color_mode
-
-    background = request.files.get("background")
-    if background and background.filename:
-        data = background.read(MAX_BACKGROUND_BYTES + 1)
-        if len(data) > MAX_BACKGROUND_BYTES:
-            flash("背景图片不能超过 5 MB。", "danger")
-            return redirect(_appearance_return_url())
-        extension = _background_extension(data)
-        if not extension:
-            flash("背景只支持 PNG、JPEG 或 WebP 图片。", "danger")
-            return redirect(_appearance_return_url())
-        upload_dir = _appearance_upload_dir()
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        _remove_backgrounds(current_user.id)
-        filename = f"user-{current_user.id}.{extension}"
-        temporary = upload_dir / f".{filename}.tmp"
-        temporary.write_bytes(data)
-        temporary.replace(upload_dir / filename)
-        setting.background_filename = filename
-
-    db.session.commit()
-    flash("外观设置已保存。", "success")
-    return redirect(_appearance_return_url())
-
-
-@bp.get("/settings/appearance/background")
-@login_required
-def appearance_background():
-    setting = AppearanceSetting.query.filter_by(user_id=current_user.id).first()
-    if not setting or not setting.background_filename:
-        abort(404)
-    background_path = _appearance_upload_dir() / setting.background_filename
-    if not background_path.is_file():
-        abort(404)
-    mimetype = {".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp"}.get(
-        background_path.suffix.lower(), "application/octet-stream"
-    )
-    return send_file(
-        io.BytesIO(background_path.read_bytes()), mimetype=mimetype,
-        download_name=setting.background_filename, max_age=3600
-    )
 
 
 @bp.get("/")
@@ -2130,6 +2113,20 @@ def dashboard():
     )
 
 
+def _task_index_query(search="", status="全部", category="全部", project_id=None):
+    query = Task.query.filter_by(user_id=current_user.id, is_deleted=False)
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(or_(Task.title.ilike(pattern), Task.notes.ilike(pattern)))
+    if status != "全部":
+        query = query.filter_by(status=status)
+    if category != "全部":
+        query = query.filter_by(category=category)
+    if project_id:
+        query = query.filter(Task.project_id == project_id)
+    return query
+
+
 @bp.route("/tasks", methods=["GET", "POST"])
 @login_required
 def tasks():
@@ -2155,17 +2152,9 @@ def tasks():
         status = "全部"
     if category not in {"全部", *TASK_CATEGORIES}:
         category = "全部"
-    query = Task.query.filter_by(user_id=current_user.id, is_deleted=False)
-    if search:
-        pattern = f"%{search}%"
-        query = query.filter(or_(Task.title.ilike(pattern), Task.notes.ilike(pattern)))
-    if status != "全部":
-        query = query.filter_by(status=status)
-    if category != "全部":
-        query = query.filter_by(category=category)
     if selected_project_id:
-        project = owned_or_404(ResearchProject, selected_project_id)
-        query = query.filter(Task.project_id == project.id)
+        owned_or_404(ResearchProject, selected_project_id)
+    query = _task_index_query(search, status, category, selected_project_id)
     pagination, page_size = _paginate(
         query.order_by(Task.status, Task.deadline.is_(None), Task.deadline, Task.created_at.desc()),
         per_page=LIST_PAGE_SIZES[0], per_page_key="per_page",
@@ -2183,15 +2172,30 @@ def tasks():
 @bp.post("/tasks/bulk")
 @login_required
 def task_bulk():
-    task_ids = _form_ids("task_ids")
-    if not task_ids:
+    status_filter = request.form.get("return_status", "全部")
+    category_filter = request.form.get("return_category", "全部")
+    project_id = request.form.get("return_project_id", type=int)
+    if status_filter not in {"全部", *TASK_STATUSES} or category_filter not in {"全部", *TASK_CATEGORIES}:
+        abort(400)
+    if project_id:
+        owned_or_404(ResearchProject, project_id)
+    query = _task_index_query(
+        request.form.get("q", "").strip()[:120], status_filter, category_filter, project_id,
+    )
+    items = _bulk_scope_items(Task, query, "task_ids")
+    action = request.form.get("action", "update")
+    if action not in {"update", "delete"}:
+        abort(400)
+    if not items:
         flash("请先勾选至少一个任务。", "warning")
+    elif action == "delete":
+        deleted_at = utcnow()
+        for item in items:
+            item.is_deleted = True
+            item.deleted_at = deleted_at
+        db.session.commit()
+        flash(f"已将 {len(items)} 个任务移入回收站。", "success")
     else:
-        items = Task.query.filter(
-            Task.user_id == current_user.id, Task.is_deleted.is_(False), Task.id.in_(task_ids),
-        ).all()
-        if {item.id for item in items} != task_ids:
-            abort(404)
         status = request.form.get("bulk_status", "__keep__")
         category = request.form.get("bulk_category", "__keep__")
         priority = request.form.get("bulk_priority", "__keep__")
@@ -2274,33 +2278,14 @@ def task_delete(item_id):
     return redirect(url_for("main.tasks"))
 
 
-def _default_project():
-    project = ResearchProject.query.filter_by(
-        user_id=current_user.id, is_deleted=False
-    ).order_by(ResearchProject.created_at).first()
-    if project:
-        return project
-    project = ResearchProject(
-        user_id=current_user.id, title="未分类项目", status="进行中",
-        notes="用于尚未归类的实验计划",
-    )
-    db.session.add(project)
-    db.session.flush()
-    return project
-
 
 def _assistant_experiment_project(project_id=None):
-    projects = ResearchProject.query.filter_by(
-        user_id=current_user.id, is_deleted=False,
-    ).order_by(ResearchProject.updated_at.desc()).all()
-    if project_id:
-        project = next((item for item in projects if item.id == project_id), None)
-        if not project:
-            raise AIProposalConflict("所选科研项目已不存在，请重新生成实验计划。")
-        return project
-    if len(projects) > 1:
-        raise ValueError("账号下有多个科研项目，请先在差异确认区选择实验计划的所属项目。")
-    return projects[0] if projects else _default_project()
+    if not project_id:
+        return None
+    project = db.session.get(ResearchProject, project_id)
+    if not project or project.user_id != current_user.id or project.is_deleted:
+        raise AIProposalConflict("所选科研项目已不存在，请重新生成实验计划。")
+    return project
 
 
 def _next_execution_code(experiment):
@@ -2309,6 +2294,28 @@ def _next_execution_code(experiment):
     while f"RUN-{sequence:02d}" in used:
         sequence += 1
     return f"RUN-{sequence:02d}"
+
+
+def _template_library_query(kind, search=""):
+    if kind == "steps":
+        query = ExperimentTemplate.query.filter_by(user_id=current_user.id, is_deleted=False)
+        if search:
+            pattern = f"%{search}%"
+            query = query.filter(or_(
+                ExperimentTemplate.name.ilike(pattern),
+                ExperimentTemplate.description.ilike(pattern),
+                ExperimentTemplate.objective.ilike(pattern),
+            ))
+        return query
+    query = RecordTemplate.query.filter_by(user_id=current_user.id, is_deleted=False)
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(or_(
+            RecordTemplate.name.ilike(pattern), RecordTemplate.description.ilike(pattern),
+            RecordTemplate.conditions.ilike(pattern), RecordTemplate.content.ilike(pattern),
+            RecordTemplate.remark.ilike(pattern),
+        ))
+    return query
 
 
 @bp.get("/templates")
@@ -2322,19 +2329,12 @@ def template_center():
     if kind not in {"steps", "records"}:
         kind = "steps"
     search = request.args.get("q", "").strip()[:120]
-    step_query = ExperimentTemplate.query.filter_by(user_id=current_user.id, is_deleted=False)
-    record_query = RecordTemplate.query.filter_by(user_id=current_user.id, is_deleted=False)
+    step_query = _template_library_query("steps")
+    record_query = _template_library_query("records")
     step_total = step_query.count()
     record_total = record_query.count()
     if kind == "steps":
-        query = step_query
-        if search:
-            pattern = f"%{search}%"
-            query = query.filter(or_(
-                ExperimentTemplate.name.ilike(pattern),
-                ExperimentTemplate.description.ilike(pattern),
-                ExperimentTemplate.objective.ilike(pattern),
-            ))
+        query = _template_library_query(kind, search)
         pagination, page_size = _paginate(
             query.order_by(ExperimentTemplate.updated_at.desc(), ExperimentTemplate.id.desc()),
             per_page=LIST_PAGE_SIZES[0], per_page_key="per_page",
@@ -2342,14 +2342,7 @@ def template_center():
         step_templates = pagination.items
         record_templates = []
     else:
-        query = record_query
-        if search:
-            pattern = f"%{search}%"
-            query = query.filter(or_(
-                RecordTemplate.name.ilike(pattern), RecordTemplate.description.ilike(pattern),
-                RecordTemplate.conditions.ilike(pattern), RecordTemplate.content.ilike(pattern),
-                RecordTemplate.remark.ilike(pattern),
-            ))
+        query = _template_library_query(kind, search)
         pagination, page_size = _paginate(
             query.order_by(RecordTemplate.updated_at.desc(), RecordTemplate.id.desc()),
             per_page=LIST_PAGE_SIZES[0], per_page_key="per_page",
@@ -2372,6 +2365,47 @@ def template_center():
             ExperimentBatch.is_deleted.is_(False),
         ).order_by(ExperimentBatch.updated_at.desc()).all(),
     )
+
+
+@bp.post("/templates/bulk")
+@login_required
+def template_bulk():
+    kind = request.form.get("kind", "steps")
+    if kind not in {"steps", "records"}:
+        abort(400)
+    search = request.form.get("q", "").strip()[:120]
+    model = ExperimentTemplate if kind == "steps" else RecordTemplate
+    items = _bulk_scope_items(model, _template_library_query(kind, search), "template_ids")
+    if not items:
+        flash("请先勾选至少一个模板。", "warning")
+    else:
+        action = request.form.get("action", "update")
+        if action == "delete":
+            deleted_at = utcnow()
+            for item in items:
+                item.is_deleted = True
+                item.deleted_at = deleted_at
+            db.session.commit()
+            flash(f"已将 {len(items)} 个模板移入回收站。", "success")
+        elif action == "update":
+            description_mode = request.form.get("description_mode", "keep")
+            if description_mode not in {"keep", "replace", "append", "clear"}:
+                abort(400)
+            description = request.form.get("description", "").strip()
+            for item in items:
+                _bulk_text_value(item, "description", description_mode, description)
+            db.session.commit()
+            flash(f"已批量更新 {len(items)} 个模板。", "success")
+        else:
+            abort(400)
+    values = {
+        "kind": kind, "q": search,
+        "page": request.form.get("page", "1"),
+        "per_page": request.form.get("per_page", str(LIST_PAGE_SIZES[0])),
+    }
+    return redirect(url_for(
+        "main.template_center", **{key: value for key, value in values.items() if value},
+    ))
 
 
 @bp.post("/templates/new")
@@ -2398,7 +2432,7 @@ def template_create():
         )
         db.session.add(template)
         db.session.commit()
-        flash("步骤模板已创建，现在可以添加步骤。", "success")
+        flash("方案模板已创建，现在可以添加阶段。", "success")
         return redirect(url_for("main.experiment_template_detail", item_id=template.id))
 
     template = RecordTemplate(
@@ -2554,33 +2588,7 @@ def record_template_index():
     return redirect(url_for("main.template_center", kind="records"))
 
 
-@bp.route("/experiments", methods=["GET", "POST"])
-@login_required
-def experiments():
-    if request.method == "POST":
-        title = request.form.get("title", "").strip()
-        if title:
-            project_id = request.form.get("project_id", type=int)
-            project = db.session.get(ResearchProject, project_id) if project_id else None
-            if not project or project.user_id != current_user.id or project.is_deleted:
-                project = _default_project()
-            item = Experiment(user_id=current_user.id, title=title, code=request.form.get("code", "").strip(),
-                project_id=project.id,
-                objective=request.form.get("objective", "").strip(), owner=request.form.get("owner", "").strip(),
-                status=request.form.get("status", "未开始"), start_date=parse_date(request.form.get("start_date")),
-                end_date=parse_date(request.form.get("end_date")))
-            db.session.add(item)
-            db.session.commit()
-            flash("实验计划已创建。", "success")
-            return redirect(url_for("main.experiment_detail", item_id=item.id))
-        flash("实验计划名称不能为空。", "danger")
-    status = request.args.get("status", "全部")
-    if status not in {"全部", *EXPERIMENT_STATUSES}:
-        status = "全部"
-    search = request.args.get("q", "").strip()[:120]
-    requested_project_id = request.args.get("project_id", type=int)
-    if requested_project_id:
-        owned_or_404(ResearchProject, requested_project_id)
+def _experiment_index_query(search="", status="全部", project_id=None):
     query = Experiment.query.filter_by(user_id=current_user.id, is_deleted=False)
     if search:
         pattern = f"%{search}%"
@@ -2598,8 +2606,54 @@ def experiments():
         ))
     if status != "全部":
         query = query.filter_by(status=status)
+    if project_id:
+        query = query.filter(Experiment.project_id == project_id)
+    return query
+
+
+def _move_experiment_to_recycle_bin(item, deleted_at=None):
+    deleted_at = deleted_at or utcnow()
+    item.is_deleted = True
+    item.deleted_at = deleted_at
+    for batch in item.batches:
+        batch.is_deleted = True
+        batch.deleted_at = deleted_at
+    for record in item.records:
+        record.is_deleted = True
+        record.deleted_at = deleted_at
+        for attachment in record.attachments:
+            attachment.is_deleted = True
+            attachment.deleted_at = deleted_at
+
+
+@bp.route("/experiments", methods=["GET", "POST"])
+@login_required
+def experiments():
+    if request.method == "POST":
+        title = request.form.get("title", "").strip()
+        if title:
+            project_id = request.form.get("project_id", type=int)
+            project = db.session.get(ResearchProject, project_id) if project_id else None
+            if project and (project.user_id != current_user.id or project.is_deleted):
+                project = None
+            item = Experiment(user_id=current_user.id, title=title, code=request.form.get("code", "").strip(),
+                project_id=project.id if project else None,
+                objective=request.form.get("objective", "").strip(), owner=request.form.get("owner", "").strip(),
+                status=request.form.get("status", "未开始"), start_date=parse_date(request.form.get("start_date")),
+                end_date=parse_date(request.form.get("end_date")))
+            db.session.add(item)
+            db.session.commit()
+            flash("实验计划已创建。", "success")
+            return redirect(url_for("main.experiment_detail", item_id=item.id))
+        flash("实验计划名称不能为空。", "danger")
+    status = request.args.get("status", "全部")
+    if status not in {"全部", *EXPERIMENT_STATUSES}:
+        status = "全部"
+    search = request.args.get("q", "").strip()[:120]
+    requested_project_id = request.args.get("project_id", type=int)
     if requested_project_id:
-        query = query.filter(Experiment.project_id == requested_project_id)
+        owned_or_404(ResearchProject, requested_project_id)
+    query = _experiment_index_query(search, status, requested_project_id)
     pagination, page_size = _paginate(
         query.order_by(Experiment.updated_at.desc(), Experiment.id.desc()),
         per_page=LIST_PAGE_SIZES[0], per_page_key="per_page",
@@ -2617,17 +2671,28 @@ def experiments():
 @bp.post("/experiments/bulk")
 @login_required
 def experiment_bulk():
-    experiment_ids = _form_ids("experiment_ids")
-    if not experiment_ids:
+    status_filter = request.form.get("return_status", "全部")
+    if status_filter not in {"全部", *EXPERIMENT_STATUSES}:
+        abort(400)
+    project_id = request.form.get("return_project_id", type=int)
+    if project_id:
+        owned_or_404(ResearchProject, project_id)
+    query = _experiment_index_query(
+        request.form.get("q", "").strip()[:120], status_filter, project_id,
+    )
+    items = _bulk_scope_items(Experiment, query, "experiment_ids")
+    action = request.form.get("action", "update")
+    if action not in {"update", "delete"}:
+        abort(400)
+    if not items:
         flash("请先勾选至少一个实验计划。", "warning")
+    elif action == "delete":
+        deleted_at = utcnow()
+        for item in items:
+            _move_experiment_to_recycle_bin(item, deleted_at)
+        db.session.commit()
+        flash(f"已将 {len(items)} 个实验计划及其关联内容移入回收站。", "success")
     else:
-        items = Experiment.query.filter(
-            Experiment.user_id == current_user.id,
-            Experiment.is_deleted.is_(False),
-            Experiment.id.in_(experiment_ids),
-        ).all()
-        if {item.id for item in items} != experiment_ids:
-            abort(404)
         status = request.form.get("bulk_status", "__keep__")
         owner_mode = request.form.get("owner_mode", "keep")
         project_mode = request.form.get("project_mode", "keep")
@@ -2635,7 +2700,7 @@ def experiment_bulk():
             abort(400)
         if owner_mode not in {"keep", "replace", "clear"}:
             abort(400)
-        if project_mode not in {"keep", "replace"}:
+        if project_mode not in {"keep", "replace", "clear"}:
             abort(400)
         project = None
         if project_mode == "replace":
@@ -2646,8 +2711,8 @@ def experiment_bulk():
                 item.status = status
             if owner_mode != "keep":
                 item.owner = owner if owner_mode == "replace" else ""
-            if project:
-                item.project_id = project.id
+            if project_mode != "keep":
+                item.project_id = project.id if project else None
         db.session.commit()
         flash(f"已批量更新 {len(items)} 个实验计划。", "success")
     values = {
@@ -2665,16 +2730,16 @@ def experiment_bulk():
 def experiment_from_template():
     template = template_or_404(_positive_int(request.form.get("template_id"), default=0))
     if not template.steps:
-        flash("这个步骤模板还没有步骤，请先编辑模板后再调用。", "danger")
+        flash("这个方案模板还没有阶段，请先编辑模板后再调用。", "danger")
         return redirect(url_for("main.template_center", kind="steps"))
     start_date = parse_date(request.form.get("start_date")) or date.today()
     project_id = request.form.get("project_id", type=int)
     project = db.session.get(ResearchProject, project_id) if project_id else None
-    if not project or project.user_id != current_user.id or project.is_deleted:
-        project = _default_project()
+    if project and (project.user_id != current_user.id or project.is_deleted):
+        project = None
     item = Experiment(
         user_id=current_user.id,
-        project_id=project.id,
+        project_id=project.id if project else None,
         title=request.form.get("title", "").strip() or template.name,
         code=request.form.get("code", "").strip(),
         objective=template.objective or "",
@@ -2697,6 +2762,90 @@ def experiment_from_template():
     db.session.commit()
     flash(f"已从模板“{template.name}”创建实验计划。", "success")
     return redirect(url_for("main.experiment_detail", item_id=item.id))
+
+
+def _experiment_batch_query(item, source):
+    search = str(source.get("batch_q", "") or "").strip()[:120]
+    status = str(source.get("batch_status", "全部") or "全部").strip()
+    if status not in {"全部", *BATCH_STATUSES}:
+        status = "全部"
+    query = ExperimentBatch.query.filter_by(experiment_id=item.id, is_deleted=False)
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(or_(
+            ExperimentBatch.batch_code.ilike(pattern),
+            ExperimentBatch.repeat_kind.ilike(pattern),
+            ExperimentBatch.group_name.ilike(pattern),
+            ExperimentBatch.operator.ilike(pattern),
+            ExperimentBatch.summary.ilike(pattern),
+            ExperimentBatch.conclusion.ilike(pattern),
+        ))
+    if status != "全部":
+        query = query.filter(ExperimentBatch.status == status)
+    return query, search, status
+
+
+def _experiment_record_query(item, source, batch_id=None):
+    search = str(source.get("record_q", "") or "").strip()[:120]
+    result = str(source.get("record_result", "全部") or "全部").strip()
+    if result not in {"全部", "待确认", "成功", "失败"}:
+        result = "全部"
+    query = ExperimentRecord.query.filter_by(experiment_id=item.id, is_deleted=False)
+    if batch_id is not None:
+        query = query.filter(ExperimentRecord.batch_id == batch_id)
+    if search:
+        pattern = f"%{search}%"
+        query = query.outerjoin(
+            ExperimentBatch, ExperimentRecord.batch_id == ExperimentBatch.id,
+        ).filter(or_(
+            ExperimentRecord.operator.ilike(pattern),
+            ExperimentRecord.conditions.ilike(pattern),
+            ExperimentRecord.content.ilike(pattern),
+            ExperimentRecord.result.ilike(pattern),
+            ExperimentRecord.remark.ilike(pattern),
+            ExperimentBatch.batch_code.ilike(pattern),
+        ))
+    if result != "全部":
+        query = query.filter(ExperimentRecord.result == result)
+    return query, search, result
+
+
+def _experiment_step_query(item, source):
+    search = str(source.get("step_q", "") or "").strip()[:120]
+    query = ExperimentStep.query.filter_by(experiment_id=item.id)
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(or_(
+            ExperimentStep.title.ilike(pattern),
+            ExperimentStep.description.ilike(pattern),
+            ExperimentStep.operator.ilike(pattern),
+        ))
+    return query, search
+
+
+def _experiment_sample_query(item, source):
+    search = str(source.get("sample_q", "") or "").strip()[:120]
+    query = ExperimentSample.query.filter_by(experiment_id=item.id)
+    if search:
+        pattern = f"%{search}%"
+        query = query.join(Sample, ExperimentSample.sample_id == Sample.id).filter(or_(
+            Sample.sample_code.ilike(pattern), Sample.sample_type.ilike(pattern),
+            Sample.source.ilike(pattern), ExperimentSample.role.ilike(pattern),
+            ExperimentSample.amount_used.ilike(pattern), ExperimentSample.notes.ilike(pattern),
+        ))
+    return query, search
+
+
+def _experiment_parameter_query(item, source):
+    search = str(source.get("parameter_q", "") or "").strip()[:120]
+    query = ExperimentParameter.query.filter_by(experiment_id=item.id)
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(or_(
+            ExperimentParameter.name.ilike(pattern), ExperimentParameter.value.ilike(pattern),
+            ExperimentParameter.unit.ilike(pattern), ExperimentParameter.notes.ilike(pattern),
+        ))
+    return query, search
 
 
 @bp.route("/experiments/<int:item_id>", methods=["GET", "POST"])
@@ -2729,26 +2878,38 @@ def experiment_detail(item_id):
     if requested_batch_id and not ExperimentBatch.query.filter_by(
             id=requested_batch_id, experiment_id=item.id, is_deleted=False).first():
         requested_batch_id = None
-    batch_query = ExperimentBatch.query.filter_by(
-        experiment_id=item.id, is_deleted=False,
-    ).order_by(ExperimentBatch.created_at.desc(), ExperimentBatch.id.desc())
-    batch_pagination, _ = _paginate(batch_query, page_key="batch_page")
-    record_query = ExperimentRecord.query.filter_by(
-        experiment_id=item.id, is_deleted=False,
-    ).order_by(ExperimentRecord.record_date.desc(), ExperimentRecord.updated_at.desc())
-    record_pagination, _ = _paginate(record_query, page_key="record_page")
-    step_query = ExperimentStep.query.filter_by(experiment_id=item.id).order_by(
-        ExperimentStep.position, ExperimentStep.id,
+    batch_query, batch_search, batch_status = _experiment_batch_query(item, request.args)
+    batch_query = batch_query.order_by(ExperimentBatch.created_at.desc(), ExperimentBatch.id.desc())
+    batch_pagination, batch_page_size = _paginate(
+        batch_query, page_key="batch_page", per_page=DETAIL_PAGE_SIZES[0],
+        per_page_key="batch_per_page", page_sizes=DETAIL_PAGE_SIZES,
     )
-    step_pagination, _ = _paginate(step_query, page_key="step_page")
-    sample_usage_query = ExperimentSample.query.filter_by(experiment_id=item.id).order_by(
-        ExperimentSample.created_at, ExperimentSample.id,
+    record_query, record_search, record_result = _experiment_record_query(item, request.args)
+    record_query = record_query.order_by(
+        ExperimentRecord.record_date.desc(), ExperimentRecord.updated_at.desc(),
     )
-    sample_pagination, _ = _paginate(sample_usage_query, page_key="sample_page")
-    parameter_query = ExperimentParameter.query.filter_by(experiment_id=item.id).order_by(
-        ExperimentParameter.position, ExperimentParameter.id,
+    record_pagination, record_page_size = _paginate(
+        record_query, page_key="record_page", per_page=DETAIL_PAGE_SIZES[0],
+        per_page_key="record_per_page", page_sizes=DETAIL_PAGE_SIZES,
     )
-    parameter_pagination, _ = _paginate(parameter_query, page_key="parameter_page")
+    step_query, step_search = _experiment_step_query(item, request.args)
+    step_query = step_query.order_by(ExperimentStep.position, ExperimentStep.id)
+    step_pagination, step_page_size = _paginate(
+        step_query, page_key="step_page", per_page=DETAIL_PAGE_SIZES[0],
+        per_page_key="step_per_page", page_sizes=DETAIL_PAGE_SIZES,
+    )
+    sample_usage_query, sample_search = _experiment_sample_query(item, request.args)
+    sample_usage_query = sample_usage_query.order_by(ExperimentSample.created_at, ExperimentSample.id)
+    sample_pagination, sample_page_size = _paginate(
+        sample_usage_query, page_key="sample_page", per_page=DETAIL_PAGE_SIZES[0],
+        per_page_key="sample_per_page", page_sizes=DETAIL_PAGE_SIZES,
+    )
+    parameter_query, parameter_search = _experiment_parameter_query(item, request.args)
+    parameter_query = parameter_query.order_by(ExperimentParameter.position, ExperimentParameter.id)
+    parameter_pagination, parameter_page_size = _paginate(
+        parameter_query, page_key="parameter_page", per_page=DETAIL_PAGE_SIZES[0],
+        per_page_key="parameter_per_page", page_sizes=DETAIL_PAGE_SIZES,
+    )
     attachment_query = ExperimentAttachment.query.filter_by(
         experiment_id=item.id, is_deleted=False
     )
@@ -2764,7 +2925,10 @@ def experiment_detail(item_id):
     recent_attachments = attachment_query.order_by(
         ExperimentAttachment.updated_at.desc(), ExperimentAttachment.id.desc()
     ).limit(8).all()
-    latest_batch = batch_query.first()
+    all_batch_query = ExperimentBatch.query.filter_by(
+        experiment_id=item.id, is_deleted=False,
+    ).order_by(ExperimentBatch.created_at.desc(), ExperimentBatch.id.desc())
+    latest_batch = all_batch_query.first()
     latest_batch_steps = list(latest_batch.steps) if latest_batch else []
     latest_step_done = sum(1 for step in latest_batch_steps if step.is_done)
     latest_record = ExperimentRecord.query.filter_by(
@@ -2784,15 +2948,27 @@ def experiment_detail(item_id):
         requested_batch_id=requested_batch_id,
         available_samples=Sample.query.filter_by(user_id=current_user.id).order_by(Sample.sample_code).all(),
         projects=ResearchProject.query.filter_by(user_id=current_user.id, is_deleted=False).order_by(ResearchProject.updated_at.desc()).all(),
-        batches=batch_pagination.items, batch_total=batch_pagination.total,
-        batch_pagination=batch_pagination,
-        active_records=record_pagination.items, record_total=record_pagination.total,
-        record_pagination=record_pagination,
-        recent_records=record_query.limit(5).all(),
+        batches=batch_pagination.items,
+        batch_total=ExperimentBatch.query.filter_by(experiment_id=item.id, is_deleted=False).count(),
+        batch_pagination=batch_pagination, batch_search=batch_search, batch_status=batch_status,
+        batch_page_size=batch_page_size,
+        active_records=record_pagination.items,
+        record_total=ExperimentRecord.query.filter_by(experiment_id=item.id, is_deleted=False).count(),
+        record_pagination=record_pagination, record_search=record_search,
+        record_result=record_result, record_page_size=record_page_size,
         steps=step_pagination.items, step_pagination=step_pagination,
+        step_search=step_search, step_page_size=step_page_size,
         sample_usages=sample_pagination.items, sample_pagination=sample_pagination,
+        sample_search=sample_search, sample_page_size=sample_page_size,
         plan_parameters=parameter_pagination.items, parameter_pagination=parameter_pagination,
-        snapshot_steps=step_query.limit(6).all(),
+        parameter_search=parameter_search, parameter_page_size=parameter_page_size,
+        detail_page_sizes=DETAIL_PAGE_SIZES,
+        recent_records=ExperimentRecord.query.filter_by(
+            experiment_id=item.id, is_deleted=False,
+        ).order_by(ExperimentRecord.record_date.desc(), ExperimentRecord.updated_at.desc()).limit(5).all(),
+        snapshot_steps=ExperimentStep.query.filter_by(experiment_id=item.id).order_by(
+            ExperimentStep.position, ExperimentStep.id,
+        ).limit(6).all(),
         recent_attachments=recent_attachments,
         attachment_count=attachment_count,
         attachment_bytes=attachment_bytes,
@@ -2804,6 +2980,42 @@ def experiment_detail(item_id):
         latest_activity_at=latest_activity_at,
         report_templates=report_template_choices(),
     )
+
+
+@bp.post("/experiments/<int:item_id>/batches/bulk")
+@login_required
+def experiment_batch_bulk(item_id):
+    item = owned_or_404(Experiment, item_id)
+    query, _, _ = _experiment_batch_query(item, request.form)
+    selected = _bulk_scope_items(ExperimentBatch, query, "batch_ids")
+    if not selected:
+        flash("请先勾选至少一个实验批次。", "warning")
+        return redirect(_local_return_url(
+            "main.experiment_detail", "experiment-batches", item_id=item.id,
+        ))
+    if request.form.get("action", "update") != "update":
+        abort(400)
+    status = request.form.get("bulk_status", "__keep__")
+    operator_mode = request.form.get("operator_mode", "keep")
+    group_mode = request.form.get("group_mode", "keep")
+    if status not in {"__keep__", *BATCH_STATUSES}:
+        abort(400)
+    if operator_mode not in {"keep", "replace", "clear"}:
+        abort(400)
+    if group_mode not in {"keep", "replace", "clear"}:
+        abort(400)
+    operator = request.form.get("operator", "").strip()[:80]
+    group_name = request.form.get("group_name", "").strip()[:80]
+    for batch in selected:
+        if status != "__keep__":
+            batch.status = status
+        _bulk_text_value(batch, "operator", operator_mode, operator)
+        _bulk_text_value(batch, "group_name", group_mode, group_name)
+    db.session.commit()
+    flash(f"已批量更新 {len(selected)} 个实验批次。", "success")
+    return redirect(_local_return_url(
+        "main.experiment_detail", "experiment-batches", item_id=item.id,
+    ))
 
 
 def _attachment_index_filters(source):
@@ -3343,7 +3555,7 @@ def file_center_bulk_download():
 def experiment_save_template(item_id):
     item = owned_or_404(Experiment, item_id)
     if not item.steps:
-        flash("请先添加实验步骤，再保存步骤模板。", "danger")
+        flash("请先添加方案阶段，再保存方案模板。", "danger")
         return redirect(url_for("main.experiment_detail", item_id=item.id, _anchor="step-templates"))
     name = request.form.get("name", "").strip() or item.title
     template = ExperimentTemplate(
@@ -3359,7 +3571,7 @@ def experiment_save_template(item_id):
             description=step.description, planned_offset_days=offset,
         ))
     db.session.commit()
-    flash(f"已保存步骤模板“{name}”，包含 {len(item.steps)} 个步骤。", "success")
+    flash(f"已保存方案模板“{name}”，包含 {len(item.steps)} 个阶段。", "success")
     return redirect(url_for("main.experiment_template_detail", item_id=template.id))
 
 
@@ -3379,10 +3591,25 @@ def experiment_template_detail(item_id):
             template.record_content_template = request.form.get("record_content_template", "").strip()
             template.record_remark_template = request.form.get("record_remark_template", "").strip()
             db.session.commit()
-            flash("步骤模板信息已保存。", "success")
+            flash("方案模板信息已保存。", "success")
             return redirect(url_for("main.experiment_template_detail", item_id=template.id))
+    step_search = request.args.get("step_q", "").strip()[:120]
+    step_query = ExperimentTemplateStep.query.filter_by(template_id=template.id)
+    if step_search:
+        pattern = f"%{step_search}%"
+        step_query = step_query.filter(or_(
+            ExperimentTemplateStep.title.ilike(pattern),
+            ExperimentTemplateStep.description.ilike(pattern),
+        ))
+    step_pagination, step_page_size = _paginate(
+        step_query.order_by(ExperimentTemplateStep.position, ExperimentTemplateStep.id),
+        page_key="step_page", per_page=DETAIL_PAGE_SIZES[0],
+        per_page_key="step_per_page", page_sizes=DETAIL_PAGE_SIZES,
+    )
     return render_template(
-        "template_detail.html", template=template,
+        "template_detail.html", template=template, template_steps=step_pagination.items,
+        step_pagination=step_pagination, step_search=step_search,
+        step_page_size=step_page_size, detail_page_sizes=DETAIL_PAGE_SIZES,
         experiments=Experiment.query.filter_by(user_id=current_user.id, is_deleted=False).order_by(Experiment.updated_at.desc()).all(),
     )
 
@@ -3431,6 +3658,64 @@ def experiment_template_step_delete(item_id):
     db.session.delete(step)
     db.session.commit()
     return redirect(url_for("main.experiment_template_detail", item_id=template_id))
+
+
+@bp.post("/templates/<int:item_id>/steps/bulk")
+@login_required
+def experiment_template_step_bulk(item_id):
+    template = template_or_404(item_id)
+    search = request.form.get("step_q", "").strip()[:120]
+    query = ExperimentTemplateStep.query.filter_by(template_id=template.id)
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(or_(
+            ExperimentTemplateStep.title.ilike(pattern),
+            ExperimentTemplateStep.description.ilike(pattern),
+        ))
+    selected = _bulk_scope_items(ExperimentTemplateStep, query, "step_ids")
+    return_url = _local_return_url(
+        "main.experiment_template_detail", "template-steps", item_id=template.id,
+    )
+    if not selected:
+        flash("请先勾选至少一个模板阶段。", "warning")
+        return redirect(return_url)
+    action = request.form.get("action", "update")
+    if action == "delete":
+        for step in selected:
+            db.session.delete(step)
+        db.session.flush()
+        remaining = ExperimentTemplateStep.query.filter_by(template_id=template.id).order_by(
+            ExperimentTemplateStep.position, ExperimentTemplateStep.id,
+        ).all()
+        for position, step in enumerate(remaining, 1):
+            step.position = position
+        db.session.commit()
+        flash(f"已删除 {len(selected)} 个模板阶段。", "success")
+        return redirect(return_url)
+    if action != "update":
+        abort(400)
+    description_mode = request.form.get("description_mode", "keep")
+    offset_mode = request.form.get("offset_mode", "keep")
+    if description_mode not in {"keep", "replace", "append", "clear"}:
+        abort(400)
+    if offset_mode not in {"keep", "set", "shift"}:
+        abort(400)
+    try:
+        offset_days = int(request.form.get("offset_days", "0") or 0)
+    except ValueError:
+        abort(400)
+    if abs(offset_days) > 3650:
+        abort(400)
+    description = request.form.get("description", "").strip()
+    for step in selected:
+        _bulk_text_value(step, "description", description_mode, description)
+        if offset_mode == "set":
+            step.planned_offset_days = max(0, offset_days)
+        elif offset_mode == "shift":
+            step.planned_offset_days = max(0, step.planned_offset_days + offset_days)
+    db.session.commit()
+    flash(f"已批量更新 {len(selected)} 个模板阶段。", "success")
+    return redirect(return_url)
 
 
 @bp.post("/templates/<int:item_id>/parameters")
@@ -3486,7 +3771,7 @@ def experiment_template_duplicate(item_id):
             value=parameter.value, unit=parameter.unit, notes=parameter.notes,
         ))
     db.session.commit()
-    flash(f"已复制步骤模板“{source.name}”。", "success")
+    flash(f"已复制方案模板“{source.name}”。", "success")
     return redirect(url_for("main.experiment_template_detail", item_id=template.id))
 
 
@@ -3495,7 +3780,7 @@ def experiment_template_duplicate(item_id):
 def experiment_template_apply(item_id):
     template = template_or_404(item_id)
     if not template.steps:
-        flash("这个步骤模板还没有步骤，请先编辑模板后再调用。", "danger")
+        flash("这个方案模板还没有阶段，请先编辑模板后再调用。", "danger")
         return redirect(url_for("main.template_center", kind="steps"))
     experiment = owned_or_404(Experiment, _positive_int(request.form.get("experiment_id"), default=0))
     start_date = experiment.start_date or date.today()
@@ -3505,7 +3790,7 @@ def experiment_template_apply(item_id):
         return redirect(url_for("main.experiment_detail", item_id=experiment.id, _anchor="step-templates"))
     _apply_step_template(template, experiment, start_date, replace=replace)
     db.session.commit()
-    flash(f"已将步骤模板“{template.name}”{('替换' if replace else '追加')}到实验。", "success")
+    flash(f"已将方案模板“{template.name}”{('替换' if replace else '追加')}到实验方案。", "success")
     return redirect(url_for("main.experiment_detail", item_id=experiment.id, _anchor="step-templates"))
 
 
@@ -3515,7 +3800,7 @@ def experiment_apply_step_template(item_id):
     experiment = owned_or_404(Experiment, item_id)
     template = template_or_404(_positive_int(request.form.get("template_id"), default=0))
     if not template.steps:
-        flash("这个步骤模板还没有步骤，请先编辑模板后再调用。", "danger")
+        flash("这个方案模板还没有阶段，请先编辑模板后再调用。", "danger")
         return redirect(url_for("main.template_center", kind="steps"))
     start_date = experiment.start_date or date.today()
     replace = request.form.get("apply_mode", "append") == "replace"
@@ -3524,7 +3809,7 @@ def experiment_apply_step_template(item_id):
         return redirect(url_for("main.experiment_detail", item_id=experiment.id, _anchor="step-templates"))
     _apply_step_template(template, experiment, start_date, replace=replace)
     db.session.commit()
-    flash(f"步骤模板“{template.name}”已{('替换当前步骤' if replace else '追加到当前步骤')}。", "success")
+    flash(f"方案模板“{template.name}”已{('替换当前阶段' if replace else '追加到当前阶段')}。", "success")
     return redirect(url_for("main.experiment_detail", item_id=experiment.id, _anchor="step-templates"))
 
 
@@ -3547,7 +3832,7 @@ def experiment_template_delete(item_id):
     template.is_deleted = True
     template.deleted_at = utcnow()
     db.session.commit()
-    flash("步骤模板已移入回收站。", "success")
+    flash("方案模板已移入回收站。", "success")
     return redirect(request.form.get("next") or url_for("main.template_center", kind="steps"))
 
 
@@ -3581,17 +3866,21 @@ def experiment_parameter_delete(item_id):
 @login_required
 def experiment_parameter_bulk(item_id):
     item = owned_or_404(Experiment, item_id)
-    selected = _selected_child_items(item.plan_parameters, "parameter_ids")
+    query, _ = _experiment_parameter_query(item, request.form)
+    selected = _bulk_scope_items(ExperimentParameter, query, "parameter_ids")
+    return_url = _local_return_url(
+        "main.experiment_detail", "plan-parameters", item_id=item.id,
+    )
     if not selected:
         flash("请先勾选至少一个计划参数。", "warning")
-        return redirect(url_for("main.experiment_detail", item_id=item.id, _anchor="plan-parameters"))
+        return redirect(return_url)
     action = request.form.get("action", "update")
     if action == "delete":
         for parameter in selected:
             db.session.delete(parameter)
         db.session.commit()
         flash(f"已删除 {len(selected)} 个计划参数。", "success")
-        return redirect(url_for("main.experiment_detail", item_id=item.id, _anchor="plan-parameters"))
+        return redirect(return_url)
     if action != "update":
         abort(400)
     unit_mode = request.form.get("unit_mode", "keep")
@@ -3605,7 +3894,7 @@ def experiment_parameter_bulk(item_id):
         _bulk_text_value(parameter, "notes", notes_mode, notes)
     db.session.commit()
     flash(f"已批量更新 {len(selected)} 个计划参数。", "success")
-    return redirect(url_for("main.experiment_detail", item_id=item.id, _anchor="plan-parameters"))
+    return redirect(return_url)
 
 
 @bp.post("/experiments/<int:item_id>/samples")
@@ -3645,17 +3934,21 @@ def experiment_sample_delete(item_id):
 @login_required
 def experiment_sample_bulk(item_id):
     item = owned_or_404(Experiment, item_id)
-    selected = _selected_child_items(item.sample_usages, "sample_usage_ids")
+    query, _ = _experiment_sample_query(item, request.form)
+    selected = _bulk_scope_items(ExperimentSample, query, "sample_usage_ids")
+    return_url = _local_return_url(
+        "main.experiment_detail", "experiment-samples", item_id=item.id,
+    )
     if not selected:
         flash("请先勾选至少一个关联样本。", "warning")
-        return redirect(url_for("main.experiment_detail", item_id=item.id, _anchor="experiment-samples"))
+        return redirect(return_url)
     action = request.form.get("action", "update")
     if action == "delete":
         for usage in selected:
             db.session.delete(usage)
         db.session.commit()
         flash(f"已解除 {len(selected)} 个样本关联。", "success")
-        return redirect(url_for("main.experiment_detail", item_id=item.id, _anchor="experiment-samples"))
+        return redirect(return_url)
     if action != "update":
         abort(400)
     role_mode = request.form.get("role_mode", "keep")
@@ -3672,25 +3965,14 @@ def experiment_sample_bulk(item_id):
         _bulk_text_value(usage, "notes", notes_mode, notes)
     db.session.commit()
     flash(f"已批量更新 {len(selected)} 个样本关联。", "success")
-    return redirect(url_for("main.experiment_detail", item_id=item.id, _anchor="experiment-samples"))
+    return redirect(return_url)
 
 
 @bp.post("/experiments/<int:item_id>/delete")
 @login_required
 def experiment_delete(item_id):
     item = owned_or_404(Experiment, item_id)
-    deleted_at = utcnow()
-    item.is_deleted = True
-    item.deleted_at = deleted_at
-    for batch in item.batches:
-        batch.is_deleted = True
-        batch.deleted_at = deleted_at
-    for record in item.records:
-        record.is_deleted = True
-        record.deleted_at = deleted_at
-        for attachment in record.attachments:
-            attachment.is_deleted = True
-            attachment.deleted_at = deleted_at
+    _move_experiment_to_recycle_bin(item)
     db.session.commit()
     flash("实验计划已移入回收站，关联批次、过程记录和文件仍保留在原位置。", "success")
     return redirect(url_for("main.experiments"))
@@ -3708,9 +3990,9 @@ def step_add(item_id):
             operator=request.form.get("operator", "").strip(),
             planned_date=parse_date(request.form.get("planned_date"))))
         db.session.commit()
-        flash("实验步骤已添加。", "success")
+        flash("方案阶段已添加。", "success")
     else:
-        flash("步骤标题不能为空。", "danger")
+        flash("阶段名称不能为空。", "danger")
     return redirect(url_for("main.experiment_detail", item_id=item.id, _anchor="experiment-steps"))
 
 
@@ -3721,14 +4003,14 @@ def step_edit(step_id):
     if request.method == "POST":
         title = request.form.get("title", "").strip()
         if not title:
-            flash("步骤标题不能为空。", "danger")
+            flash("阶段名称不能为空。", "danger")
         else:
             step.title = title
             step.description = request.form.get("description", "").strip()
             step.operator = request.form.get("operator", "").strip()
             step.planned_date = parse_date(request.form.get("planned_date"))
             db.session.commit()
-            flash("实验步骤已更新。", "success")
+            flash("方案阶段已更新。", "success")
             return redirect(url_for("main.experiment_detail", item_id=step.experiment_id, _anchor="experiment-steps"))
     return render_template("step_edit.html", step=step)
 
@@ -3750,10 +4032,14 @@ def step_delete(step_id):
 @login_required
 def step_bulk(item_id):
     item = owned_or_404(Experiment, item_id)
-    selected = _selected_child_items(item.steps, "step_ids")
+    query, _ = _experiment_step_query(item, request.form)
+    selected = _bulk_scope_items(ExperimentStep, query, "step_ids")
+    return_url = _local_return_url(
+        "main.experiment_detail", "experiment-steps", item_id=item.id,
+    )
     if not selected:
-        flash("请先勾选至少一个实验步骤。", "warning")
-        return redirect(url_for("main.experiment_detail", item_id=item.id, _anchor="experiment-steps"))
+        flash("请先勾选至少一个方案阶段。", "warning")
+        return redirect(return_url)
     action = request.form.get("action", "update")
     if action == "delete":
         for step in selected:
@@ -3761,8 +4047,8 @@ def step_bulk(item_id):
         db.session.flush()
         _renumber_steps(item)
         db.session.commit()
-        flash(f"已删除 {len(selected)} 个实验步骤。", "success")
-        return redirect(url_for("main.experiment_detail", item_id=item.id, _anchor="experiment-steps"))
+        flash(f"已删除 {len(selected)} 个方案阶段。", "success")
+        return redirect(return_url)
     if action != "update":
         abort(400)
 
@@ -3794,8 +4080,8 @@ def step_bulk(item_id):
         elif date_mode == "shift" and step.planned_date:
             step.planned_date += timedelta(days=shift_days)
     db.session.commit()
-    flash(f"已批量更新 {len(selected)} 个实验步骤。", "success")
-    return redirect(url_for("main.experiment_detail", item_id=item.id, _anchor="experiment-steps"))
+    flash(f"已批量更新 {len(selected)} 个方案阶段。", "success")
+    return redirect(return_url)
 
 
 @bp.post("/experiments/<int:item_id>/records")
@@ -3858,6 +4144,36 @@ def record_add(item_id):
     return redirect(url_for("workspace.batch_detail", item_id=batch.id, _anchor="new-record"))
 
 
+def _record_parameter_query(record, source):
+    search = str(source.get("parameter_q", "") or "").strip()[:120]
+    query = RecordParameter.query.filter_by(record_id=record.id)
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(or_(
+            RecordParameter.name.ilike(pattern), RecordParameter.value.ilike(pattern),
+            RecordParameter.unit.ilike(pattern), RecordParameter.notes.ilike(pattern),
+        ))
+    return query, search
+
+
+def _record_attachment_query(record, source):
+    search = str(source.get("file_q", "") or "").strip()[:120]
+    category = str(source.get("file_category", "全部") or "全部").strip()[:ATTACHMENT_CATEGORY_MAX_LENGTH]
+    query = ExperimentAttachment.query.filter_by(record_id=record.id, is_deleted=False)
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(or_(
+            ExperimentAttachment.original_name.ilike(pattern),
+            ExperimentAttachment.relative_path.ilike(pattern),
+            ExperimentAttachment.category.ilike(pattern),
+            ExperimentAttachment.tags.ilike(pattern),
+            ExperimentAttachment.description.ilike(pattern),
+        ))
+    if category != "全部":
+        query = query.filter(ExperimentAttachment.category == category)
+    return query, search, category
+
+
 @bp.route("/records/<int:record_id>", methods=["GET", "POST"])
 @login_required
 def record_detail(record_id):
@@ -3905,20 +4221,48 @@ def record_detail(record_id):
             db.session.commit()
             flash("过程记录已更新。", "success")
             return redirect(url_for("main.record_detail", record_id=record.id))
+    parameter_query, parameter_search = _record_parameter_query(record, request.args)
+    parameter_pagination, parameter_page_size = _paginate(
+        parameter_query.order_by(RecordParameter.position, RecordParameter.id),
+        page_key="parameter_page", per_page=DETAIL_PAGE_SIZES[0],
+        per_page_key="parameter_per_page", page_sizes=DETAIL_PAGE_SIZES,
+    )
+    attachment_query, file_search, file_category = _record_attachment_query(record, request.args)
+    attachment_pagination, file_page_size = _paginate(
+        attachment_query.order_by(
+            ExperimentAttachment.updated_at.desc(), ExperimentAttachment.id.desc(),
+        ),
+        page_key="file_page", per_page=DETAIL_PAGE_SIZES[0],
+        per_page_key="file_per_page", page_sizes=DETAIL_PAGE_SIZES,
+    )
     attachment_groups = {}
-    for attachment in record.attachments:
-        if attachment.is_deleted:
-            continue
+    for attachment in attachment_pagination.items:
         attachment_groups.setdefault(attachment.category, []).append(attachment)
     attachment_categories = tuple(dict.fromkeys(
         (*ATTACHMENT_MANUAL_CATEGORIES, *(attachment.category for attachment in record.attachments if not attachment.is_deleted))
     ))
+    template_search = request.args.get("template_q", "").strip()[:120]
+    template_pagination, template_page_size = _paginate(
+        _template_library_query("records", template_search).order_by(
+            RecordTemplate.name, RecordTemplate.id,
+        ),
+        page_key="template_page", per_page=DETAIL_PAGE_SIZES[0],
+        per_page_key="template_per_page", page_sizes=DETAIL_PAGE_SIZES,
+    )
     return render_template(
         "record_detail.html", record=record, attachment_groups=attachment_groups,
+        record_parameters=parameter_pagination.items,
+        parameter_pagination=parameter_pagination, parameter_search=parameter_search,
+        parameter_page_size=parameter_page_size,
+        attachment_pagination=attachment_pagination, file_search=file_search,
+        file_category=file_category, file_page_size=file_page_size,
+        detail_page_sizes=DETAIL_PAGE_SIZES,
         attachment_storage_path=str(_attachment_record_dir(record).resolve()),
         attachment_categories=attachment_categories,
         attachment_metadata_categories=tuple(dict.fromkeys((*ATTACHMENT_METADATA_CATEGORIES, *(attachment.category for attachment in record.attachments)))),
-        record_templates=RecordTemplate.query.filter_by(user_id=current_user.id, is_deleted=False).order_by(RecordTemplate.name).all(),
+        record_templates=template_pagination.items,
+        template_search=template_search, template_pagination=template_pagination,
+        template_page_size=template_page_size,
     )
 
 
@@ -3976,8 +4320,26 @@ def record_template_detail(item_id):
             db.session.commit()
             flash("记录模板已保存。", "success")
             return redirect(url_for("main.record_template_detail", item_id=template.id))
+    parameter_search = request.args.get("parameter_q", "").strip()[:120]
+    parameter_query = RecordTemplateParameter.query.filter_by(template_id=template.id)
+    if parameter_search:
+        pattern = f"%{parameter_search}%"
+        parameter_query = parameter_query.filter(or_(
+            RecordTemplateParameter.name.ilike(pattern),
+            RecordTemplateParameter.value.ilike(pattern),
+            RecordTemplateParameter.unit.ilike(pattern),
+            RecordTemplateParameter.notes.ilike(pattern),
+        ))
+    parameter_pagination, parameter_page_size = _paginate(
+        parameter_query.order_by(RecordTemplateParameter.position, RecordTemplateParameter.id),
+        page_key="parameter_page", per_page=DETAIL_PAGE_SIZES[0],
+        per_page_key="parameter_per_page", page_sizes=DETAIL_PAGE_SIZES,
+    )
     return render_template(
         "record_template_detail.html", template=template,
+        template_parameters=parameter_pagination.items,
+        parameter_pagination=parameter_pagination, parameter_search=parameter_search,
+        parameter_page_size=parameter_page_size, detail_page_sizes=DETAIL_PAGE_SIZES,
         batches=ExperimentBatch.query.join(Experiment).filter(
             Experiment.user_id == current_user.id,
             Experiment.is_deleted.is_(False),
@@ -4010,6 +4372,57 @@ def record_template_parameter_delete(item_id):
     db.session.delete(parameter)
     db.session.commit()
     return redirect(url_for("main.record_template_detail", item_id=template_id))
+
+
+@bp.post("/record-templates/<int:item_id>/parameters/bulk")
+@login_required
+def record_template_parameter_bulk(item_id):
+    template = record_template_or_404(item_id)
+    search = request.form.get("parameter_q", "").strip()[:120]
+    query = RecordTemplateParameter.query.filter_by(template_id=template.id)
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(or_(
+            RecordTemplateParameter.name.ilike(pattern),
+            RecordTemplateParameter.value.ilike(pattern),
+            RecordTemplateParameter.unit.ilike(pattern),
+            RecordTemplateParameter.notes.ilike(pattern),
+        ))
+    selected = _bulk_scope_items(RecordTemplateParameter, query, "parameter_ids")
+    return_url = _local_return_url(
+        "main.record_template_detail", "template-parameters", item_id=template.id,
+    )
+    if not selected:
+        flash("请先勾选至少一个模板参数。", "warning")
+        return redirect(return_url)
+    action = request.form.get("action", "update")
+    if action == "delete":
+        for parameter in selected:
+            db.session.delete(parameter)
+        db.session.commit()
+        flash(f"已删除 {len(selected)} 个模板参数。", "success")
+        return redirect(return_url)
+    if action != "update":
+        abort(400)
+    value_mode = request.form.get("value_mode", "keep")
+    unit_mode = request.form.get("unit_mode", "keep")
+    notes_mode = request.form.get("notes_mode", "keep")
+    if value_mode not in {"keep", "replace", "clear"}:
+        abort(400)
+    if unit_mode not in {"keep", "replace", "clear"}:
+        abort(400)
+    if notes_mode not in {"keep", "replace", "append", "clear"}:
+        abort(400)
+    value = request.form.get("value", "").strip()[:160]
+    unit = request.form.get("unit", "").strip()[:40]
+    notes = request.form.get("notes", "").strip()[:255]
+    for parameter in selected:
+        _bulk_text_value(parameter, "value", value_mode, value)
+        _bulk_text_value(parameter, "unit", unit_mode, unit)
+        _bulk_text_value(parameter, "notes", notes_mode, notes)
+    db.session.commit()
+    flash(f"已批量更新 {len(selected)} 个模板参数。", "success")
+    return redirect(return_url)
 
 
 @bp.post("/record-templates/<int:item_id>/duplicate")
@@ -4123,6 +4536,48 @@ def record_parameter_delete(item_id):
     db.session.delete(parameter)
     db.session.commit()
     return redirect(url_for("main.record_detail", record_id=record_id, _anchor="record-view"))
+
+
+@bp.post("/records/<int:record_id>/parameters/bulk")
+@login_required
+def record_parameter_bulk(record_id):
+    record = experiment_child_or_404(ExperimentRecord, record_id)
+    query, _ = _record_parameter_query(record, request.form)
+    selected = _bulk_scope_items(RecordParameter, query, "parameter_ids")
+    return_url = _local_return_url(
+        "main.record_detail", "record-view", record_id=record.id,
+    )
+    if not selected:
+        flash("请先勾选至少一个记录参数。", "warning")
+        return redirect(return_url)
+    action = request.form.get("action", "update")
+    if action == "delete":
+        for parameter in selected:
+            db.session.delete(parameter)
+        db.session.commit()
+        flash(f"已删除 {len(selected)} 个记录参数。", "success")
+        return redirect(return_url)
+    if action != "update":
+        abort(400)
+    value_mode = request.form.get("value_mode", "keep")
+    unit_mode = request.form.get("unit_mode", "keep")
+    notes_mode = request.form.get("notes_mode", "keep")
+    if value_mode not in {"keep", "replace", "clear"}:
+        abort(400)
+    if unit_mode not in {"keep", "replace", "clear"}:
+        abort(400)
+    if notes_mode not in {"keep", "replace", "append", "clear"}:
+        abort(400)
+    value = request.form.get("value", "").strip()[:160]
+    unit = request.form.get("unit", "").strip()[:40]
+    notes = request.form.get("notes", "").strip()[:255]
+    for parameter in selected:
+        _bulk_text_value(parameter, "value", value_mode, value)
+        _bulk_text_value(parameter, "unit", unit_mode, unit)
+        _bulk_text_value(parameter, "notes", notes_mode, notes)
+    db.session.commit()
+    flash(f"已批量更新 {len(selected)} 个记录参数。", "success")
+    return redirect(return_url)
 
 
 @bp.get("/attachments/<int:item_id>/download")
@@ -4268,17 +4723,14 @@ def attachment_metadata(item_id):
 @login_required
 def attachment_bulk_update(record_id):
     record = experiment_child_or_404(ExperimentRecord, record_id)
-    raw_ids = request.form.getlist("attachment_ids")
-    try:
-        attachment_ids = {int(value) for value in raw_ids}
-    except (TypeError, ValueError):
-        abort(400)
-    if not attachment_ids:
+    query, _, _ = _record_attachment_query(record, request.form)
+    selected = _bulk_scope_items(ExperimentAttachment, query, "attachment_ids")
+    return_url = _local_return_url(
+        "main.record_detail", "record-files", record_id=record.id,
+    )
+    if not selected:
         flash("请先勾选至少一个文件。", "warning")
-        return redirect(url_for("main.record_detail", record_id=record.id, _anchor="record-files"))
-    selected = [attachment for attachment in record.attachments if not attachment.is_deleted and attachment.id in attachment_ids]
-    if len(selected) != len(attachment_ids):
-        abort(404)
+        return redirect(return_url)
 
     action = request.form.get("action", "update").strip().lower()
     if action == "delete":
@@ -4288,7 +4740,7 @@ def attachment_bulk_update(record_id):
             attachment.deleted_at = deleted_at
         db.session.commit()
         flash(f"已将 {len(selected)} 个文件移入回收站，原始文件尚未删除。", "success")
-        return redirect(url_for("main.record_detail", record_id=record.id, _anchor="record-files"))
+        return redirect(return_url)
     if action != "update":
         abort(400)
 
@@ -4321,7 +4773,7 @@ def attachment_bulk_update(record_id):
             attachment.tags = ", ".join(filter(None, (attachment.tags, tags)))[:255]
     db.session.commit()
     flash(f"已批量更新 {len(selected)} 个文件。", "success")
-    return redirect(url_for("main.record_detail", record_id=record.id, _anchor="record-files"))
+    return redirect(return_url)
 
 
 @bp.post("/attachments/<int:item_id>/verify")
@@ -4377,12 +4829,21 @@ def record_delete(record_id):
 
 @bp.post("/experiments/<int:item_id>/records/bulk")
 @login_required
-def record_bulk(item_id):
+def record_bulk(item_id, batch_scope_id=None):
     item = owned_or_404(Experiment, item_id)
-    selected = _selected_child_items(item.records, "record_ids")
+    if batch_scope_id is not None and not ExperimentBatch.query.filter_by(
+            id=batch_scope_id, experiment_id=item.id, is_deleted=False).first():
+        abort(404)
+    query, _, _ = _experiment_record_query(item, request.form, batch_id=batch_scope_id)
+    selected = _bulk_scope_items(ExperimentRecord, query, "record_ids")
+    return_url = _local_return_url(
+        "workspace.batch_detail" if batch_scope_id is not None else "main.experiment_detail",
+        "batch-records" if batch_scope_id is not None else "experiment-record-index",
+        **({"item_id": batch_scope_id} if batch_scope_id is not None else {"item_id": item.id}),
+    )
     if not selected:
         flash("请先勾选至少一条过程记录。", "warning")
-        return redirect(url_for("main.experiment_detail", item_id=item.id, _anchor="experiment-record-index"))
+        return redirect(return_url)
     if any(record.is_deleted for record in selected):
         abort(404)
     finalized = [record for record in selected if record.lifecycle_status in FINALIZED_RECORD_STATUSES]
@@ -4391,7 +4852,7 @@ def record_bulk(item_id):
             f"所选记录中有 {len(finalized)} 条已经定稿，不能批量修改或删除。请逐条填写修订原因。",
             "danger",
         )
-        return redirect(url_for("main.experiment_detail", item_id=item.id, _anchor="experiment-record-index"))
+        return redirect(return_url)
     action = request.form.get("action", "update")
     if action == "delete":
         deleted_at = utcnow()
@@ -4405,7 +4866,7 @@ def record_bulk(item_id):
                 attachment.deleted_at = deleted_at
         db.session.commit()
         flash(f"已将 {len(selected)} 条过程记录移入回收站，附件文件未删除。", "success")
-        return redirect(url_for("main.experiment_detail", item_id=item.id, _anchor="experiment-record-index"))
+        return redirect(return_url)
     if action != "update":
         abort(400)
     result = request.form.get("result", "__keep__")
@@ -4430,7 +4891,7 @@ def record_bulk(item_id):
             date_error = _record_date_error(record.batch, new_date)
             if date_error:
                 flash(f"{record.record_date} 的过程记录无法移动日期：{date_error}", "danger")
-                return redirect(url_for("main.experiment_detail", item_id=item.id, _anchor="experiment-record-index"))
+                return redirect(return_url)
             shifted_dates[record.id] = new_date
     for record in selected:
         if result != "__keep__":
@@ -4443,7 +4904,7 @@ def record_bulk(item_id):
             record.record_date = new_date
     db.session.commit()
     flash(f"已批量更新 {len(selected)} 条过程记录。", "success")
-    return redirect(url_for("main.experiment_detail", item_id=item.id, _anchor="experiment-record-index"))
+    return redirect(return_url)
 
 
 def _safe_export_basename(item):
@@ -4499,14 +4960,12 @@ def _report_record_query(experiment, search=""):
     return query.order_by(ExperimentRecord.record_date.desc(), ExperimentRecord.id.desc())
 
 
-@bp.get("/experiment-reports")
-@login_required
-def experiment_report_index():
-    search = request.args.get("q", "").strip()[:120]
-    scope = _evidence_scope(request.args)
+def _report_index_query(scope, search=""):
     query = ExperimentRecord.query.join(
-        Experiment, Experiment.id == ExperimentRecord.experiment_id
-    ).outerjoin(ExperimentBatch, ExperimentBatch.id == ExperimentRecord.batch_id).filter(
+        Experiment, Experiment.id == ExperimentRecord.experiment_id,
+    ).outerjoin(
+        ExperimentBatch, ExperimentBatch.id == ExperimentRecord.batch_id,
+    ).filter(
         Experiment.user_id == current_user.id,
         Experiment.is_deleted.is_(False),
         ExperimentRecord.is_deleted.is_(False),
@@ -4538,10 +4997,132 @@ def experiment_report_index():
                 ),
             )),
         ))
-    pagination, page_size = _paginate(query.order_by(
+    return query
+
+
+def _ordered_report_query(query):
+    return query.order_by(
         ExperimentRecord.record_date.desc(), ExperimentRecord.updated_at.desc(),
         ExperimentRecord.id.desc(),
-    ), per_page=WEEKLY_REPORT_PAGE_SIZES[0], per_page_key="per_page",
+    )
+
+
+def _report_selection_ids(source):
+    try:
+        record_ids = list(dict.fromkeys(int(value) for value in source.getlist("record_ids")))
+    except (TypeError, ValueError):
+        abort(400, description="实验报告选择无效。")
+    if any(record_id < 1 for record_id in record_ids):
+        abort(400, description="实验报告选择无效。")
+    return record_ids
+
+
+def _report_preview_sort_key(record):
+    project = record.experiment.project
+    project_title = project.title if project else "未归类项目"
+    record_day = record.record_date.toordinal() if record.record_date else 0
+    return (
+        project_title.casefold(), record.experiment.title.casefold(),
+        -record_day, -record.id,
+    )
+
+
+def _owned_selected_reports(record_ids):
+    if not record_ids:
+        return []
+    records = ExperimentRecord.query.join(
+        Experiment, Experiment.id == ExperimentRecord.experiment_id,
+    ).filter(
+        ExperimentRecord.id.in_(record_ids),
+        Experiment.user_id == current_user.id,
+        Experiment.is_deleted.is_(False),
+        ExperimentRecord.is_deleted.is_(False),
+    ).all()
+    if len(records) != len(record_ids):
+        abort(404)
+    return sorted(records, key=_report_preview_sort_key)
+
+
+def _selected_reports_from_form(source):
+    selection_scope = str(source.get("selection_scope", "page") or "page").strip().lower()
+    if selection_scope == "all":
+        scope = _evidence_scope(source)
+        search = str(source.get("q", "") or "").strip()[:120]
+        records = _ordered_report_query(_report_index_query(scope, search)).all()
+        return sorted(records, key=_report_preview_sort_key), "all"
+    if selection_scope != "page":
+        abort(400, description="实验报告选择范围无效。")
+    return _owned_selected_reports(_report_selection_ids(source)), "page"
+
+
+def _report_index_return_url(source):
+    values = {}
+    for key in ("project_id", "experiment_id", "batch_id", "q", "page", "per_page"):
+        value = source.get(key)
+        if value not in {None, ""}:
+            values[key] = str(value)[:120]
+    return url_for("main.experiment_report_index", **values)
+
+
+def _report_preview_groups(records):
+    groups = []
+    group_lookup = {}
+    for record in records:
+        group = group_lookup.get(record.experiment_id)
+        if group is None:
+            group = {"experiment": record.experiment, "records": []}
+            group_lookup[record.experiment_id] = group
+            groups.append(group)
+        group["records"].append(record)
+    active_attachments = [
+        attachment
+        for record in records
+        for attachment in record.attachments
+        if not attachment.is_deleted
+    ]
+    return groups, {
+        "reports": len(records),
+        "projects": len({record.experiment.project_id for record in records}),
+        "experiments": len(group_lookup),
+        "batches": len({record.batch_id for record in records if record.batch_id}),
+        "attachments": len(active_attachments),
+    }
+
+
+def _render_report_export_preview(
+        records, selection_scope="page", export_format="docx",
+        template_key="research", return_url=None):
+    groups, stats = _report_preview_groups(records)
+    return render_template(
+        "experiment_report_export_preview.html",
+        records=records, report_groups=groups, report_stats=stats,
+        selection_scope=selection_scope, export_format=export_format,
+        report_template=template_key, report_templates=report_template_choices(),
+        return_url=return_url or url_for("main.experiment_report_index"),
+    )
+
+
+def _safe_report_return_url(value):
+    fallback = url_for("main.experiment_report_index")
+    parsed = urlparse(str(value or ""))
+    if parsed.scheme or parsed.netloc or parsed.path != fallback:
+        return fallback
+    return parsed.path + (f"?{parsed.query}" if parsed.query else "")
+
+
+def _safe_archive_component(value, fallback):
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", str(value or "")).strip(". ")
+    return cleaned[:120] or fallback
+
+
+@bp.get("/experiment-reports")
+@login_required
+def experiment_report_index():
+    search = request.args.get("q", "").strip()[:120]
+    scope = _evidence_scope(request.args)
+    query = _report_index_query(scope, search)
+    pagination, page_size = _paginate(_ordered_report_query(query),
+       per_page=WEEKLY_REPORT_PAGE_SIZES[0], per_page_key="per_page",
        page_sizes=WEEKLY_REPORT_PAGE_SIZES)
     return render_template(
         "experiment_report_index.html", records=pagination.items, search=search,
@@ -4662,6 +5243,129 @@ def record_export(record_id):
     abort(400, description="单条实验报告只支持 PDF 和 Word 导出。")
 
 
+@bp.post("/experiment-reports/export-preview")
+@login_required
+def experiment_report_export_preview():
+    records, selection_scope = _selected_reports_from_form(request.form)
+    return_url = _report_index_return_url(request.form)
+    if not records:
+        flash("请先选择至少一份实验报告。", "warning")
+        return redirect(return_url)
+    return _render_report_export_preview(
+        records, selection_scope=selection_scope, return_url=return_url,
+    )
+
+
+def _selected_report_archive_response(records, export_format, template_key):
+    template_labels = dict(report_template_choices())
+    project_labels = sorted({
+        (
+            f"{record.experiment.project.code or '未编号'} · {record.experiment.project.title}"
+            if record.experiment.project else "未归类项目"
+        )
+        for record in records
+    })
+    experiment_count = len({record.experiment_id for record in records})
+    archive_stream = tempfile.SpooledTemporaryFile(max_size=32 * 1024 * 1024, mode="w+b")
+    try:
+        with zipfile.ZipFile(archive_stream, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            manifest_rows = [
+                "所选实验报告导出",
+                f"项目范围：{'；'.join(project_labels)}",
+                f"实验计划数：{experiment_count}",
+                f"报告数量：{len(records)}",
+                f"导出格式：{export_format.upper()}",
+                f"报告模板：{template_labels[template_key]}",
+                f"导出时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                "",
+                "目录：按项目和实验计划分组，每条经预览确认的过程记录对应一份实验报告。",
+                "",
+                "已选报告：",
+            ]
+            for record in records:
+                manifest_rows.append(
+                    f"- R-{record.id} | {record.record_date or '未设置日期'} | "
+                    f"{record.experiment.title} | "
+                    f"{record.batch.batch_code if record.batch else '历史记录'} | {record.result}"
+                )
+            archive.writestr(
+                "导出说明.txt", ("\ufeff" + "\n".join(manifest_rows) + "\n").encode("utf-8"),
+            )
+            for record in records:
+                project = record.experiment.project
+                if project:
+                    project_folder = _safe_archive_component(
+                        f"{project.code or f'PROJECT-{project.id}'}-{project.title}",
+                        f"project-{project.id}",
+                    )
+                else:
+                    project_folder = "未归类项目"
+                experiment_folder = _safe_export_basename(record.experiment)
+                batch_label = _safe_archive_component(
+                    record.batch.batch_code if record.batch else "历史记录", "历史记录",
+                )
+                record_date = record.record_date.isoformat() if record.record_date else "未设置日期"
+                filename = f"{record_date}-{batch_label}-R-{record.id}.{export_format}"
+                entry_name = f"{project_folder}/{experiment_folder}/{filename}"
+                if export_format == "docx":
+                    content = build_record_docx_export(record, _attachment_path, template_key)
+                else:
+                    content = build_record_pdf_export(record, template_key, _attachment_path)
+                archive.writestr(entry_name, content)
+    except Exception:
+        archive_stream.close()
+        raise
+
+    archive_stream.seek(0)
+    project_ids = {record.experiment.project_id for record in records}
+    if len(project_ids) == 1:
+        project = records[0].experiment.project
+        archive_basename = _safe_archive_component(
+            f"{project.code or f'PROJECT-{project.id}'}-{project.title}" if project else "未归类项目",
+            "selected-reports",
+        )
+    else:
+        archive_basename = f"所选实验报告-{len(records)}份"
+    response = send_file(
+        archive_stream, mimetype="application/zip", as_attachment=True,
+        download_name=f"{archive_basename}-实验报告-{export_format.upper()}.zip",
+    )
+    response.call_on_close(archive_stream.close)
+    return response
+
+
+@bp.post("/experiment-reports/export-selected")
+@login_required
+def experiment_report_export_selected():
+    records = _owned_selected_reports(_report_selection_ids(request.form))
+    return_url = _safe_report_return_url(request.form.get("return_url"))
+    if not records:
+        flash("没有可导出的实验报告，请返回列表重新选择。", "warning")
+        return redirect(return_url)
+    export_format = str(request.form.get("format", "docx") or "docx").strip().lower()
+    if export_format not in {"docx", "pdf"}:
+        abort(400, description="批量实验报告只支持 PDF 和 Word 导出。")
+    template_key = str(request.form.get("report_template", "research") or "research").strip().lower()
+    if template_key not in dict(report_template_choices()):
+        template_key = "research"
+    try:
+        return _selected_report_archive_response(records, export_format, template_key)
+    except PdfFontMissingError as exc:
+        flash(str(exc), "error")
+        return _render_report_export_preview(
+            records, export_format=export_format, template_key=template_key,
+            return_url=return_url,
+        )
+
+
+@bp.get("/projects/<int:item_id>/reports/export")
+@login_required
+def project_reports_export(item_id):
+    project = owned_or_404(ResearchProject, item_id)
+    flash("项目报告已改为自选导出。请先勾选需要的报告并预览。", "info")
+    return redirect(url_for("main.experiment_report_index", project_id=project.id))
+
+
 @bp.get("/experiments/<int:item_id>/export.md")
 @login_required
 def experiment_export_markdown(item_id):
@@ -4686,6 +5390,53 @@ def experiment_archive(item_id):
     return _experiment_archive_response(item)
 
 
+def _sample_index_query(keyword="", status="全部"):
+    query = Sample.query.filter_by(user_id=current_user.id)
+    if keyword:
+        pattern = f"%{keyword}%"
+        query = query.filter(or_(
+            Sample.sample_code.ilike(pattern), Sample.sample_type.ilike(pattern),
+            Sample.source.ilike(pattern), Sample.location.ilike(pattern),
+        ))
+    if status != "全部":
+        query = query.filter(Sample.status == status)
+    return query
+
+
+def _sample_plan_usage_query(sample, search=""):
+    query = ExperimentSample.query.join(Experiment).filter(
+        ExperimentSample.sample_id == sample.id,
+        Experiment.user_id == current_user.id,
+        Experiment.is_deleted.is_(False),
+    )
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(or_(
+            Experiment.title.ilike(pattern), Experiment.code.ilike(pattern),
+            ExperimentSample.role.ilike(pattern), ExperimentSample.amount_used.ilike(pattern),
+            ExperimentSample.notes.ilike(pattern),
+        ))
+    return query.order_by(ExperimentSample.updated_at.desc(), ExperimentSample.id.desc())
+
+
+def _sample_batch_usage_query(sample, search=""):
+    query = BatchSample.query.join(ExperimentBatch).join(Experiment).filter(
+        BatchSample.sample_id == sample.id,
+        Experiment.user_id == current_user.id,
+        Experiment.is_deleted.is_(False),
+        ExperimentBatch.is_deleted.is_(False),
+    )
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(or_(
+            Experiment.title.ilike(pattern), Experiment.code.ilike(pattern),
+            ExperimentBatch.batch_code.ilike(pattern), ExperimentBatch.group_name.ilike(pattern),
+            BatchSample.role.ilike(pattern), BatchSample.amount_used.ilike(pattern),
+            BatchSample.notes.ilike(pattern),
+        ))
+    return query.order_by(BatchSample.updated_at.desc(), BatchSample.id.desc())
+
+
 @bp.route("/samples", methods=["GET", "POST"])
 @login_required
 def samples():
@@ -4707,13 +5458,7 @@ def samples():
     status = request.args.get("status", "全部").strip()
     if status not in {"全部", *SAMPLE_STATUSES}:
         status = "全部"
-    query = Sample.query.filter_by(user_id=current_user.id)
-    if keyword:
-        pattern = f"%{keyword}%"
-        query = query.filter(or_(Sample.sample_code.ilike(pattern), Sample.sample_type.ilike(pattern),
-                                 Sample.source.ilike(pattern), Sample.location.ilike(pattern)))
-    if status != "全部":
-        query = query.filter(Sample.status == status)
+    query = _sample_index_query(keyword, status)
     pagination, page_size = _paginate(
         query.order_by(Sample.updated_at.desc(), Sample.id.desc()),
         per_page=LIST_PAGE_SIZES[0], per_page_key="per_page",
@@ -4728,15 +5473,24 @@ def samples():
 @bp.post("/samples/bulk")
 @login_required
 def sample_bulk():
-    sample_ids = _form_ids("sample_ids")
-    if not sample_ids:
+    status_filter = request.form.get("return_status", "全部")
+    if status_filter not in {"全部", *SAMPLE_STATUSES}:
+        abort(400)
+    query = _sample_index_query(
+        request.form.get("q", "").strip()[:120], status_filter,
+    )
+    items = _bulk_scope_items(Sample, query, "sample_ids")
+    action = request.form.get("action", "update")
+    if action not in {"update", "delete"}:
+        abort(400)
+    if not items:
         flash("请先勾选至少一个样本。", "warning")
+    elif action == "delete":
+        for item in items:
+            db.session.delete(item)
+        db.session.commit()
+        flash(f"已永久删除 {len(items)} 个样本及其关联记录。", "success")
     else:
-        items = Sample.query.filter(
-            Sample.user_id == current_user.id, Sample.id.in_(sample_ids),
-        ).all()
-        if {item.id for item in items} != sample_ids:
-            abort(404)
         status = request.form.get("bulk_status", "__keep__")
         location_mode = request.form.get("location_mode", "keep")
         if status not in {"__keep__", *SAMPLE_STATUSES}:
@@ -4771,7 +5525,85 @@ def sample_edit(item_id):
             db.session.commit()
             flash("样本信息已更新。", "success")
             return redirect(url_for("main.samples"))
-    return render_template("sample_edit.html", sample=item)
+    plan_usage_search = request.args.get("plan_usage_q", "").strip()[:120]
+    plan_usage_pagination, plan_usage_page_size = _paginate(
+        _sample_plan_usage_query(item, plan_usage_search),
+        page_key="plan_usage_page", per_page=DETAIL_PAGE_SIZES[0],
+        per_page_key="plan_usage_per_page", page_sizes=DETAIL_PAGE_SIZES,
+    )
+    batch_usage_search = request.args.get("batch_usage_q", "").strip()[:120]
+    batch_usage_pagination, batch_usage_page_size = _paginate(
+        _sample_batch_usage_query(item, batch_usage_search),
+        page_key="batch_usage_page", per_page=DETAIL_PAGE_SIZES[0],
+        per_page_key="batch_usage_per_page", page_sizes=DETAIL_PAGE_SIZES,
+    )
+    return render_template(
+        "sample_edit.html", sample=item, detail_page_sizes=DETAIL_PAGE_SIZES,
+        plan_usages=plan_usage_pagination.items,
+        plan_usage_search=plan_usage_search,
+        plan_usage_pagination=plan_usage_pagination,
+        plan_usage_page_size=plan_usage_page_size,
+        batch_usages=batch_usage_pagination.items,
+        batch_usage_search=batch_usage_search,
+        batch_usage_pagination=batch_usage_pagination,
+        batch_usage_page_size=batch_usage_page_size,
+    )
+
+
+def _sample_usage_bulk(item, model, query, field_name, label, anchor):
+    selected = _bulk_scope_items(model, query, field_name)
+    if not selected:
+        flash(f"请先勾选至少一条{label}。", "warning")
+    else:
+        action = request.form.get("action", "update")
+        if action == "delete":
+            for usage in selected:
+                db.session.delete(usage)
+            db.session.commit()
+            flash(f"已解除 {len(selected)} 条{label}。", "success")
+        elif action == "update":
+            role_mode = request.form.get("role_mode", "keep")
+            amount_mode = request.form.get("amount_mode", "keep")
+            notes_mode = request.form.get("notes_mode", "keep")
+            valid_modes = {"keep", "append", "replace", "clear"}
+            if role_mode not in valid_modes or amount_mode not in valid_modes or notes_mode not in valid_modes:
+                abort(400)
+            role = request.form.get("role", "").strip()[:80]
+            amount = request.form.get("amount_used", "").strip()[:80]
+            notes = request.form.get("notes", "").strip()[:255]
+            for usage in selected:
+                _bulk_text_value(usage, "role", role_mode, role)
+                _bulk_text_value(usage, "amount_used", amount_mode, amount)
+                _bulk_text_value(usage, "notes", notes_mode, notes)
+            db.session.commit()
+            flash(f"已批量更新 {len(selected)} 条{label}。", "success")
+        else:
+            abort(400)
+    return redirect(_local_return_url(
+        "main.sample_edit", anchor=anchor, item_id=item.id,
+    ))
+
+
+@bp.post("/samples/<int:item_id>/plan-usages/bulk")
+@login_required
+def sample_plan_usage_bulk(item_id):
+    item = owned_or_404(Sample, item_id)
+    search = request.form.get("plan_usage_q", "").strip()[:120]
+    return _sample_usage_bulk(
+        item, ExperimentSample, _sample_plan_usage_query(item, search),
+        "usage_ids", "计划用途", "sample-plan-usages",
+    )
+
+
+@bp.post("/samples/<int:item_id>/batch-usages/bulk")
+@login_required
+def sample_batch_usage_bulk(item_id):
+    item = owned_or_404(Sample, item_id)
+    search = request.form.get("batch_usage_q", "").strip()[:120]
+    return _sample_usage_bulk(
+        item, BatchSample, _sample_batch_usage_query(item, search),
+        "usage_ids", "实际使用", "sample-batch-usages",
+    )
 
 
 @bp.post("/samples/<int:item_id>/delete")
@@ -4892,6 +5724,21 @@ def _presentation_skill_choices():
     return builtins, custom
 
 
+def _presentation_skill_library_query(search=""):
+    query = PresentationSkill.query.filter_by(
+        user_id=current_user.id, is_deleted=False,
+    )
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(or_(
+            PresentationSkill.name.ilike(pattern),
+            PresentationSkill.description.ilike(pattern),
+            PresentationSkill.instructions.ilike(pattern),
+            PresentationSkill.theme.ilike(pattern),
+        ))
+    return query.order_by(PresentationSkill.updated_at.desc(), PresentationSkill.id.desc())
+
+
 def _presentation_skill(value):
     value = str(value or "builtin:evidence-weekly")
     if value.startswith("builtin:"):
@@ -4928,6 +5775,33 @@ def _weekly_report_query(search="", status="全部"):
     )
 
 
+def _weekly_update_query(report, search="", status="全部", kind="全部"):
+    query = WeeklyReportUpdate.query.filter_by(
+        report_id=report.id, user_id=current_user.id,
+    )
+    if status != "全部":
+        query = query.filter_by(status=status)
+    if kind != "全部":
+        query = query.filter_by(kind=kind)
+    if search:
+        query = query.filter(WeeklyReportUpdate.content.ilike(f"%{search}%"))
+    return query.order_by(
+        WeeklyReportUpdate.entry_date.desc(), WeeklyReportUpdate.updated_at.desc(),
+        WeeklyReportUpdate.id.desc(),
+    )
+
+
+def _assistant_conversation_query(search=""):
+    query = AIConversation.query.filter_by(user_id=current_user.id)
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(or_(
+            AIConversation.title.ilike(pattern),
+            AIConversation.messages.any(AIMessage.content.ilike(pattern)),
+        ))
+    return query.order_by(AIConversation.updated_at.desc(), AIConversation.id.desc())
+
+
 @bp.route("/reports/presentation", methods=["GET", "POST"])
 @login_required
 def presentation_report():
@@ -4936,7 +5810,8 @@ def presentation_report():
     experiments = Experiment.query.filter_by(user_id=current_user.id, is_deleted=False).order_by(Experiment.updated_at.desc()).all()
     builtin_skills, custom_skills = _presentation_skill_choices()
     selected_ids = _selected_experiment_ids(
-        request.form.getlist("experiment_ids") if request.method == "POST" else request.args.getlist("experiment_id")
+        request.form.getlist("experiment_ids") if request.method == "POST" else request.args.getlist("experiment_id"),
+        limit=None,
     )
     start = parse_date(request.form.get("start_date")) if request.method == "POST" else week_start
     end = parse_date(request.form.get("end_date")) if request.method == "POST" else week_end
@@ -4996,6 +5871,37 @@ def presentation_report():
     )
     if selected_weekly_report is None and weekly_reports:
         selected_weekly_report = weekly_reports[0]
+    update_search = request.args.get("update_q", "").strip()[:120]
+    update_status = request.args.get("update_status", "全部").strip() or "全部"
+    if update_status not in ("全部", *WEEKLY_REPORT_UPDATE_STATUSES):
+        update_status = "全部"
+    update_kind = request.args.get("update_kind", "全部").strip() or "全部"
+    if update_kind not in ("全部", *WEEKLY_REPORT_UPDATE_KINDS):
+        update_kind = "全部"
+    update_pagination = None
+    update_page_size = _page_size(
+        request.args.get("update_per_page"), DETAIL_PAGE_SIZES, DETAIL_PAGE_SIZES[0],
+    )
+    weekly_updates = []
+    weekly_update_total = 0
+    if selected_weekly_report:
+        update_query = _weekly_update_query(
+            selected_weekly_report, update_search, update_status, update_kind,
+        )
+        update_pagination, update_page_size = _paginate(
+            update_query, page_key="update_page", per_page=DETAIL_PAGE_SIZES[0],
+            per_page_key="update_per_page", page_sizes=DETAIL_PAGE_SIZES,
+        )
+        weekly_updates = update_pagination.items
+        weekly_update_total = WeeklyReportUpdate.query.filter_by(
+            report_id=selected_weekly_report.id, user_id=current_user.id,
+        ).count()
+    custom_skill_search = request.args.get("skill_q", "").strip()[:120]
+    custom_skill_pagination, custom_skill_page_size = _paginate(
+        _presentation_skill_library_query(custom_skill_search),
+        page_key="skill_page", per_page=DETAIL_PAGE_SIZES[0],
+        per_page_key="skill_per_page", page_sizes=DETAIL_PAGE_SIZES,
+    )
     weekly_latest = WeeklyReport.query.filter_by(
         user_id=current_user.id, is_deleted=False
     ).order_by(WeeklyReport.updated_at.desc(), WeeklyReport.id.desc()).first()
@@ -5020,6 +5926,14 @@ def presentation_report():
         weekly_report_statuses=WEEKLY_REPORT_STATUSES,
         weekly_update_kinds=WEEKLY_REPORT_UPDATE_KINDS,
         weekly_update_statuses=WEEKLY_REPORT_UPDATE_STATUSES,
+        weekly_updates=weekly_updates, weekly_update_total=weekly_update_total,
+        update_search=update_search, update_status=update_status,
+        update_kind=update_kind, update_pagination=update_pagination,
+        update_page_size=update_page_size, detail_page_sizes=DETAIL_PAGE_SIZES,
+        custom_skill_items=custom_skill_pagination.items,
+        custom_skill_search=custom_skill_search,
+        custom_skill_pagination=custom_skill_pagination,
+        custom_skill_page_size=custom_skill_page_size,
         projects=ResearchProject.query.filter_by(
             user_id=current_user.id, is_deleted=False
         ).order_by(ResearchProject.updated_at.desc()).all(),
@@ -5070,19 +5984,18 @@ def weekly_report_upload():
 @bp.post("/reports/weekly/bulk")
 @login_required
 def weekly_report_bulk():
-    report_ids = _form_ids("report_ids")
     selected_report_id = request.form.get("return_report_id", type=int)
-    if not report_ids:
+    status_filter = request.form.get("return_status", "全部")
+    if status_filter not in {"全部", *WEEKLY_REPORT_STATUSES}:
+        abort(400)
+    query = _weekly_report_query(
+        request.form.get("q", "").strip()[:120], status_filter,
+    )
+    reports = _bulk_scope_items(WeeklyReport, query, "report_ids")
+    selected_ids = {report.id for report in reports}
+    if not reports:
         flash("请先勾选至少一份周报。", "warning")
     else:
-        reports = WeeklyReport.query.filter(
-            WeeklyReport.user_id == current_user.id,
-            WeeklyReport.is_deleted.is_(False),
-            WeeklyReport.id.in_(report_ids),
-        ).all()
-        if {report.id for report in reports} != report_ids:
-            abort(404)
-
         action = request.form.get("action", "update")
         if action == "delete":
             deleted_at = utcnow()
@@ -5091,7 +6004,7 @@ def weekly_report_bulk():
                 report.deleted_at = deleted_at
             db.session.commit()
             flash(f"已将 {len(reports)} 份周报移入回收站，本地文件仍保留。", "success")
-            if selected_report_id in report_ids:
+            if selected_report_id in selected_ids:
                 selected_report_id = None
         elif action == "update":
             status = request.form.get("bulk_status", "__keep__")
@@ -5185,7 +6098,80 @@ def weekly_report_update_add(report_id):
         report.status = "修改中"
     db.session.commit()
     flash("周报反馈已记录。", "success")
-    return redirect(url_for("main.presentation_report", report_id=report.id))
+    return redirect(_local_return_url(
+        "main.presentation_report", anchor="weekly-updates", report_id=report.id,
+    ))
+
+
+@bp.post("/reports/weekly/<int:report_id>/updates/bulk")
+@login_required
+def weekly_report_update_bulk(report_id):
+    report = weekly_report_or_404(report_id)
+    search = request.form.get("update_q", "").strip()[:120]
+    status_filter = request.form.get("return_update_status", "全部").strip() or "全部"
+    kind_filter = request.form.get("return_update_kind", "全部").strip() or "全部"
+    if status_filter not in {"全部", *WEEKLY_REPORT_UPDATE_STATUSES}:
+        abort(400)
+    if kind_filter not in {"全部", *WEEKLY_REPORT_UPDATE_KINDS}:
+        abort(400)
+    query = _weekly_update_query(report, search, status_filter, kind_filter)
+    selected = _bulk_scope_items(WeeklyReportUpdate, query, "update_ids")
+    if not selected:
+        flash("请先勾选至少一条周报更新。", "warning")
+    else:
+        action = request.form.get("action", "update")
+        if action == "delete":
+            for item in selected:
+                db.session.delete(item)
+            db.session.commit()
+            flash(f"已删除 {len(selected)} 条周报更新。", "success")
+        elif action == "update":
+            status = request.form.get("bulk_update_status", "__keep__")
+            kind = request.form.get("bulk_update_kind", "__keep__")
+            date_mode = request.form.get("date_mode", "keep")
+            content_mode = request.form.get("content_mode", "keep")
+            if status not in {"__keep__", *WEEKLY_REPORT_UPDATE_STATUSES}:
+                abort(400)
+            if kind not in {"__keep__", *WEEKLY_REPORT_UPDATE_KINDS}:
+                abort(400)
+            if date_mode not in {"keep", "set", "shift"}:
+                abort(400)
+            if content_mode not in {"keep", "append", "replace"}:
+                abort(400)
+            entry_date = parse_date(request.form.get("entry_date"))
+            try:
+                shift_days = int(request.form.get("shift_days", "0") or 0)
+            except ValueError:
+                abort(400)
+            if not -3650 <= shift_days <= 3650:
+                abort(400)
+            if date_mode == "set" and not entry_date:
+                abort(400)
+            content = request.form.get("content", "").strip()[:10000]
+            if content_mode in {"append", "replace"} and not content:
+                abort(400)
+
+            for item in selected:
+                if status != "__keep__":
+                    item.status = status
+                if kind != "__keep__":
+                    item.kind = kind
+                if date_mode == "set":
+                    item.entry_date = entry_date
+                elif date_mode == "shift":
+                    item.entry_date += timedelta(days=shift_days)
+                _bulk_text_value(item, "content", content_mode, content)
+            db.session.commit()
+            flash(f"已批量更新 {len(selected)} 条周报更新。", "success")
+        else:
+            abort(400)
+
+    return redirect(_local_return_url(
+        "main.presentation_report", anchor="weekly-updates", report_id=report.id,
+        update_q=search, update_status=status_filter, update_kind=kind_filter,
+        update_page=request.form.get("update_page", "1"),
+        update_per_page=request.form.get("update_per_page", str(DETAIL_PAGE_SIZES[0])),
+    ))
 
 
 @bp.post("/reports/weekly-updates/<int:update_id>/toggle")
@@ -5194,7 +6180,9 @@ def weekly_report_update_toggle(update_id):
     item = weekly_report_update_or_404(update_id)
     item.status = "待处理" if item.status == "已完成" else "已完成"
     db.session.commit()
-    return redirect(url_for("main.presentation_report", report_id=item.report_id))
+    return redirect(_local_return_url(
+        "main.presentation_report", anchor="weekly-updates", report_id=item.report_id,
+    ))
 
 
 @bp.get("/reports/weekly/<int:report_id>/download")
@@ -5263,6 +6251,59 @@ def presentation_skill_save():
     return redirect(url_for("main.presentation_report"))
 
 
+@bp.post("/reports/presentation/skills/bulk")
+@login_required
+def presentation_skill_bulk():
+    search = request.form.get("skill_q", "").strip()[:120]
+    selected = _bulk_scope_items(
+        PresentationSkill, _presentation_skill_library_query(search), "skill_ids",
+    )
+    if not selected:
+        flash("请先勾选至少一个 PPT Skill。", "warning")
+    else:
+        action = request.form.get("action", "update")
+        if action == "delete":
+            deleted_at = utcnow()
+            for item in selected:
+                item.is_deleted = True
+                item.deleted_at = deleted_at
+            db.session.commit()
+            flash(f"已将 {len(selected)} 个 PPT Skill 移入回收站。", "success")
+        elif action == "update":
+            enabled = request.form.get("bulk_enabled", "__keep__")
+            theme = request.form.get("bulk_theme", "__keep__")
+            description_mode = request.form.get("description_mode", "keep")
+            instruction_mode = request.form.get("instruction_mode", "keep")
+            if enabled not in {"__keep__", "enabled", "disabled"}:
+                abort(400)
+            if theme not in {"__keep__", "evidence", "review"}:
+                abort(400)
+            if description_mode not in {"keep", "append", "replace", "clear"}:
+                abort(400)
+            if instruction_mode not in {"keep", "append", "replace"}:
+                abort(400)
+            description = request.form.get("description", "").strip()[:10000]
+            instructions = request.form.get("instructions", "").strip()[:12000]
+            if instruction_mode in {"append", "replace"} and not instructions:
+                abort(400)
+            for item in selected:
+                if enabled != "__keep__":
+                    item.is_enabled = enabled == "enabled"
+                if theme != "__keep__":
+                    item.theme = theme
+                _bulk_text_value(item, "description", description_mode, description)
+                _bulk_text_value(item, "instructions", instruction_mode, instructions)
+            db.session.commit()
+            flash(f"已批量更新 {len(selected)} 个 PPT Skill。", "success")
+        else:
+            abort(400)
+    return redirect(_local_return_url(
+        "main.presentation_report", anchor="custom-skills",
+        skill_q=search, skill_page=request.form.get("skill_page", "1"),
+        skill_per_page=request.form.get("skill_per_page", str(DETAIL_PAGE_SIZES[0])),
+    ))
+
+
 @bp.post("/reports/presentation/skills/<int:item_id>/delete")
 @login_required
 def presentation_skill_delete(item_id):
@@ -5279,9 +6320,13 @@ def presentation_skill_delete(item_id):
 @bp.get("/assistant/state")
 @login_required
 def assistant_state():
-    conversations = AIConversation.query.filter_by(user_id=current_user.id).order_by(
-        AIConversation.updated_at.desc()
-    ).limit(100).all()
+    conversation_search = request.args.get("conversation_q", "").strip()[:120]
+    conversation_pagination, conversation_page_size = _paginate(
+        _assistant_conversation_query(conversation_search),
+        page_key="conversation_page", per_page=ASSISTANT_LIST_PAGE_SIZES[0],
+        per_page_key="conversation_per_page", page_sizes=ASSISTANT_LIST_PAGE_SIZES,
+    )
+    conversations = conversation_pagination.items
     conversation_id = request.args.get("conversation_id", type=int)
     if conversation_id:
         conversation = _conversation_or_404(conversation_id)
@@ -5305,37 +6350,184 @@ def assistant_state():
         model = config.model
     except SecretDecryptionError:
         enabled, web_capable, model = False, False, ""
-    experiment_options = Experiment.query.filter_by(user_id=current_user.id, is_deleted=False).order_by(
-        Experiment.updated_at.desc()
-    ).limit(100).all()
-    project_options = ResearchProject.query.filter_by(user_id=current_user.id, is_deleted=False).order_by(
-        ResearchProject.updated_at.desc()
-    ).limit(100).all()
-    batch_options = ExperimentBatch.query.join(Experiment).filter(
-        Experiment.user_id == current_user.id,
-        Experiment.is_deleted.is_(False),
-        ExperimentBatch.is_deleted.is_(False),
-    ).order_by(ExperimentBatch.updated_at.desc()).limit(300).all()
     state_page_type = request.args.get("page_type", "").strip()
     state_page_id = request.args.get("page_id", type=int)
     if state_page_type or request.args.get("page_id", "").strip():
-        if state_page_type not in {"project", "experiment", "batch", "record"} or not state_page_id:
+        if state_page_type not in {"experiment", "batch", "record"} or not state_page_id:
             abort(400)
         state_page_scope = _assistant_page_scope(state_page_type, state_page_id)
     else:
         state_page_scope = _assistant_page_scope("", None)
-    knowledge_bases = AIKnowledgeBase.query.filter_by(user_id=current_user.id).order_by(
-        AIKnowledgeBase.updated_at.desc()
+
+    active_record_query = ExperimentRecord.query.join(Experiment).join(
+        ExperimentBatch, ExperimentRecord.batch_id == ExperimentBatch.id,
+    ).filter(
+        Experiment.user_id == current_user.id,
+        Experiment.is_deleted.is_(False),
+        ExperimentBatch.is_deleted.is_(False),
+        ExperimentRecord.is_deleted.is_(False),
+    )
+    record_activity_rows = db.session.query(
+        ExperimentRecord.experiment_id,
+        ExperimentRecord.batch_id,
+        func.max(ExperimentRecord.updated_at),
+        func.count(ExperimentRecord.id),
+    ).join(Experiment).join(
+        ExperimentBatch, ExperimentRecord.batch_id == ExperimentBatch.id,
+    ).filter(
+        Experiment.user_id == current_user.id,
+        Experiment.is_deleted.is_(False),
+        ExperimentBatch.is_deleted.is_(False),
+        ExperimentRecord.is_deleted.is_(False),
+    ).group_by(
+        ExperimentRecord.experiment_id, ExperimentRecord.batch_id,
     ).all()
+    record_activity_by_batch = {}
+    record_activity_by_experiment = {}
+    record_count_by_batch = {}
+    for experiment_id, batch_id, activity_at, record_count in record_activity_rows:
+        record_activity_by_batch[batch_id] = activity_at
+        record_count_by_batch[batch_id] = record_count
+        previous = record_activity_by_experiment.get(experiment_id)
+        if activity_at and (previous is None or activity_at > previous):
+            record_activity_by_experiment[experiment_id] = activity_at
+
+    all_batch_options = ExperimentBatch.query.join(Experiment).filter(
+        Experiment.user_id == current_user.id,
+        Experiment.is_deleted.is_(False),
+        ExperimentBatch.is_deleted.is_(False),
+    ).all()
+    batch_activity = {
+        item.id: max(item.updated_at, record_activity_by_batch.get(item.id) or item.updated_at)
+        for item in all_batch_options
+    }
+    batch_activity_by_experiment = {}
+    for item in all_batch_options:
+        activity_at = batch_activity[item.id]
+        previous = batch_activity_by_experiment.get(item.experiment_id)
+        if previous is None or activity_at > previous:
+            batch_activity_by_experiment[item.experiment_id] = activity_at
+
+    record_options = active_record_query.order_by(
+        ExperimentRecord.updated_at.desc(), ExperimentRecord.id.desc(),
+    ).limit(1000).all()
+    required_record_ids = set(
+        _selected_record_ids(_json_list(conversation.selected_record_ids_json))
+        if conversation else []
+    )
+    if state_page_scope["record_id"]:
+        required_record_ids.add(state_page_scope["record_id"])
+    loaded_record_ids = {item.id for item in record_options}
+    if required_record_ids - loaded_record_ids:
+        record_options.extend(active_record_query.filter(
+            ExperimentRecord.id.in_(required_record_ids - loaded_record_ids)
+        ).all())
+        record_options.sort(key=lambda item: (item.updated_at, item.id), reverse=True)
+
+    selected_batch_ids = set(
+        _selected_batch_ids(_json_list(conversation.selected_batch_ids_json))
+        if conversation else []
+    )
+    required_batch_ids = {
+        *(item.batch_id for item in record_options), *selected_batch_ids,
+    }
+    if state_page_scope["batch_id"]:
+        required_batch_ids.add(state_page_scope["batch_id"])
+    batch_options = sorted(
+        all_batch_options, key=lambda item: (batch_activity[item.id], item.id), reverse=True,
+    )
+    recent_batch_ids = {item.id for item in batch_options[:600]}
+    batch_options = [
+        item for item in batch_options
+        if item.id in recent_batch_ids or item.id in required_batch_ids
+    ]
+
+    all_experiment_options = Experiment.query.filter_by(
+        user_id=current_user.id, is_deleted=False,
+    ).all()
+    experiment_activity = {
+        item.id: max(
+            item.updated_at,
+            batch_activity_by_experiment.get(item.id) or item.updated_at,
+            record_activity_by_experiment.get(item.id) or item.updated_at,
+        )
+        for item in all_experiment_options
+    }
+    selected_experiment_ids = set(
+        _selected_experiment_ids(_json_list(conversation.selected_experiment_ids_json))
+        if conversation else []
+    )
+    required_experiment_ids = {
+        *(item.experiment_id for item in batch_options), *selected_experiment_ids,
+    }
+    if state_page_scope["experiment_id"]:
+        required_experiment_ids.add(state_page_scope["experiment_id"])
+    experiment_options = sorted(
+        all_experiment_options,
+        key=lambda item: (experiment_activity[item.id], item.id),
+        reverse=True,
+    )
+    recent_experiment_ids = {item.id for item in experiment_options[:200]}
+    experiment_options = [
+        item for item in experiment_options
+        if item.id in recent_experiment_ids or item.id in required_experiment_ids
+    ]
+
+    project_options = ResearchProject.query.filter_by(user_id=current_user.id, is_deleted=False).order_by(
+        ResearchProject.updated_at.desc()
+    ).limit(100).all()
+    knowledge_search = request.args.get("knowledge_q", "").strip()[:120]
+    knowledge_pagination, knowledge_page_size = _paginate(
+        _knowledge_base_query(knowledge_search),
+        page_key="knowledge_page", per_page=ASSISTANT_LIST_PAGE_SIZES[0],
+        per_page_key="knowledge_per_page", page_sizes=ASSISTANT_LIST_PAGE_SIZES,
+    )
+    knowledge_bases = knowledge_pagination.items
+    knowledge_document_page_size = _page_size(
+        request.args.get("knowledge_document_per_page"),
+        ASSISTANT_LIST_PAGE_SIZES, ASSISTANT_LIST_PAGE_SIZES[0],
+    )
+    knowledge_base_rows = []
+    for item in knowledge_bases:
+        document_pagination = _knowledge_document_query(item).paginate(
+            page=1, per_page=knowledge_document_page_size, error_out=False,
+        )
+        knowledge_base_rows.append({
+            "id": item.id, "name": item.name, "description": item.description,
+            "custom_instructions": item.custom_instructions, "is_enabled": item.is_enabled,
+            "updated_at": item.updated_at.strftime("%Y-%m-%d %H:%M"),
+            "documents": [
+                _knowledge_document_payload(document) for document in document_pagination.items
+            ],
+            "document_pagination": {
+                "page": 1, "pages": document_pagination.pages,
+                "per_page": knowledge_document_page_size,
+                "total": document_pagination.total,
+                "has_prev": False, "has_next": document_pagination.has_next,
+                "page_sizes": list(ASSISTANT_LIST_PAGE_SIZES),
+            },
+        })
     preference = _assistant_preference()
     return {
         "conversation": _assistant_conversation_payload(conversation, include_messages=True) if conversation else None,
         "conversations": [_assistant_conversation_payload(item) for item in conversations],
+        "conversation_query": conversation_search,
+        "conversation_pagination": {
+            "page": conversation_pagination.page,
+            "pages": conversation_pagination.pages,
+            "per_page": conversation_page_size,
+            "total": conversation_pagination.total,
+            "has_prev": conversation_pagination.has_prev,
+            "has_next": conversation_pagination.has_next,
+            "page_sizes": list(ASSISTANT_LIST_PAGE_SIZES),
+        },
         "experiments": [
             {
                 "id": item.id, "title": item.title, "code": item.code or "未编号",
                 "status": item.status, "project_id": item.project_id,
-                "updated_at": item.updated_at.date().isoformat(),
+                "updated_at": experiment_activity[item.id].isoformat(timespec="minutes"),
+                "updated_label": edited_at_filter(experiment_activity[item.id]),
+                "updated_title": edited_at_title_filter(experiment_activity[item.id]),
             }
             for item in experiment_options
         ],
@@ -5348,31 +6540,41 @@ def assistant_state():
                 "repeat_number": item.repeat_number, "group_name": item.group_name,
                 "start_date": _serialize_value(item.start_date),
                 "end_date": _serialize_value(item.end_date),
-                "updated_at": item.updated_at.date().isoformat(),
+                "record_count": record_count_by_batch.get(item.id, 0),
+                "updated_at": batch_activity[item.id].isoformat(timespec="minutes"),
+                "updated_label": edited_at_filter(batch_activity[item.id]),
+                "updated_title": edited_at_title_filter(batch_activity[item.id]),
             }
             for item in batch_options
         ],
+        "records": [
+            {
+                "id": item.id, "experiment_id": item.experiment_id,
+                "batch_id": item.batch_id, "record_date": item.record_date.isoformat(),
+                "operator": item.operator or "未填写实验人员",
+                "result": item.result, "lifecycle_status": item.lifecycle_status,
+                "summary": _short_ai_text(item.remark or item.content, 120) or "未填写记录摘要",
+                "updated_at": item.updated_at.isoformat(timespec="minutes"),
+                "updated_label": edited_at_filter(item.updated_at),
+                "updated_title": edited_at_title_filter(item.updated_at),
+            }
+            for item in record_options
+        ],
+        "record_total": active_record_query.count(),
         "page_scope": state_page_scope,
         "projects": [
             {"id": item.id, "title": item.title, "code": item.code or "未编号"}
             for item in project_options
         ],
-        "knowledge_bases": [
-            {
-                "id": item.id, "name": item.name, "description": item.description,
-                "custom_instructions": item.custom_instructions, "is_enabled": item.is_enabled,
-                "updated_at": item.updated_at.strftime("%Y-%m-%d %H:%M"),
-                "documents": [
-                    {
-                        "id": document.id, "title": document.title,
-                        "name": document.original_name, "size": document.size_label,
-                        "readable": bool(document.text_content),
-                    }
-                    for document in item.documents
-                ],
-            }
-            for item in knowledge_bases
-        ],
+        "knowledge_bases": knowledge_base_rows,
+        "knowledge_query": knowledge_search,
+        "knowledge_pagination": {
+            "page": knowledge_pagination.page, "pages": knowledge_pagination.pages,
+            "per_page": knowledge_page_size, "total": knowledge_pagination.total,
+            "has_prev": knowledge_pagination.has_prev,
+            "has_next": knowledge_pagination.has_next,
+            "page_sizes": list(ASSISTANT_LIST_PAGE_SIZES),
+        },
         "preference": {
             "custom_prompt": preference.custom_prompt if preference else "",
             "using_default": not bool(preference and preference.custom_prompt.strip()),
@@ -5418,6 +6620,51 @@ def assistant_knowledge_base_create():
     db.session.add(item)
     db.session.commit()
     return {"ok": True, "id": item.id, "name": item.name}
+
+
+@bp.post("/assistant/knowledge-bases/bulk")
+@login_required
+def assistant_knowledge_base_bulk():
+    search = request.form.get("knowledge_q", "").strip()[:120]
+    selected = _bulk_scope_items(
+        AIKnowledgeBase, _knowledge_base_query(search), "knowledge_base_item_ids",
+    )
+    if not selected:
+        return {"error": "请先选择至少一个知识库。"}, 400
+    selected_ids = [item.id for item in selected]
+    action = request.form.get("action", "update")
+    if action == "delete":
+        directories = [
+            _knowledge_upload_root() / f"user-{current_user.id}" / f"base-{item.id}"
+            for item in selected
+        ]
+        for item in selected:
+            db.session.delete(item)
+        db.session.commit()
+        for directory in directories:
+            if directory.exists():
+                shutil.rmtree(directory, ignore_errors=True)
+        return {"ok": True, "deleted": len(selected), "ids": selected_ids}
+    if action != "update":
+        abort(400)
+    enabled = request.form.get("bulk_enabled", "__keep__")
+    description_mode = request.form.get("description_mode", "keep")
+    instruction_mode = request.form.get("instruction_mode", "keep")
+    if enabled not in {"__keep__", "enabled", "disabled"}:
+        abort(400)
+    if description_mode not in {"keep", "append", "replace", "clear"}:
+        abort(400)
+    if instruction_mode not in {"keep", "append", "replace", "clear"}:
+        abort(400)
+    description = request.form.get("description", "").strip()[:10000]
+    instructions = request.form.get("custom_instructions", "").strip()[:12000]
+    for item in selected:
+        if enabled != "__keep__":
+            item.is_enabled = enabled == "enabled"
+        _bulk_text_value(item, "description", description_mode, description)
+        _bulk_text_value(item, "custom_instructions", instruction_mode, instructions)
+    db.session.commit()
+    return {"ok": True, "updated": len(selected), "ids": selected_ids}
 
 
 @bp.post("/assistant/knowledge-bases/<int:item_id>")
@@ -5474,6 +6721,69 @@ def assistant_knowledge_document_add(item_id):
     return {"ok": True, "created": len(created)}
 
 
+@bp.get("/assistant/knowledge-bases/<int:item_id>/documents")
+@login_required
+def assistant_knowledge_documents(item_id):
+    base = _knowledge_base_or_404(item_id)
+    search = request.args.get("q", "").strip()[:120]
+    pagination, page_size = _paginate(
+        _knowledge_document_query(base, search), per_page=ASSISTANT_LIST_PAGE_SIZES[0],
+        per_page_key="per_page", page_sizes=ASSISTANT_LIST_PAGE_SIZES,
+    )
+    return {
+        "documents": [_knowledge_document_payload(item) for item in pagination.items],
+        "query": search,
+        "pagination": {
+            "page": pagination.page, "pages": pagination.pages,
+            "per_page": page_size, "total": pagination.total,
+            "has_prev": pagination.has_prev, "has_next": pagination.has_next,
+            "page_sizes": list(ASSISTANT_LIST_PAGE_SIZES),
+        },
+    }
+
+
+@bp.post("/assistant/knowledge-bases/<int:item_id>/documents/bulk")
+@login_required
+def assistant_knowledge_document_bulk(item_id):
+    base = _knowledge_base_or_404(item_id)
+    search = request.form.get("q", "").strip()[:120]
+    selected = _bulk_scope_items(
+        AIKnowledgeDocument, _knowledge_document_query(base, search), "document_ids",
+    )
+    if not selected:
+        return {"error": "请先选择至少一个知识文档。"}, 400
+    action = request.form.get("action", "update")
+    if action == "delete":
+        root = _knowledge_upload_root().resolve()
+        paths = [
+            (root / item.stored_path).resolve() for item in selected if item.stored_path
+        ]
+        for item in selected:
+            db.session.delete(item)
+        base.updated_at = utcnow()
+        db.session.commit()
+        for path in paths:
+            if root in path.parents and path.is_file():
+                path.unlink(missing_ok=True)
+        return {"ok": True, "deleted": len(selected)}
+    if action != "update":
+        abort(400)
+    title_mode = request.form.get("title_mode", "keep")
+    title_value = request.form.get("title_value", "")[:80]
+    if title_mode not in {"keep", "prefix", "suffix"}:
+        abort(400)
+    if title_mode != "keep" and not title_value.strip():
+        return {"error": "批量修改文档标题时，请填写前缀或后缀。"}, 400
+    for item in selected:
+        if title_mode == "prefix":
+            item.title = f"{title_value}{item.title}"[:255]
+        elif title_mode == "suffix":
+            item.title = f"{item.title}{title_value}"[:255]
+    base.updated_at = utcnow()
+    db.session.commit()
+    return {"ok": True, "updated": len(selected)}
+
+
 @bp.post("/assistant/knowledge-documents/<int:document_id>/delete")
 @login_required
 def assistant_knowledge_document_delete(document_id):
@@ -5518,6 +6828,9 @@ def assistant_new():
         selected_batch_ids_json=json.dumps(
             _selected_batch_ids(request.form.getlist("batch_ids")), ensure_ascii=False
         ),
+        selected_record_ids_json=json.dumps(
+            _selected_record_ids(request.form.getlist("record_ids")), ensure_ascii=False
+        ),
         selected_knowledge_base_ids_json=json.dumps(
             _selected_knowledge_base_ids(request.form.getlist("knowledge_base_ids")), ensure_ascii=False
         ),
@@ -5525,6 +6838,47 @@ def assistant_new():
     db.session.add(item)
     db.session.commit()
     return {"id": item.id, "title": item.title}
+
+
+@bp.post("/assistant/conversations/bulk")
+@login_required
+def assistant_conversation_bulk():
+    search = request.form.get("conversation_q", "").strip()[:120]
+    selected = _bulk_scope_items(
+        AIConversation, _assistant_conversation_query(search), "conversation_ids",
+    )
+    if not selected:
+        return {"error": "请先选择至少一个历史会话。"}, 400
+    action = request.form.get("action", "update")
+    selected_ids = {item.id for item in selected}
+    if action == "delete":
+        current_id = request.form.get("current_conversation_id", type=int)
+        for item in selected:
+            for message in item.messages:
+                _remove_ai_message_files(message)
+            db.session.delete(item)
+        db.session.commit()
+        next_item = _assistant_conversation_query().first()
+        return {
+            "ok": True, "deleted": len(selected),
+            "current_deleted": current_id in selected_ids,
+            "next_conversation_id": next_item.id if next_item else None,
+        }
+    if action != "update":
+        abort(400)
+    title_mode = request.form.get("title_mode", "keep")
+    title_value = request.form.get("title_value", "")[:80]
+    if title_mode not in {"keep", "prefix", "suffix"}:
+        abort(400)
+    if title_mode != "keep" and not title_value.strip():
+        return {"error": "批量修改会话名称时，请填写前缀或后缀。"}, 400
+    for item in selected:
+        if title_mode == "prefix":
+            item.title = f"{title_value}{item.title}"[:160]
+        elif title_mode == "suffix":
+            item.title = f"{item.title}{title_value}"[:160]
+    db.session.commit()
+    return {"ok": True, "updated": len(selected), "ids": sorted(selected_ids)}
 
 
 @bp.post("/assistant/conversations/<int:conversation_id>")
@@ -5631,16 +6985,21 @@ def assistant_chat():
         db.session.flush()
     conversation.page_type = page_context.get("page_type", "")
     conversation.page_id = page_context.get("page_id")
-    if request.form.get("experiment_scope_present") or request.form.get("batch_scope_present"):
+    if any(request.form.get(key) for key in (
+            "experiment_scope_present", "batch_scope_present", "record_scope_present")):
         selected_ids = _selected_experiment_ids(request.form.getlist("experiment_ids"))
         selected_batch_ids = _selected_batch_ids(request.form.getlist("batch_ids"))
+        selected_record_ids = _selected_record_ids(request.form.getlist("record_ids"))
         conversation.selected_experiment_ids_json = json.dumps(selected_ids, ensure_ascii=False)
         conversation.selected_batch_ids_json = json.dumps(selected_batch_ids, ensure_ascii=False)
+        conversation.selected_record_ids_json = json.dumps(selected_record_ids, ensure_ascii=False)
     else:
         stored_scope = _selected_experiment_ids(_json_list(conversation.selected_experiment_ids_json))
         selected_ids = stored_scope if stored_scope else None
         stored_batch_scope = _selected_batch_ids(_json_list(conversation.selected_batch_ids_json))
         selected_batch_ids = stored_batch_scope if stored_batch_scope else None
+        stored_record_scope = _selected_record_ids(_json_list(conversation.selected_record_ids_json))
+        selected_record_ids = stored_record_scope if stored_record_scope else None
     if request.form.get("knowledge_scope_present"):
         selected_knowledge_ids = _selected_knowledge_base_ids(request.form.getlist("knowledge_base_ids"))
         conversation.selected_knowledge_base_ids_json = json.dumps(selected_knowledge_ids, ensure_ascii=False)
@@ -5679,15 +7038,22 @@ def assistant_context_preview():
     conversation_id = request.form.get("conversation_id", type=int)
     conversation = _conversation_or_404(conversation_id) if conversation_id else None
     page_context = _assistant_request_page_context()
-    if request.form.get("experiment_scope_present") or request.form.get("batch_scope_present"):
+    scope_present = any(request.form.get(key) for key in (
+        "experiment_scope_present", "batch_scope_present", "record_scope_present",
+    ))
+    if scope_present:
         selected_ids = _selected_experiment_ids(request.form.getlist("experiment_ids"))
         selected_batch_ids = _selected_batch_ids(request.form.getlist("batch_ids"))
+        selected_record_ids = _selected_record_ids(request.form.getlist("record_ids"))
     else:
         selected_ids = _selected_experiment_ids(
             _json_list(conversation.selected_experiment_ids_json)
         ) if conversation else []
         selected_batch_ids = _selected_batch_ids(
             _json_list(conversation.selected_batch_ids_json)
+        ) if conversation else []
+        selected_record_ids = _selected_record_ids(
+            _json_list(conversation.selected_record_ids_json)
         ) if conversation else []
     if request.form.get("knowledge_scope_present"):
         selected_knowledge_ids = _selected_knowledge_base_ids(request.form.getlist("knowledge_base_ids"))
@@ -5698,8 +7064,9 @@ def assistant_context_preview():
     research_context, research_references = _assistant_research_context(
         page_context,
         content,
-        selected_ids if request.form.get("experiment_scope_present") or selected_ids else None,
-        selected_batch_ids if request.form.get("batch_scope_present") or selected_batch_ids else None,
+        selected_ids if scope_present or selected_ids else None,
+        selected_batch_ids if scope_present or selected_batch_ids else None,
+        selected_record_ids if scope_present or selected_record_ids else None,
     )
     knowledge_context, knowledge_references = _assistant_knowledge_context(selected_knowledge_ids)
     config = current_ai_config()
@@ -5885,8 +7252,8 @@ def _apply_ai_step_operations(item, operations, before):
             continue
         step = db.session.get(ExperimentStep, operation.get("id"))
         if not step or step.experiment_id != item.id:
-            raise AIProposalConflict("提案中的实验步骤已不存在。")
-        _verify_ai_resource(before, "实验步骤", step, STEP_AI_FIELDS)
+            raise AIProposalConflict("提案中的方案阶段已不存在。")
+        _verify_ai_resource(before, "方案阶段", step, STEP_AI_FIELDS)
         if operation["operation"] == "delete":
             db.session.delete(step)
             continue
@@ -5903,16 +7270,16 @@ def _apply_ai_step_operations(item, operations, before):
 def _apply_ai_batch_step_operations(batch, operations, before):
     for operation in operations:
         if operation.get("operation") != "update":
-            raise AIProposalConflict("批次步骤只允许更新，不能由 AI 新建或删除。")
+            raise AIProposalConflict("批次实验步骤只允许更新，不能由 AI 新建或删除。")
         step = db.session.get(BatchStep, operation.get("id"))
         if not step or step.batch_id != batch.id:
-            raise AIProposalConflict("提案中的批次步骤已不存在或已移到其他批次。")
-        _verify_ai_resource(before, "批次步骤", step, BATCH_STEP_SNAPSHOT_FIELDS)
+            raise AIProposalConflict("提案中的批次实验步骤已不存在或已移到其他批次。")
+        _verify_ai_resource(before, "批次实验步骤", step, BATCH_STEP_SNAPSHOT_FIELDS)
         changes = dict(operation.get("changes") or {})
         if "title" in changes and not changes["title"]:
-            raise ValueError("批次步骤标题不能为空。")
+            raise ValueError("批次实验步骤标题不能为空。")
         if _invalid_ai_date(changes, {"planned_date", "completed_date"}):
-            raise ValueError("批次步骤日期格式不合法。")
+            raise ValueError("批次实验步骤日期格式不合法。")
 
         done = _ai_bool(changes.pop("is_done")) if "is_done" in changes else step.is_done
         completed_date_supplied = "completed_date" in changes
@@ -6165,10 +7532,6 @@ def _restore_assistant_snapshot(snapshot):
     context = snapshot["context"]
     page_type = context.get("page_type")
     page_id = context.get("page_id")
-    if page_type == "project":
-        item = owned_or_404(ResearchProject, page_id)
-        _set_ai_fields(item, context.get("fields") or {}, {"start_date", "end_date"})
-        return url_for("workspace.project_detail", item_id=item.id)
     if page_type == "experiment":
         item = owned_or_404(Experiment, page_id)
         _set_ai_fields(item, context.get("fields") or {}, {"start_date", "end_date"})
@@ -6277,9 +7640,7 @@ def assistant_apply_proposal(message_id):
     before_context = None
     target_page_type = ""
     target_page_id = proposal.get("target_id")
-    if action == "manage_project":
-        target_page_type = "project"
-    elif action in {"manage_experiment", "update_experiment"}:
+    if action in {"manage_experiment", "update_experiment"}:
         target_page_type = "experiment"
     elif action == "manage_batch":
         target_page_type = "batch"
@@ -6290,21 +7651,7 @@ def assistant_apply_proposal(message_id):
             _assistant_page_context(target_page_type, target_page_id, full_snapshot=True)
         )
 
-    if action == "manage_project":
-        item = owned_or_404(ResearchProject, proposal.get("target_id"))
-        try:
-            if any(_serialize_value(getattr(item, field)) != old for field, old in before.items()):
-                raise AIProposalConflict("科研项目信息在提案生成后已发生变化，请重新生成修改建议。")
-            _validate_ai_project_changes(changes)
-            _set_ai_fields(item, changes, {"start_date", "end_date"})
-            redirect_url = url_for("workspace.project_detail", item_id=item.id)
-        except AIProposalConflict as exc:
-            db.session.rollback()
-            return {"error": str(exc)}, 409
-        except ValueError as exc:
-            db.session.rollback()
-            return {"error": str(exc)}, 400
-    elif action == "manage_experiment":
+    if action == "manage_experiment":
         item = owned_or_404(Experiment, proposal.get("target_id"))
         try:
             if proposal.get("record_operations"):
@@ -6473,8 +7820,6 @@ def assistant_apply_proposal(message_id):
                 item.batch_code = _next_execution_code(experiment)
             db.session.add(item)
             db.session.flush()
-            for step in experiment.steps:
-                db.session.add(BatchStep.from_plan_step(item.id, step))
             for usage in experiment.sample_usages:
                 db.session.add(BatchSample(
                     batch_id=item.id, sample_id=usage.sample_id, role=usage.role,
@@ -6484,28 +7829,13 @@ def assistant_apply_proposal(message_id):
         except ValueError as exc:
             db.session.rollback()
             return {"error": str(exc)}, 400
-    elif action == "create_project":
-        try:
-            _validate_ai_project_changes(changes)
-            item = ResearchProject(
-                user_id=current_user.id,
-                title=changes.get("title", "").strip(),
-            )
-            if not item.title:
-                raise ValueError("项目名称不能为空。")
-            _set_ai_fields(item, changes, {"start_date", "end_date"})
-        except ValueError as exc:
-            return {"error": str(exc)}, 400
-        db.session.add(item)
-        db.session.flush()
-        redirect_url = url_for("workspace.project_detail", item_id=item.id)
     elif action == "create_experiment":
         try:
             _validate_ai_experiment_changes(changes)
             project_id = request.form.get("project_id", type=int) or proposal.get("project_id")
             project = _assistant_experiment_project(project_id)
             item = Experiment(
-                user_id=current_user.id, project_id=project.id,
+                user_id=current_user.id, project_id=project.id if project else None,
                 title=changes.get("title", "").strip(),
             )
             if not item.title:
@@ -6545,7 +7875,6 @@ def assistant_apply_proposal(message_id):
     undo_payload = {
         "action": action, "context": before_context,
         "created_experiment_id": target_page_id if action == "create_experiment" else None,
-        "created_project_id": target_page_id if action == "create_project" else None,
         "created_execution_id": target_page_id if action == "create_execution" else None,
         "selected_change_ids": selected_change_ids,
     }
@@ -6583,15 +7912,6 @@ def assistant_revert_proposal(message_id):
                 raise AIProposalConflict("实验在 AI 保存后又发生了变化，为避免覆盖新内容，已停止撤销。")
             db.session.delete(item)
             redirect_url = url_for("main.experiments")
-        elif undo.get("action") == "create_project":
-            item = owned_or_404(ResearchProject, undo.get("created_project_id"))
-            current = _assistant_context_signature(
-                _assistant_page_context("project", item.id, full_snapshot=True)
-            )
-            if current != expected:
-                raise AIProposalConflict("科研项目在 AI 创建后又发生了变化，为避免删除后续内容，已停止撤销。")
-            db.session.delete(item)
-            redirect_url = url_for("workspace.projects")
         elif undo.get("action") == "create_execution":
             item = db.session.get(ExperimentBatch, undo.get("created_execution_id"))
             if (not item or item.experiment.user_id != current_user.id or item.is_deleted
@@ -6689,8 +8009,27 @@ def ai_assistant():
     return redirect(url_for("main.dashboard", assistant="open"))
 
 
+def _api_preset_query(search=""):
+    query = ApiPreset.query.filter_by(user_id=current_user.id)
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(or_(
+            ApiPreset.name.ilike(pattern), ApiPreset.api_url.ilike(pattern),
+            ApiPreset.text_model.ilike(pattern),
+        ))
+    return query.order_by(
+        ApiPreset.is_default.desc(), ApiPreset.updated_at.desc(), ApiPreset.id.desc(),
+    )
+
+
 def _api_settings_page_context(preset_form=None):
-    presets = _ensure_api_presets()
+    _ensure_api_presets()
+    search = request.args.get("q", "").strip()[:120]
+    pagination, page_size = _paginate(
+        _api_preset_query(search), per_page=DETAIL_PAGE_SIZES[0],
+        per_page_key="per_page", page_sizes=DETAIL_PAGE_SIZES,
+    )
+    presets = pagination.items
     default_form = {
         "name": "",
         "api_url": "",
@@ -6703,6 +8042,11 @@ def _api_settings_page_context(preset_form=None):
         default_form.update(preset_form)
     return {
         "presets": presets,
+        "current_preset": ApiPreset.query.filter_by(
+            user_id=current_user.id, is_default=True, is_enabled=True,
+        ).order_by(ApiPreset.updated_at.desc()).first(),
+        "search": search, "pagination": pagination, "page_size": page_size,
+        "page_sizes": DETAIL_PAGE_SIZES,
         "preset_form": default_form,
         "preset_descriptors": {
             preset.id: describe_model_from_snapshot(
@@ -6711,6 +8055,54 @@ def _api_settings_page_context(preset_form=None):
             for preset in presets
         },
     }
+
+
+@bp.post("/settings/api/bulk")
+@login_required
+def api_preset_bulk():
+    if current_app.config["AI_SETTINGS_ADMIN_ONLY"] and not current_user.is_admin:
+        abort(403)
+    _ensure_api_presets()
+    search = request.form.get("q", "").strip()[:120]
+    selected = _bulk_scope_items(ApiPreset, _api_preset_query(search), "preset_ids")
+    if not selected:
+        flash("请先勾选至少一个 API 预设。", "warning")
+    else:
+        action = request.form.get("action", "update")
+        if action == "delete":
+            removed_default = any(item.is_default for item in selected)
+            for item in selected:
+                db.session.delete(item)
+            db.session.flush()
+            if removed_default:
+                replacement = ApiPreset.query.filter_by(user_id=current_user.id).order_by(
+                    ApiPreset.updated_at.desc(), ApiPreset.id.desc(),
+                ).first()
+                if replacement:
+                    replacement.is_default = True
+            db.session.commit()
+            flash(f"已删除 {len(selected)} 个 API 预设，密钥不会导出。", "success")
+        elif action == "update":
+            enabled = request.form.get("bulk_enabled", "__keep__")
+            warning = request.form.get("bulk_warning", "__keep__")
+            if enabled not in {"__keep__", "enabled", "disabled"}:
+                abort(400)
+            if warning not in {"__keep__", "enabled", "disabled"}:
+                abort(400)
+            for item in selected:
+                if enabled != "__keep__":
+                    item.is_enabled = enabled == "enabled"
+                if warning != "__keep__":
+                    item.sensitive_warning_enabled = warning == "enabled"
+            db.session.commit()
+            flash(f"已批量更新 {len(selected)} 个 API 预设。", "success")
+        else:
+            abort(400)
+    return redirect(url_for(
+        "main.api_settings", q=search,
+        page=request.form.get("page", "1"),
+        per_page=request.form.get("per_page", str(DETAIL_PAGE_SIZES[0])),
+    ))
 
 
 @bp.route("/settings/api", methods=["GET", "POST"])
@@ -6894,15 +8286,18 @@ def seed_demo():
     db.session.flush()
     plan_steps = [
         ExperimentStep(
-            experiment_id=experiment.id, position=1, title="细胞铺板",
+            experiment_id=experiment.id, position=1, title="样本准备与基线确认",
+            description="确认样本状态、纳入标准与基线记录完整。",
             planned_date=today - timedelta(days=2),
         ),
         ExperimentStep(
-            experiment_id=experiment.id, position=2, title="药物处理 24h",
+            experiment_id=experiment.id, position=2, title="干预与观察窗口",
+            description="按研究设计完成候选药物干预并记录观察节点。",
             planned_date=today - timedelta(days=1),
         ),
         ExperimentStep(
-            experiment_id=experiment.id, position=3, title="Western Blot",
+            experiment_id=experiment.id, position=3, title="结果检测与质量复核",
+            description="完成蛋白表达检测，核对质控指标并形成结论。",
             planned_date=today,
         ),
     ]
@@ -6915,11 +8310,32 @@ def seed_demo():
     )
     db.session.add(batch)
     db.session.flush()
-    execution_steps = [BatchStep.from_plan_step(batch.id, step) for step in plan_steps]
-    execution_steps[0].is_done = True
-    execution_steps[0].completed_date = today - timedelta(days=2)
-    execution_steps[1].is_done = True
-    execution_steps[1].completed_date = today - timedelta(days=1)
+    execution_steps = [
+        BatchStep(
+            batch_id=batch.id, position=1, title="细胞铺板",
+            description="按 2×10^5 cells/孔接种。", operator=current_user.name,
+            planned_date=today - timedelta(days=2), is_done=True,
+            completed_date=today - timedelta(days=2),
+        ),
+        BatchStep(
+            batch_id=batch.id, position=2, title="加入候选药物",
+            description="终浓度 5 μM。", operator=current_user.name,
+            planned_date=today - timedelta(days=1), is_done=True,
+            completed_date=today - timedelta(days=1),
+        ),
+        BatchStep(
+            batch_id=batch.id, position=3, title="培养并观察 24h",
+            operator=current_user.name, planned_date=today,
+        ),
+        BatchStep(
+            batch_id=batch.id, position=4, title="裂解并定量蛋白",
+            operator=current_user.name, planned_date=today,
+        ),
+        BatchStep(
+            batch_id=batch.id, position=5, title="Western Blot 检测",
+            operator=current_user.name, planned_date=today + timedelta(days=1),
+        ),
+    ]
     db.session.add_all([
         *execution_steps,
         ExperimentRecord(experiment_id=experiment.id, batch_id=batch.id, record_date=today - timedelta(days=1), operator=current_user.name,

@@ -1,18 +1,17 @@
 <!doctype html>
-<html lang="zh-CN" data-theme="{{ appearance.theme }}" data-mode="{{ appearance.color_mode }}">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=1180">
-  <meta name="theme-color" content="#f3f5f7">
+  <meta name="theme-color" content="#f2f2ef">
   <meta name="csrf-token" content="{{ csrf_token() }}">
   <title>{% block title %}科研助手{% endblock %} · R/LAB</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/tokens.css', v=config.APP_VERSION) }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v=config.APP_VERSION) }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/themes.css', v=config.APP_VERSION) }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/assistant.css', v=config.APP_VERSION) }}">
   <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" defer></script>
 </head>
-<body class="{% if not current_user.is_authenticated %}auth-body{% endif %}{% if appearance.background_url %} has-custom-background{% endif %}" data-assistant-page-type="{{ assistant_page.type }}" data-assistant-page-id="{{ assistant_page.id or '' }}"{% if current_user.is_authenticated %} data-update-check-url="{{ url_for('updates.check') }}"{% endif %}{% if appearance.background_url %} style="--workspace-background-image: url('{{ appearance.background_url }}')"{% endif %}>
+<body class="{% if not current_user.is_authenticated %}auth-body{% endif %}" data-assistant-page-type="{{ assistant_page.type }}" data-assistant-page-id="{{ assistant_page.id or '' }}"{% if current_user.is_authenticated %} data-update-check-url="{{ url_for('updates.check') }}"{% endif %}>
 {% if current_user.is_authenticated %}
   <aside class="sidebar" id="sidebar">
     <a class="brand" href="{{ url_for('main.dashboard') }}" aria-label="返回首页">
@@ -22,12 +21,12 @@
       <div class="nav-group">
         <small class="nav-group-label">工作</small>
         <a href="{{ url_for('main.dashboard') }}" class="{{ 'active' if request.endpoint == 'main.dashboard' }}"><i data-lucide="layout-dashboard"></i><span>总览</span></a>
-        <a href="{{ url_for('workspace.projects') }}" class="{{ 'active' if request.endpoint in ['workspace.projects', 'workspace.project_detail', 'main.experiments', 'main.experiment_detail', 'main.record_detail', 'main.step_edit', 'workspace.batch_detail'] }}"><i data-lucide="panels-top-left"></i><span>实验台</span></a>
+        <a href="{{ url_for('main.experiments') }}" class="{{ 'active' if request.endpoint in ['main.experiments', 'main.experiment_detail', 'main.record_detail', 'main.step_edit', 'workspace.batch_detail'] }}"><i data-lucide="panels-top-left"></i><span>实验计划</span></a>
         <a href="{{ url_for('main.tasks') }}" class="{{ 'active' if request.endpoint in ['main.tasks', 'main.task_edit'] }}"><i data-lucide="check-square-2"></i><span>任务</span></a>
       </div>
       <div class="nav-group">
         <small class="nav-group-label">资料</small>
-        <a href="{{ url_for('main.experiment_report_index') }}" class="{{ 'active' if request.endpoint in ['main.experiment_report_index', 'main.experiment_reports', 'main.file_center', 'main.experiment_files'] }}"><i data-lucide="library-big"></i><span>报告与文件</span></a>
+        <a href="{{ url_for('main.experiment_report_index') }}" class="{{ 'active' if request.endpoint in ['main.experiment_report_index', 'main.experiment_report_export_preview', 'main.experiment_reports', 'main.file_center', 'main.experiment_files'] }}"><i data-lucide="library-big"></i><span>报告与文件</span></a>
         <a href="{{ url_for('main.presentation_report') }}" class="{{ 'active' if request.endpoint in ['main.presentation_report', 'main.weekly_report_upload', 'main.weekly_report_update', 'main.weekly_report_update_add'] }}"><i data-lucide="calendar-days"></i><span>周报</span></a>
       </div>
       <div class="nav-group">
@@ -52,42 +51,6 @@
       <a href="https://github.com/weideai/research-assistant" target="_blank" rel="noopener noreferrer" title="打开项目 GitHub 仓库" aria-label="打开项目 GitHub 仓库"><i data-lucide="github"></i></a>
     </div>
   </aside>
-  <button class="appearance-launch icon-btn" id="appearance-toggle" type="button" title="外观设置" aria-label="打开外观设置"><i data-lucide="palette"></i></button>
-  <dialog class="appearance-dialog" id="appearance-dialog" aria-labelledby="appearance-title">
-    <div class="appearance-dialog-head">
-      <div><p class="eyebrow">APPEARANCE</p><h2 id="appearance-title">外观设置</h2></div>
-      <button class="icon-btn" id="appearance-close" type="button" aria-label="关闭外观设置"><i data-lucide="x"></i></button>
-    </div>
-    <form method="post" action="{{ url_for('main.appearance_settings') }}" enctype="multipart/form-data" class="appearance-form" id="appearance-form">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
-      <fieldset class="theme-fieldset">
-        <legend>界面风格</legend>
-        <div class="theme-options">
-          {% for value, label in [('research','科研'),('tech','科技'),('minimal','极简'),('cute','可爱')] %}
-          <label class="theme-option">
-            <input type="radio" name="theme" value="{{ value }}" {{ 'checked' if appearance.theme == value }}>
-            <span class="theme-preview theme-preview-{{ value }}" aria-hidden="true"><i></i><i></i><i></i></span>
-            <b>{{ label }}</b>
-          </label>
-          {% endfor %}
-        </div>
-      </fieldset>
-      <label class="mode-control" for="dark-mode-toggle">
-        <span><i data-lucide="moon"></i><b>夜间模式</b></span>
-        <input id="dark-mode-toggle" type="checkbox" name="dark_mode" value="1" {{ 'checked' if appearance.color_mode == 'dark' }}>
-      </label>
-      <div class="background-control">
-        <div class="background-preview{% if appearance.background_url %} has-image{% endif %}" id="background-preview"{% if appearance.background_url %} style="background-image: url('{{ appearance.background_url }}')"{% endif %}><i data-lucide="image"></i></div>
-        <label class="background-file">背景图片<input id="background-input" type="file" name="background" accept="image/png,image/jpeg,image/webp"><small>PNG、JPEG 或 WebP，最大 5 MB</small></label>
-      </div>
-      <div class="appearance-actions">
-        <button class="btn ghost" name="action" value="reset"><i data-lucide="rotate-ccw"></i> 恢复默认</button>
-        {% if appearance.background_url %}<button class="btn secondary" name="action" value="clear_background"><i data-lucide="image-off"></i> 清除背景</button>{% endif %}
-        <button class="btn primary" name="action" value="save"><i data-lucide="save"></i> 保存外观</button>
-      </div>
-    </form>
-  </dialog>
   <main class="main-shell">
 {% else %}
   <main>
@@ -95,9 +58,9 @@
     {% if current_user.is_authenticated %}
     {% set workspace_page_label = '科研工作区' %}
     {% if request.endpoint == 'main.dashboard' %}{% set workspace_page_label = '首页' %}
-    {% elif request.endpoint in ['workspace.projects', 'workspace.project_detail', 'main.experiments', 'main.experiment_detail', 'workspace.batch_detail', 'main.record_detail', 'main.step_edit'] %}{% set workspace_page_label = '实验台' %}
+    {% elif request.endpoint in ['main.experiments', 'main.experiment_detail', 'workspace.batch_detail', 'main.record_detail', 'main.step_edit'] %}{% set workspace_page_label = '实验计划' %}
     {% elif request.endpoint in ['main.tasks', 'main.task_edit'] %}{% set workspace_page_label = '任务' %}
-    {% elif request.endpoint in ['main.experiment_report_index', 'main.experiment_reports', 'main.file_center', 'main.experiment_files'] %}{% set workspace_page_label = '报告与文件' %}
+    {% elif request.endpoint in ['main.experiment_report_index', 'main.experiment_report_export_preview', 'main.experiment_reports', 'main.file_center', 'main.experiment_files'] %}{% set workspace_page_label = '报告与文件' %}
     {% elif request.endpoint == 'main.presentation_report' %}{% set workspace_page_label = '周报' %}
     {% elif request.endpoint in ['main.template_center', 'main.experiment_template_detail', 'main.record_template_detail'] %}{% set workspace_page_label = '模板中心' %}
     {% elif request.endpoint in ['main.samples', 'main.sample_edit'] %}{% set workspace_page_label = '物品管理' %}
@@ -148,26 +111,63 @@
     <div class="ai-workspace">
       <aside class="ai-conversation-sidebar" id="ai-conversation-sidebar" aria-label="历史聊天">
         <div class="ai-conversation-sidebar-head">
-          <div><b>历史聊天</b><small>最多显示最近 100 个会话</small></div>
+          <div><b>历史聊天</b><small id="ai-conversation-total">0 个会话</small></div>
           <button class="icon-btn" id="ai-new-chat-side" type="button" title="新建对话" aria-label="新建对话"><i data-lucide="plus"></i></button>
         </div>
         <label class="ai-conversation-search"><i data-lucide="search"></i><input id="ai-conversation-search" type="search" placeholder="搜索会话" aria-label="搜索历史聊天"></label>
+        <div class="ai-conversation-page-tools"><label title="全选本页"><input id="ai-conversation-select-page" type="checkbox"> 本页</label><button id="ai-conversation-select-matches" type="button">筛选全部</button><select id="ai-conversation-per-page" aria-label="每页会话数量"><option value="8">8 / 页</option><option value="16">16 / 页</option><option value="32">32 / 页</option></select></div>
+        <details class="ai-conversation-bulk" id="ai-conversation-bulk"><summary><span><i data-lucide="list-checks"></i>批量管理</span><small id="ai-conversation-selected">已选择 0 个</small></summary><div><select id="ai-conversation-title-mode" aria-label="会话名称批量操作"><option value="keep">名称不变</option><option value="prefix">添加前缀</option><option value="suffix">添加后缀</option></select><input id="ai-conversation-title-value" maxlength="80" placeholder="名称前缀或后缀"><span><button id="ai-conversation-bulk-save" type="button" disabled><i data-lucide="save"></i>保存</button><button id="ai-conversation-bulk-delete" type="button" disabled><i data-lucide="trash-2"></i>删除</button></span></div></details>
         <div class="ai-conversation-list" id="ai-conversation-list"><p>打开助手后加载历史聊天</p></div>
+        <nav class="ai-conversation-pagination" aria-label="历史会话翻页"><button id="ai-conversation-prev" type="button" title="上一页" aria-label="上一页"><i data-lucide="chevron-left"></i></button><span id="ai-conversation-page">第 1 / 1 页</span><button id="ai-conversation-next" type="button" title="下一页" aria-label="下一页"><i data-lucide="chevron-right"></i></button></nav>
       </aside>
       <div class="ai-chat-pane">
-        <div class="ai-context-bar" id="ai-context-bar"><span class="ai-context-copy"><i data-lucide="database"></i><span id="ai-context-label">可检索本地项目、实验批次、过程记录与附件说明</span></span><span class="ai-context-state" id="ai-context-state">当前页面</span></div>
-        <details class="ai-config-panel" id="ai-config-panel">
-          <summary><span><i data-lucide="library-big"></i><b>知识库与助手设置</b></span><small id="ai-knowledge-count">未选择知识库</small></summary>
+        <div class="ai-source-launchers" id="ai-context-bar">
+          <button class="ai-source-launcher" id="ai-experiment-source-open" type="button"><span class="ai-source-launcher-icon"><i data-lucide="flask-conical"></i></span><span><b>实验资料</b><small id="ai-history-count">计划、批次与记录</small></span><i data-lucide="arrow-up-right"></i></button>
+          <button class="ai-source-launcher" id="ai-knowledge-source-open" type="button"><span class="ai-source-launcher-icon"><i data-lucide="library-big"></i></span><span><b>知识库</b><small id="ai-knowledge-count">本地文档与使用说明</small></span><i data-lucide="arrow-up-right"></i></button>
+        </div>
+        <section class="ai-context-page" id="ai-context-page" aria-label="AI 资料选择" hidden>
+          <header class="ai-context-page-head" data-ai-context-drag-handle>
+            <span class="ai-context-page-icon"><i data-lucide="database"></i></span>
+            <div><span class="eyebrow">AI CONTEXT</span><h2 id="ai-context-page-title">资料选择</h2><p id="ai-context-page-description">限定本次对话可读取的本地资料。</p></div>
+            <button class="icon-btn" id="ai-context-page-close" type="button" title="关闭选择窗口" aria-label="关闭选择窗口"><i data-lucide="x"></i></button>
+          </header>
+          <div class="ai-context-page-scroll">
+        <details class="ai-config-panel" id="ai-config-panel" open>
+          <summary><span><i data-lucide="library-big"></i><b>知识库与助手设置</b></span><small>选择、检索和管理</small></summary>
           <div class="ai-config-scroll">
             <section class="ai-setting-section">
               <div class="ai-setting-head"><b>本次对话使用的知识库</b><button type="button" id="ai-refresh-knowledge">刷新</button></div>
+              <div class="ai-knowledge-toolbar">
+                <label class="ai-knowledge-search"><i data-lucide="search"></i><input id="ai-knowledge-search" type="search" maxlength="120" placeholder="搜索名称、说明或文档" aria-label="搜索知识库"></label>
+                <select id="ai-knowledge-per-page" aria-label="每页知识库数量"><option value="8">8 / 页</option><option value="16">16 / 页</option><option value="32">32 / 页</option></select>
+              </div>
+              <div class="ai-knowledge-page-tools">
+                <label title="全选本页知识库"><input id="ai-knowledge-select-page" type="checkbox"> 全选本页</label>
+                <button id="ai-knowledge-select-matches" type="button">选择筛选全部</button>
+                <small id="ai-knowledge-total">0 个知识库</small>
+              </div>
+              <details class="ai-knowledge-bulk" id="ai-knowledge-bulk">
+                <summary><span><i data-lucide="list-checks"></i>批量管理知识库</span><small id="ai-knowledge-selected">已选择 0 个</small></summary>
+                <div class="ai-knowledge-bulk-fields">
+                  <label><span>启用状态</span><select id="ai-knowledge-bulk-enabled"><option value="__keep__">保持不变</option><option value="enabled">启用</option><option value="disabled">停用</option></select></label>
+                  <label><span>用途说明</span><select id="ai-knowledge-description-mode"><option value="keep">保持不变</option><option value="append">追加</option><option value="replace">替换</option><option value="clear">清空</option></select></label>
+                  <input id="ai-knowledge-description-value" maxlength="10000" placeholder="用途说明内容">
+                  <label><span>使用说明</span><select id="ai-knowledge-instruction-mode"><option value="keep">保持不变</option><option value="append">追加</option><option value="replace">替换</option><option value="clear">清空</option></select></label>
+                  <textarea id="ai-knowledge-instruction-value" rows="2" maxlength="12000" placeholder="知识库使用说明内容"></textarea>
+                  <div class="ai-knowledge-bulk-actions"><button id="ai-knowledge-bulk-save" class="btn" type="button" disabled><i data-lucide="save"></i>保存修改</button><button id="ai-knowledge-bulk-delete" class="btn danger" type="button" disabled><i data-lucide="trash-2"></i>批量删除</button></div>
+                </div>
+              </details>
               <div class="ai-knowledge-list" id="ai-knowledge-list"><p>打开助手后加载知识库</p></div>
-              <form class="ai-inline-form" id="ai-knowledge-create-form">
-                <input name="name" maxlength="160" placeholder="新知识库名称" required>
-                <input name="description" placeholder="用途说明（可选）">
-                <textarea name="custom_instructions" rows="2" placeholder="仅对此知识库生效的使用说明（可选）"></textarea>
-                <button class="btn" type="submit"><i data-lucide="plus"></i>创建知识库</button>
-              </form>
+              <nav class="ai-knowledge-pagination" aria-label="知识库翻页"><button id="ai-knowledge-prev" type="button" title="上一页" aria-label="知识库上一页"><i data-lucide="chevron-left"></i></button><span id="ai-knowledge-page">第 1 / 1 页</span><button id="ai-knowledge-next" type="button" title="下一页" aria-label="知识库下一页"><i data-lucide="chevron-right"></i></button></nav>
+              <details class="ai-knowledge-create">
+                <summary><i data-lucide="plus"></i>新建知识库</summary>
+                <form class="ai-inline-form" id="ai-knowledge-create-form">
+                  <input name="name" maxlength="160" placeholder="新知识库名称" required>
+                  <input name="description" placeholder="用途说明（可选）">
+                  <textarea name="custom_instructions" rows="2" placeholder="仅对此知识库生效的使用说明（可选）"></textarea>
+                  <button class="btn" type="submit"><i data-lucide="plus"></i>创建知识库</button>
+                </form>
+              </details>
             </section>
             <section class="ai-setting-section">
               <div class="ai-setting-head"><b>科研助手提示词</b><small id="ai-prompt-status">使用默认提示词</small></div>
@@ -179,11 +179,19 @@
             </section>
           </div>
         </details>
-        <details class="ai-history-scope" id="ai-history-scope">
-          <summary><span><i data-lucide="list-filter"></i><b>选择实验计划与批次</b></span><small id="ai-history-count">未选择</small></summary>
-          <div class="ai-history-tools"><button type="button" id="ai-select-current">仅当前范围</button><button type="button" id="ai-select-all">全选</button><button type="button" id="ai-clear-selection">清空</button></div>
-          <div class="ai-history-list" id="ai-history-list"><p>打开助手后加载实验计划与批次</p></div>
+        <details class="ai-history-scope" id="ai-history-scope" open>
+          <summary><span><i data-lucide="list-filter"></i><b>选择实验计划、批次与记录</b></span><small>限定 AI 读取范围</small></summary>
+          <div class="ai-history-query">
+            <label><i data-lucide="search"></i><input id="ai-history-search" type="search" placeholder="搜索计划、批次或实验记录" aria-label="搜索实验计划、批次或实验记录"></label>
+            <select id="ai-history-level" aria-label="筛选实验目录层级"><option value="all">全部层级</option><option value="experiment">实验计划</option><option value="batch">实验批次</option><option value="record">实验记录</option></select>
+            <select id="ai-history-per-page" aria-label="每页实验计划数量"><option value="8">8 / 页</option><option value="16">16 / 页</option><option value="32">32 / 页</option></select>
+          </div>
+          <div class="ai-history-tools"><button type="button" id="ai-select-current">仅当前范围</button><button type="button" id="ai-select-all">全选结果</button><button type="button" id="ai-clear-selection">清空</button><span id="ai-history-results" aria-live="polite"></span></div>
+          <div class="ai-history-list" id="ai-history-list"><p>打开助手后加载实验计划、批次与记录</p></div>
+          <nav class="ai-history-pagination" aria-label="实验计划目录翻页"><button id="ai-history-prev" type="button" title="上一页" aria-label="实验计划上一页"><i data-lucide="chevron-left"></i></button><span id="ai-history-page">第 1 / 1 页</span><button id="ai-history-next" type="button" title="下一页" aria-label="实验计划下一页"><i data-lucide="chevron-right"></i></button></nav>
         </details>
+          </div>
+        </section>
         <div class="ai-messages" id="ai-messages" aria-live="polite">
           <div class="ai-welcome">
             <span class="ai-welcome-mark"><i data-lucide="sparkles"></i></span>

@@ -63,10 +63,10 @@ def _iter_rule_blocks(text):
 
 
 def _resolved_theme_palettes():
-    """Resolve each theme block against the base :root block.
+    """Return the palettes defined by the token layer.
 
-    Theme blocks only override what differs, so a naive per-block read misses
-    inherited values. Every palette here is what the browser actually computes.
+    The application now has one fixed palette. Retaining this parser keeps the
+    contrast tests useful while making any reintroduced theme selector visible.
     """
     blocks = list(_iter_rule_blocks(TOKENS_CSS.read_text(encoding="utf-8")))
 
@@ -96,7 +96,7 @@ def _resolved_theme_palettes():
 
 
 def _theme_palettes():
-    """(selector, muted, bg, surface) for every resolved theme."""
+    """(selector, muted, bg, surface) for the fixed palette."""
     out = []
     for selector, tokens in _resolved_theme_palettes():
         if all(key in tokens for key in ("--muted", "--bg", "--surface")):
@@ -104,8 +104,18 @@ def _theme_palettes():
     return out
 
 
+def _sidebar_palettes():
+    """(selector, sidebar ink, sidebar muted, sidebar background)."""
+    out = []
+    for selector, tokens in _resolved_theme_palettes():
+        keys = ("--sidebar-ink", "--sidebar-muted", "--sidebar")
+        if all(key in tokens for key in keys):
+            out.append((selector, *(tokens[key] for key in keys)))
+    return out
+
+
 def _ink_pairs():
-    """(selector, semantic, ink, soft) for every semantic colour in every theme."""
+    """(selector, semantic, ink, soft) for every semantic colour."""
     pairs = []
     for selector, tokens in _resolved_theme_palettes():
         for name in SEMANTICS:
@@ -115,13 +125,20 @@ def _ink_pairs():
     return pairs
 
 
-def test_every_theme_declares_a_full_palette():
-    """4 themes x (light, dark) = 8 palettes. A missing one silently skips a check."""
+def test_only_the_fixed_palette_is_declared():
     palettes = _theme_palettes()
-    assert len(palettes) >= 8, (
-        f"只解析到 {len(palettes)} 个调色板，预期至少 8 个"
-        f"（research/tech/minimal/cute 各有亮色与暗色）：{[p[0] for p in palettes]}"
-    )
+    assert [palette[0] for palette in palettes] == [":root"]
+
+
+@pytest.mark.parametrize("selector,ink,muted,background", _sidebar_palettes())
+def test_sidebar_text_meets_wcag_aa(selector, ink, muted, background):
+    """A light sidebar must not inherit white text from the former dark shell."""
+    for role, foreground in (("--sidebar-ink", ink), ("--sidebar-muted", muted)):
+        achieved = contrast_ratio(foreground, background)
+        assert achieved >= MIN_CONTRAST, (
+            f"{selector}: {role} {foreground} 在 --sidebar {background} 上只有 "
+            f"{achieved:.2f}:1，未达 {MIN_CONTRAST}:1"
+        )
 
 
 @pytest.mark.parametrize("selector,name,ink,soft", _ink_pairs())
@@ -134,7 +151,7 @@ def test_semantic_ink_grade_is_readable_on_its_own_soft_background(selector, nam
     )
 
 
-def test_every_theme_defines_both_grades_for_every_semantic_colour():
+def test_fixed_palette_defines_both_grades_for_every_semantic_colour():
     """A missing -ink token silently falls back to the unreadable fill grade."""
     gaps = []
     for selector, tokens in _resolved_theme_palettes():
@@ -146,13 +163,11 @@ def test_every_theme_defines_both_grades_for_every_semantic_colour():
     assert not gaps, "语义色档位不完整：" + "; ".join(gaps)
 
 
-# The theme picker swatches must render each theme's real colours while a different
-# theme is active, so they are the one place literal hex belongs outside tokens.css.
-LITERAL_HEX_ALLOWED_MARKERS = (".theme-preview",)
+LITERAL_HEX_ALLOWED_MARKERS = ()
 
 
 def test_no_literal_hex_outside_the_token_layer():
-    """Hard-coded colours ignore the active theme, so they break on theme switch."""
+    """Component colours must stay sourced from the shared token layer."""
     offenders = []
     for path in (APP_CSS, THEMES_CSS, CSS_DIR / "assistant.css"):
         if not path.exists():
@@ -180,9 +195,7 @@ def test_token_layer_defines_no_malformed_colour():
     assert not malformed, "tokens.css 存在非法颜色值：" + ", ".join(malformed)
 
 
-# Same reasoning as the hex exemption: the swatches are miniature mockups of other
-# themes, so their corners must not follow the active theme's radius.
-LITERAL_RADIUS_ALLOWED_MARKERS = (".theme-preview",)
+LITERAL_RADIUS_ALLOWED_MARKERS = ()
 RADIUS_MIN_STEP_PX = 2
 # design.md 05 pins exactly these three steps plus the pill.
 RADIUS_SCALE_STEPS = ("--radius-sm", "--radius-md", "--radius-lg")
@@ -190,7 +203,7 @@ RADIUS_ALIASES = ("--radius-panel", "--radius-control")
 
 
 def _resolved_radius_scales():
-    """(selector, {token: px}) per theme, with var() aliases followed to a number."""
+    """(selector, {token: px}), with var() aliases followed to a number."""
     blocks = list(_iter_rule_blocks(TOKENS_CSS.read_text(encoding="utf-8")))
 
     def declarations(body):
@@ -202,7 +215,7 @@ def _resolved_radius_scales():
             base.update(declarations(body))
 
     def resolve(tokens, raw, hops=4):
-        """A theme aliases --radius-panel to a scale step; follow it to the pixels."""
+        """Follow a radius alias to its pixel value."""
         for _ in range(hops):
             reference = re.fullmatch(r"var\((--radius-[a-z0-9-]+)\)", raw.strip())
             if not reference:
@@ -235,8 +248,7 @@ def test_radius_scale_steps_stay_visually_distinguishable():
     )
 
 
-def test_every_theme_defines_both_radius_aliases():
-    """A theme missing an alias silently inherits the default softness."""
+def test_fixed_palette_defines_both_radius_aliases():
     gaps = []
     for selector, scale in _resolved_radius_scales():
         for alias in RADIUS_ALIASES:
@@ -311,6 +323,30 @@ def test_page_shell_uses_the_pinned_inline_and_bottom_spacing():
     assert not incorrect, "页面应使用 32px 顶部、--page-inline 左右、64px 底部间距"
 
 
+def test_focus_styles_follow_the_active_theme_colour():
+    """A hard-coded blue focus halo survives a palette switch and looks broken."""
+    css = APP_CSS.read_text(encoding="utf-8")
+    assert "rgba(33, 102, 243" not in css
+    assert re.search(
+        r":where\(a, button, input, textarea, select, summary\):focus-visible\s*"
+        r"\{[^}]*box-shadow:\s*var\(--focus-ring\)",
+        css,
+    ), "可聚焦控件应统一使用主题感知的 --focus-ring"
+
+
+def test_experiment_snapshot_keeps_a_spacious_desktop_hierarchy():
+    css = APP_CSS.read_text(encoding="utf-8")
+    expected = (
+        r"\.experiment-snapshot-content\s*\{[^}]*padding:\s*28px",
+        r"\.experiment-snapshot-metrics\s*>\s*div\s*\{[^}]*min-height:\s*96px",
+        r"\.experiment-plan-strip\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)",
+        r"\.experiment-plan-strip\s*>\s*li\s*\{[^}]*min-height:\s*116px",
+        r"\.snapshot-record-row,\s*\.snapshot-file-row\s*\{[^}]*padding:\s*14px\s+0",
+    )
+    missing = [pattern for pattern in expected if not re.search(pattern, css)]
+    assert not missing, "实验工作台重新变得拥挤，缺少宽松布局约束：" + "; ".join(missing)
+
+
 # Blocks that sit directly inside a .panel and set their own inline padding.
 #
 # This list is hand-curated and that is a known limitation: which blocks are
@@ -357,25 +393,12 @@ def test_panel_head_aligns_with_the_panel_body_family():
     )
 
 
-def test_themes_do_not_restate_component_radius():
-    """Per-component radius per theme is what produced the 11-value sprawl.
-
-    Themes retune corners through --radius-panel / --radius-control in tokens.css;
-    a border-radius under an html[data-theme=...] selector means that broke down.
-    """
-    offenders = []
-    for selector, body in _iter_rule_blocks(THEMES_CSS.read_text(encoding="utf-8")):
-        if "html[data-theme" not in selector or "border-radius" not in body:
-            continue
-        offenders.append(" ".join(selector.split())[:70])
-    assert not offenders, (
-        "以下主题规则仍在逐组件声明圆角，应改为覆盖 --radius-panel / --radius-control："
-        + "; ".join(offenders)
-    )
+def test_retired_theme_stylesheet_is_not_restored():
+    assert not THEMES_CSS.exists()
 
 
 @pytest.mark.parametrize("selector,muted,bg,surface", _theme_palettes())
-def test_muted_text_meets_wcag_aa_on_every_theme(selector, muted, bg, surface):
+def test_muted_text_meets_wcag_aa(selector, muted, bg, surface):
     """--muted carries nearly all secondary copy, so it must clear AA everywhere."""
     on_bg = contrast_ratio(muted, bg)
     on_surface = contrast_ratio(muted, surface)

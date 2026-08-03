@@ -8,12 +8,14 @@ from openpyxl import load_workbook
 
 from app import db
 from app.models import (
+    BatchStep,
     Experiment,
     ExperimentAttachment,
     ExperimentBatch,
     ExperimentParameter,
     ExperimentRecord,
     RecordParameter,
+    ResearchProject,
 )
 
 
@@ -289,6 +291,187 @@ def test_record_word_export_honours_the_selected_report_template(client, auth, a
     assert len(set(rendered.values())) == len(REPORT_TEMPLATE_FINGERPRINTS)
 
 
+def test_record_report_page_word_and_pdf_include_batch_execution_steps(client, auth, app):
+    experiment_id = _create_complete_experiment(client, auth, app)
+    with app.app_context():
+        batch = ExperimentBatch.query.filter_by(
+            experiment_id=experiment_id, batch_code="BATCH-A",
+        ).one()
+        db.session.add(BatchStep(
+            batch_id=batch.id,
+            position=1,
+            title="本批次裂解并定量",
+            description="使用本批次校准后的裂解条件。",
+            operator="执行研究员",
+            planned_date=date(2026, 7, 21),
+            completed_date=date(2026, 7, 21),
+            is_done=True,
+        ))
+        record = ExperimentRecord.query.filter_by(result="BATCH-A-RESULT").one()
+        record_id = record.id
+        db.session.commit()
+
+    page = client.get(f"/experiments/{experiment_id}/reports?record_id={record_id}")
+    assert page.status_code == 200
+    assert "本批次实验步骤".encode() in page.data
+    assert "本批次裂解并定量".encode() in page.data
+    assert "实际执行记录".encode() in page.data
+    assert "独立执行快照".encode() not in page.data
+
+    word = client.get(f"/records/{record_id}/export?format=docx")
+    assert word.status_code == 200
+    document_xml = _docx_xml(word.data)
+    assert "本批次实验步骤" in document_xml
+    assert "本批次裂解并定量" in document_xml
+    assert "已完成" in document_xml
+
+    pdf = client.get(f"/records/{record_id}/export?format=pdf")
+    assert pdf.status_code == 200
+    assert pdf.data.startswith(b"%PDF")
+
+
+def test_selected_project_reports_are_previewed_before_export(client, auth, app):
+    experiment_id = _create_complete_experiment(client, auth, app)
+    with app.app_context():
+        experiment = db.session.get(Experiment, experiment_id)
+        project = ResearchProject(
+            user_id=experiment.user_id,
+            title="细胞应答项目",
+            code="PROJ-REPORT",
+        )
+        db.session.add(project)
+        db.session.flush()
+        experiment.project_id = project.id
+        project_id = project.id
+        batch = ExperimentBatch.query.filter_by(
+            experiment_id=experiment_id, batch_code="BATCH-A",
+        ).one()
+        db.session.add(BatchStep(
+            batch_id=batch.id,
+            position=1,
+            title="预览中的裂解步骤",
+            description="核对预览和导出内容一致。",
+            operator="执行研究员",
+            planned_date=date(2026, 7, 21),
+            completed_date=date(2026, 7, 21),
+            is_done=True,
+        ))
+        selected_record = ExperimentRecord.query.filter_by(result="BATCH-A-RESULT").one()
+        unselected_record = ExperimentRecord.query.filter_by(result="BATCH-B-RESULT").one()
+        selected_record_id = selected_record.id
+        unselected_record_id = unselected_record.id
+        db.session.commit()
+
+    index = client.get(f"/experiment-reports?project_id={project_id}")
+    assert index.status_code == 200
+    assert b'action="/experiment-reports/export-preview"' in index.data
+    assert b"data-bulk-select-all-matches" in index.data
+    assert "选择当前筛选全部".encode() in index.data
+    assert "预览所选报告".encode() in index.data
+    assert f'/projects/{project_id}/reports/export'.encode() not in index.data
+    assert index.data.count(b'name="record_ids"') == 3
+
+    preview = client.post("/experiment-reports/export-preview", data={
+        "selection_scope": "page",
+        "record_ids": [str(selected_record_id)],
+        "project_id": str(project_id),
+        "q": "",
+        "page": "1",
+        "per_page": "10",
+    })
+    assert preview.status_code == 200
+    assert "批量报告预览".encode() in preview.data
+    assert "已载入 1 份实验报告".encode() in preview.data
+    assert "预览中的裂解步骤".encode() in preview.data
+    assert "核对预览和导出内容一致".encode() in preview.data
+    assert b"BATCH-A-RESULT" in preview.data
+    assert b"BATCH-B-RESULT" not in preview.data
+    assert f'name="record_ids" value="{selected_record_id}"'.encode() in preview.data
+    assert f'name="record_ids" value="{unselected_record_id}"'.encode() not in preview.data
+    assert "确认导出 1 份报告".encode() in preview.data
+
+    response = client.post("/experiment-reports/export-selected", data={
+        "record_ids": [str(selected_record_id)],
+        "format": "docx",
+        "report_template": "notebook",
+        "return_url": f"/experiment-reports?project_id={project_id}",
+    })
+    assert response.status_code == 200
+    assert response.mimetype == "application/zip"
+    with zipfile.ZipFile(io.BytesIO(response.data)) as archive:
+        names = archive.namelist()
+        report_names = [name for name in names if name.endswith(".docx")]
+        assert "导出说明.txt" in names
+        assert len(report_names) == 1
+        assert report_names[0].startswith(
+            "PROJ-REPORT-细胞应答项目/EXP-EXPORT-01-药物处理后 WB 验证/"
+        )
+        assert f"R-{selected_record_id}.docx" in report_names[0]
+        manifest = archive.read("导出说明.txt").decode("utf-8-sig")
+        assert "细胞应答项目" in manifest
+        assert "报告数量：1" in manifest
+        assert f"R-{selected_record_id}" in manifest
+        assert f"R-{unselected_record_id}" not in manifest
+        parts = _docx_parts(archive.read(report_names[0]))
+        header = "".join(markup for name, markup in parts.items() if "header" in name)
+        assert "LAB NOTEBOOK" in header
+
+    legacy = client.get(f"/projects/{project_id}/reports/export?format=docx")
+    assert legacy.status_code == 302
+    assert legacy.headers["Location"].endswith(f"/experiment-reports?project_id={project_id}")
+
+
+def test_report_preview_can_select_all_filtered_matches_and_rejects_foreign_ids(client, auth, app):
+    experiment_id = _create_complete_experiment(client, auth, app)
+    with app.app_context():
+        experiment = db.session.get(Experiment, experiment_id)
+        project = ResearchProject(
+            user_id=experiment.user_id,
+            title="筛选导出项目",
+            code="FILTERED",
+        )
+        db.session.add(project)
+        db.session.flush()
+        experiment.project_id = project.id
+        project_id = project.id
+        selected_record_id = ExperimentRecord.query.filter_by(result="BATCH-A-RESULT").one().id
+        db.session.commit()
+
+    preview = client.post("/experiment-reports/export-preview", data={
+        "selection_scope": "all",
+        "project_id": str(project_id),
+        "q": "BATCH-A-RESULT",
+        "page": "1",
+        "per_page": "10",
+    })
+    assert preview.status_code == 200
+    assert "当前筛选全部结果".encode() in preview.data
+    assert "已载入 1 份实验报告".encode() in preview.data
+    assert b"BATCH-A-RESULT" in preview.data
+    assert b"BATCH-B-RESULT" not in preview.data
+
+    no_selection = client.post("/experiment-reports/export-preview", data={
+        "selection_scope": "page",
+        "project_id": str(project_id),
+    })
+    assert no_selection.status_code == 302
+    assert no_selection.headers["Location"].endswith(
+        f"/experiment-reports?project_id={project_id}"
+    )
+
+    auth.logout()
+    auth.register(email="other-project-user@example.com")
+    assert client.post("/experiment-reports/export-preview", data={
+        "selection_scope": "page",
+        "record_ids": [str(selected_record_id)],
+    }).status_code == 404
+    assert client.post("/experiment-reports/export-selected", data={
+        "record_ids": [str(selected_record_id)],
+        "format": "docx",
+    }).status_code == 404
+    assert client.get(f"/projects/{project_id}/reports/export?format=docx").status_code == 404
+
+
 def test_experiment_file_index_collects_local_files_and_filters_metadata(client, auth, app):
     experiment_id = _create_complete_experiment(client, auth, app)
     response = client.get(f"/experiments/{experiment_id}/files?q=raw")
@@ -376,7 +559,8 @@ def test_excel_export_has_execution_sheet_and_execution_code_on_record_rows(clie
     assert "实验批次" in sheets
     assert "过程记录" in sheets
     assert len(sheets) == 9
-    assert "批次步骤" in sheets
+    assert "方案阶段" in sheets
+    assert "实验步骤" in sheets
     assert "批次编号" in sheets["过程记录"][0]
     execution_code_column = sheets["过程记录"][0].index("批次编号")
     execution_codes = {row[execution_code_column] for row in sheets["过程记录"][1:]}

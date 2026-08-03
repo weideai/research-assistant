@@ -14,7 +14,6 @@
 {% endmacro %}
 {% block title %}API 预设{% endblock %}
 {% block content %}
-{% set current_preset = presets|selectattr('is_default')|selectattr('is_enabled')|first %}
 <header class="page-head api-page-head">
   <div><p class="eyebrow">AI CONNECTIONS</p><h1>API 预设</h1><p class="muted">保存多个 OpenAI-compatible 连接，拉取模型后直接选择当前模型。</p></div>
   <span class="badge large {{ 'api-on' if current_preset else '' }}"><i data-lucide="{{ 'wifi' if current_preset else 'wifi-off' }}"></i>{{ current_preset.name if current_preset else '尚未选择预设' }}</span>
@@ -27,12 +26,17 @@
 </section>
 
 <section class="panel api-preset-panel" data-model-discovery-url="{{ url_for('main.api_models_discover') }}">
-  <div class="panel-head"><div><p class="eyebrow">PRESETS</p><h2>连接预设</h2></div><span class="count-label">{{ presets|length }} 个</span></div>
+  <div class="panel-head"><div><p class="eyebrow">PRESETS</p><h2>连接预设</h2></div><span class="count-label">{{ pagination.total }} 个匹配预设</span></div>
+  <form method="get" class="api-preset-filter"><label class="grow"><span>查找预设</span><input name="q" value="{{ search }}" placeholder="名称、API URL 或模型"></label><label><span>每页数量</span><select name="per_page">{% for value in page_sizes %}<option value="{{ value }}" {{ 'selected' if page_size == value }}>{{ value }} 个</option>{% endfor %}</select></label><button class="btn secondary"><i data-lucide="search"></i> 筛选</button></form>
+  <form id="api-preset-bulk-form" method="post" action="{{ url_for('main.api_preset_bulk') }}" class="resource-bulk-form api-preset-bulk" data-bulk-form data-bulk-label="API 预设" data-bulk-total="{{ pagination.total }}" data-bulk-delete-message="确定永久删除选中的 {count} 个 API 预设吗？保存的密钥也会一并删除。">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="q" value="{{ search }}"><input type="hidden" name="page" value="{{ pagination.page }}"><input type="hidden" name="per_page" value="{{ page_size }}"><input type="hidden" name="selection_scope" value="page" data-bulk-selection-scope>
+    <details class="resource-bulk-panel"><summary><span><i data-lucide="list-checks"></i><b>批量管理连接预设</b></span><span data-bulk-selected>已选择 0 个</span></summary><div class="resource-bulk-body"><div class="bulk-head"><label class="bulk-select-all"><input type="checkbox" data-bulk-select-all> 全选本页</label><button class="btn ghost select-all-matches" type="button" data-bulk-select-all-matches aria-pressed="false"><i data-lucide="list-checks"></i> 选择当前筛选全部 {{ pagination.total }} 个</button><small>URL、模型和密钥仍逐个维护</small></div><div class="bulk-fields"><label>启用状态<select name="bulk_enabled"><option value="__keep__">保持不变</option><option value="enabled">统一启用</option><option value="disabled">统一停用</option></select></label><label>敏感数据提醒<select name="bulk_warning"><option value="__keep__">保持不变</option><option value="enabled">统一开启</option><option value="disabled">统一关闭</option></select></label></div><div class="bulk-actions"><button class="btn secondary" name="action" value="update" disabled><i data-lucide="save"></i> 批量保存</button><button class="btn danger" name="action" value="delete" disabled><i data-lucide="trash-2"></i> 批量删除</button></div></div></details>
+  </form>
   <div class="api-preset-list">
     {% for preset in presets %}
     {% set descriptor = preset_descriptors.get(preset.id) %}
     {% set is_current = preset.is_default and preset.is_enabled %}
-    <details class="api-preset-row" {{ 'open' if preset.is_default }}>
+    <div class="api-preset-managed-row"><label class="resource-select"><input type="checkbox" name="preset_ids" value="{{ preset.id }}" form="api-preset-bulk-form" data-bulk-select aria-label="选择 API 预设 {{ preset.name }}"></label><details class="api-preset-row" {{ 'open' if preset.is_default }}>
       <summary>
         <span class="api-preset-state"><i data-lucide="{{ 'circle-check-big' if is_current else 'circle' }}"></i></span>
         <span><b>{{ preset.name }}</b><small>{{ preset.api_url }}</small></span>
@@ -65,13 +69,14 @@
           <button class="btn danger" name="action" value="preset_delete" data-confirm="删除这个 API 预设？"><i data-lucide="trash-2"></i> 删除</button>
         </div>
       </form>
-    </details>
+    </details></div>
     {% else %}
     <div class="empty compact-empty"><i data-lucide="key-round"></i><p>还没有连接预设，请在下方添加第一个 API。</p></div>
     {% endfor %}
   </div>
+  {% set page_param = 'page' %}{% set pagination_label = 'API 预设翻页' %}{% set page_item_label = '个预设' %}{% include '_pagination.html' %}
 
-  <details class="api-preset-create" {{ 'open' if not presets }}>
+  <details class="api-preset-create" {{ 'open' if not pagination.total }}>
     <summary><span><i data-lucide="plus"></i><b>添加 API 预设</b><small>URL、Key 与一个当前模型</small></span><i data-lucide="chevron-down"></i></summary>
     <form method="post" class="api-preset-form" data-api-preset-form>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

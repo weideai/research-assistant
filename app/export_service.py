@@ -105,6 +105,38 @@ def _batch_step_payload(step):
     }
 
 
+def _plan_step_report_row(step):
+    """Use a compact, readable row for portrait report pages."""
+    owner = _text(step.get("operator")).strip() or "未填写"
+    target_date = _text(step.get("planned_date")).strip() or "未设置"
+    return (
+        step["position"],
+        step["title"],
+        f"{owner}\n{target_date}",
+        step.get("description"),
+    )
+
+
+def _execution_step_report_row(step):
+    """Keep execution status and dates visible without squeezing the notes column."""
+    is_done = step.get("is_done")
+    status = "已完成" if is_done is True else "待执行" if is_done is False else "方案阶段"
+    operator = _text(step.get("operator")).strip() or "未填写"
+    planned_label = "安排" if is_done is not None else "目标"
+    planned_date = _text(step.get("planned_date")).strip() or "未设置"
+    completed_date = (
+        _text(step.get("completed_date")).strip()
+        or ("未完成" if is_done is not None else "不适用")
+    )
+    return (
+        step["position"],
+        step["title"],
+        f"{status}\n{operator}",
+        f"{planned_label}：{planned_date}\n完成：{completed_date}",
+        step.get("description"),
+    )
+
+
 def _parameter_payload(parameter):
     return {
         "position": parameter.position,
@@ -355,7 +387,7 @@ def _markdown_from_payload(payload):
         "1. [实验概览](#实验概览)",
         "2. [实验目的](#实验目的)",
         "3. [关联样本与计划参数](#关联样本与计划参数)",
-        "4. [计划步骤定义](#计划步骤定义)",
+        "4. [方案阶段](#方案阶段)",
         "5. [实验批次与过程记录](#实验批次与过程记录)",
         "",
         "---",
@@ -386,12 +418,12 @@ def _markdown_from_payload(payload):
         (parameter["position"], parameter["name"], parameter["value"], parameter["unit"], parameter["notes"])
         for parameter in payload["plan_parameters"]
     ], "暂无结构化计划参数。"))
-    lines.extend(["", "## 计划步骤定义", ""])
-    lines.extend(_markdown_table(("序号", "步骤", "计划执行人", "计划日期", "说明"), [
+    lines.extend(["", "## 方案阶段", ""])
+    lines.extend(_markdown_table(("序号", "阶段", "负责人", "目标日期", "阶段目标与验收要求"), [
         (step["position"], step["title"], step["operator"],
          step["planned_date"] or "未安排", step["description"])
         for step in payload["steps"]
-    ], "暂无计划步骤。"))
+    ], "暂无方案阶段。"))
     lines.extend(["", "## 实验批次与过程记录", ""])
 
     groups = execution_groups(payload)
@@ -418,18 +450,18 @@ def _markdown_from_payload(payload):
         lines.extend(["", "#### 批次摘要", "", _markdown_value(execution["summary"]), ""])
         if execution["conclusion"]:
             lines.extend(["#### 批次结论", "", execution["conclusion"], ""])
-        lines.extend(["#### 批次步骤", ""])
+        lines.extend(["#### 本批次实验步骤", ""])
         lines.extend(_markdown_table(
-            ("序号", "状态", "步骤", "执行人", "计划日期", "完成日期", "说明"),
+            ("序号", "状态", "实验步骤", "实验人员", "安排日期", "完成日期", "操作要求与备注"),
             [
                 (
-                    step["position"], "已完成" if step["is_done"] else "待完成",
+                    step["position"], "已完成" if step["is_done"] else "待执行",
                     step["title"], step["operator"], step["planned_date"] or "未安排",
                     step["completed_date"] or "未完成", step["description"],
                 )
                 for step in execution["steps"]
             ],
-            "暂无批次步骤。",
+            "本批次暂无实验步骤。",
         ))
         lines.append("")
         if execution["actual_parameters"]:
@@ -521,6 +553,11 @@ def _set_docx_font(document, profile=None):
     document.styles["Heading 1"].paragraph_format.keep_with_next = True
     document.styles["Heading 2"].paragraph_format.space_before = Pt(13)
     document.styles["Heading 2"].paragraph_format.keep_with_next = True
+    document.styles["Heading 3"].paragraph_format.keep_with_next = True
+
+    zoom = document.settings._element.find(qn("w:zoom"))
+    if zoom is not None:
+        zoom.set(qn("w:percent"), "100")
 
     section = document.sections[0]
     section.top_margin = Mm(18)
@@ -552,17 +589,75 @@ def _shade_docx_cell(cell, fill):
     shading = properties.find(qn("w:shd"))
     if shading is None:
         shading = OxmlElement("w:shd")
-        properties.append(shading)
+    else:
+        properties.remove(shading)
+    following_tags = {
+        qn("w:noWrap"), qn("w:tcMar"), qn("w:textDirection"),
+        qn("w:tcFitText"), qn("w:vAlign"), qn("w:hideMark"),
+        qn("w:cellIns"), qn("w:cellDel"), qn("w:cellMerge"),
+    }
+    insert_at = next(
+        (index for index, child in enumerate(properties) if child.tag in following_tags),
+        len(properties),
+    )
+    properties.insert(insert_at, shading)
+    shading.set(qn("w:val"), "clear")
+    shading.set(qn("w:color"), "auto")
     shading.set(qn("w:fill"), fill)
 
 
-def _format_docx_table(table, profile=None):
+def _format_docx_table(table, profile=None, widths=None):
+    from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_TABLE_ALIGNMENT
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
-    from docx.shared import Pt, RGBColor
+    from docx.shared import Mm, Pt, RGBColor
 
     profile = profile or REPORT_TEMPLATES["research"]
-    table.autofit = True
+    table.alignment = WD_TABLE_ALIGNMENT.LEFT
+    table.autofit = widths is None
+    table_properties = table._tbl.tblPr
+    if widths:
+        layout = table_properties.find(qn("w:tblLayout"))
+        if layout is None:
+            layout = OxmlElement("w:tblLayout")
+            table_properties.append(layout)
+        layout.set(qn("w:type"), "fixed")
+        for column_index, width_mm in enumerate(widths):
+            width = Mm(width_mm)
+            table.columns[column_index].width = width
+            for cell in table.columns[column_index].cells:
+                cell.width = width
+
+    borders = table_properties.find(qn("w:tblBorders"))
+    if borders is None:
+        borders = OxmlElement("w:tblBorders")
+    else:
+        table_properties.remove(borders)
+    following_tags = {
+        qn("w:shd"), qn("w:tblLayout"), qn("w:tblCellMar"),
+        qn("w:tblLook"), qn("w:tblCaption"), qn("w:tblDescription"),
+    }
+    insert_at = next(
+        (index for index, child in enumerate(table_properties) if child.tag in following_tags),
+        len(table_properties),
+    )
+    table_properties.insert(insert_at, borders)
+    for edge_name in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        edge = borders.find(qn(f"w:{edge_name}"))
+        if edge is None:
+            edge = OxmlElement(f"w:{edge_name}")
+            borders.append(edge)
+        edge.set(qn("w:val"), "single")
+        edge.set(qn("w:sz"), "4")
+        edge.set(qn("w:space"), "0")
+        edge.set(qn("w:color"), "D7DEE3")
+
+    for row in table.rows:
+        row_properties = row._tr.get_or_add_trPr()
+        if row_properties.find(qn("w:cantSplit")) is None:
+            row_properties.append(OxmlElement("w:cantSplit"))
+        for cell in row.cells:
+            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
     header_properties = table.rows[0]._tr.get_or_add_trPr()
     repeat = OxmlElement("w:tblHeader")
     repeat.set(qn("w:val"), "true")
@@ -606,7 +701,7 @@ def _add_docx_callout(profile, document, label, text, fill=None):
     document.add_paragraph().paragraph_format.space_after = Pt(0)
 
 
-def _add_docx_table(profile, document, headers, rows):
+def _add_docx_table(profile, document, headers, rows, widths=None):
     if not rows:
         document.add_paragraph("暂无数据。")
         return
@@ -618,7 +713,7 @@ def _add_docx_table(profile, document, headers, rows):
         cells = table.add_row().cells
         for index, value in enumerate(row):
             cells[index].text = _text(value, "-") or "-"
-    _format_docx_table(table, profile)
+    _format_docx_table(table, profile, widths)
     return table
 
 
@@ -726,12 +821,14 @@ def build_docx_export(item, attachment_path_resolver=None, template_key="researc
         for parameter in payload["plan_parameters"]
     ])
 
-    document.add_heading("04  计划步骤定义", level=1)
-    _add_docx_table(profile, document, ("序号", "步骤", "计划执行人", "计划日期", "说明"), [
-        (step["position"], step["title"], step["operator"],
-         step["planned_date"], step["description"])
-        for step in payload["steps"]
-    ])
+    document.add_heading("04  方案阶段", level=1)
+    _add_docx_callout(profile, document, "PROTOCOL OUTLINE  /  研究设计", "以下阶段描述研究顺序、目标与验收要求；各实验批次的实际步骤独立记录。")
+    _add_docx_table(
+        profile, document,
+        ("序号", "方案阶段", "负责人 / 目标日期", "阶段目标与验收要求"),
+        [_plan_step_report_row(step) for step in payload["steps"]],
+        widths=(12, 44, 38, 78),
+    )
 
     document.add_page_break()
     document.add_heading("05  实验批次与过程记录", level=1)
@@ -764,15 +861,13 @@ def build_docx_export(item, attachment_path_resolver=None, template_key="researc
         _add_docx_callout(profile, document, "SUMMARY  /  批次摘要", execution["summary"], "F3F6F7")
         if execution["conclusion"]:
             _add_docx_callout(profile, document, "CONCLUSION  /  批次结论", execution["conclusion"], "FFF4D6")
-        document.add_heading(f"5.{execution_index}.1  批次步骤", level=3)
-        _add_docx_table(profile, document, ("序号", "状态", "步骤", "执行人", "计划日期", "完成日期", "说明"), [
-            (
-                step["position"], "已完成" if step["is_done"] else "待完成",
-                step["title"], step["operator"], step["planned_date"],
-                step["completed_date"], step["description"],
-            )
-            for step in execution["steps"]
-        ])
+        document.add_heading(f"5.{execution_index}.1  本批次实验步骤", level=3)
+        _add_docx_table(
+            profile, document,
+            ("序号", "实验步骤", "状态与人员", "日期记录", "操作要求与备注"),
+            [_execution_step_report_row(step) for step in execution["steps"]],
+            widths=(12, 43, 31, 37, 49),
+        )
         if execution["actual_parameters"]:
             document.add_heading(f"5.{execution_index}.2  实际参数", level=3)
             _add_docx_table(profile, document, ("参数", "数值", "单位", "说明"), [
@@ -906,7 +1001,7 @@ def build_pdf_export(item, attachment_path_resolver, template_key="research"):
     except ImportError as exc:
         raise RuntimeError("PDF 导出需要安装 reportlab 依赖。") from exc
 
-    profile = REPORT_TEMPLATES.get(template_key, REPORT_TEMPLATES["research"])
+    profile = resolve_report_template(template_key)
     payload = experiment_payload(item)
     experiment = payload["experiment"]
     attachment_lookup = {
@@ -954,7 +1049,7 @@ def build_pdf_export(item, attachment_path_resolver, template_key="research"):
     )
     section = ParagraphStyle(
         "ResearchSection", parent=body, fontSize=11.5, leading=15, textColor=accent_text,
-        spaceBefore=10, spaceAfter=7,
+        spaceBefore=10, spaceAfter=7, keepWithNext=True,
     )
     label = ParagraphStyle(
         "ResearchLabel", parent=small, fontSize=8, leading=10.5,
@@ -1078,27 +1173,41 @@ def build_pdf_export(item, attachment_path_resolver, template_key="research"):
         result.append(folder_box)
         return [KeepTogether(result)]
 
+    accent_rule = Table([[""]], colWidths=[document.width], rowHeights=[2 * mm])
+    accent_rule.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), accent)]))
+    cover_meta = Table(
+        [
+            [p("实验状态", label), p(experiment.get("status"), body),
+             p("负责人", label), p(experiment.get("owner"), body)],
+            [p("实验批次", label), p(f"{len(payload['batches'])} 个", body),
+             p("最后导出", label), p(payload["exported_at"].replace("T", " "), body)],
+        ],
+        colWidths=[24 * mm, 46 * mm, 24 * mm, document.width - 94 * mm],
+    )
+    cover_meta.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), soft),
+        ("BOX", (0, 0), (-1, -1), 0.4, line),
+        ("INNERGRID", (0, 0), (-1, -1), 0.3, line),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 7),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+    ]))
+
     story = [
-        Spacer(1, 23 * mm),
+        Spacer(1, 17 * mm),
+        accent_rule,
+        Spacer(1, 7 * mm),
         Paragraph(_pdf_value(profile["kicker"]), kicker),
         Paragraph(_pdf_value(experiment["title"], "实验记录"), cover),
         Paragraph(_pdf_value(
             f"{experiment.get('project_title') or '未归属项目'}  ·  {experiment.get('code') or '未设置编号'}"
         ), body),
         Spacer(1, 8 * mm),
-        Table([[p("实验状态", label), p(experiment.get("status"), body),
-                p("最后导出", label), p(payload["exported_at"].replace("T", " "), body)]],
-              colWidths=[24 * mm, 46 * mm, 24 * mm, document.width - 94 * mm],
-              style=TableStyle([
-                  ("BACKGROUND", (0, 0), (-1, -1), soft),
-                  ("BOX", (0, 0), (-1, -1), 0.4, line),
-                  ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                  ("LEFTPADDING", (0, 0), (-1, -1), 8),
-                  ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-                  ("TOPPADDING", (0, 0), (-1, -1), 7),
-                  ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
-              ])),
+        cover_meta,
         Spacer(1, 12 * mm),
+        p("报告范围：方案阶段 · 批次实验步骤 · 过程记录 · 结果附件", small),
         p("本报告由 R/LAB Research Assistant 生成。原始文件仍保存在实验资料目录中，报告仅展示核心缩略图和完整实验文件夹。", small),
         PageBreak(),
         section_heading("实验概览"),
@@ -1111,14 +1220,11 @@ def build_pdf_export(item, attachment_path_resolver, template_key="research"):
         ),
         Spacer(1, 5),
             *labelled_text("实验目的与背景", experiment.get("objective"), soft),
-        section_heading("计划步骤"),
+        section_heading("方案阶段"),
         table(
-            ("序号", "步骤", "计划执行人", "计划日期", "说明"),
-            [
-                (step["position"], step["title"], step["operator"], step["planned_date"] or "未安排", step["description"])
-                for step in payload["steps"]
-            ],
-            widths=[13 * mm, 37 * mm, 28 * mm, 28 * mm, document.width - 106 * mm],
+            ("序号", "方案阶段", "负责人 / 目标日期", "阶段目标与验收要求"),
+            [_plan_step_report_row(step) for step in payload["steps"]],
+            widths=[12 * mm, 46 * mm, 38 * mm, document.width - 96 * mm],
         ),
         section_heading("计划参数"),
         table(
@@ -1159,16 +1265,11 @@ def build_pdf_export(item, attachment_path_resolver, template_key="research"):
         story.extend(labelled_text("批次摘要", execution.get("summary"), soft))
         if execution.get("conclusion"):
             story.extend(labelled_text("批次结论", execution.get("conclusion"), colors.HexColor("#FFF4D6")))
-        story.append(section_heading("批次步骤"))
+        story.append(section_heading("本批次实验步骤"))
         story.append(table(
-            ("序号", "状态", "步骤", "执行人", "计划日期", "完成日期", "说明"),
-            [
-                (step["position"], "已完成" if step["is_done"] else "待完成", step["title"],
-                 step["operator"], step["planned_date"] or "未安排", step["completed_date"] or "未完成",
-                 step["description"])
-                for step in execution["steps"]
-            ],
-            widths=[12 * mm, 19 * mm, 31 * mm, 24 * mm, 25 * mm, 25 * mm, document.width - 136 * mm],
+            ("序号", "实验步骤", "状态与人员", "日期记录", "操作要求与备注"),
+            [_execution_step_report_row(step) for step in execution["steps"]],
+            widths=[12 * mm, 44 * mm, 32 * mm, 38 * mm, document.width - 126 * mm],
         ))
         if execution["actual_parameters"]:
             story.extend([section_heading("批次参数"), table(
@@ -1204,6 +1305,18 @@ def build_pdf_export(item, attachment_path_resolver, template_key="research"):
 
     def on_page(canvas, doc):
         canvas.saveState()
+        if doc.page > 1:
+            canvas.setFont(font_name, 7.5)
+            canvas.setFillColor(muted)
+            canvas.drawString(doc.leftMargin, A4[1] - 10 * mm, "实验导出报告")
+            canvas.drawRightString(
+                A4[0] - doc.rightMargin,
+                A4[1] - 10 * mm,
+                _text(experiment.get("code"), "未设置编号") or "未设置编号",
+            )
+            canvas.setStrokeColor(line)
+            canvas.setLineWidth(0.4)
+            canvas.line(doc.leftMargin, A4[1] - 13 * mm, A4[0] - doc.rightMargin, A4[1] - 13 * mm)
         canvas.setStrokeColor(line)
         canvas.setLineWidth(0.5)
         canvas.line(doc.leftMargin, 12 * mm, A4[0] - doc.rightMargin, 12 * mm)
@@ -1220,6 +1333,23 @@ def build_pdf_export(item, attachment_path_resolver, template_key="research"):
 def _record_report_payload(record):
     experiment = record.experiment
     batch = record.batch
+    if batch:
+        steps = [
+            _batch_step_payload(step)
+            for step in sorted(batch.steps, key=_step_sort_key)
+        ]
+        step_source = "batch"
+    else:
+        steps = [
+            {
+                **_plan_step_payload(step),
+                "source_step_id": step.id,
+                "completed_date": "",
+                "is_done": None,
+            }
+            for step in sorted(experiment.steps, key=_step_sort_key)
+        ]
+        step_source = "plan"
     return {
         "experiment_title": experiment.title,
         "experiment_code": experiment.code,
@@ -1235,6 +1365,8 @@ def _record_report_payload(record):
         "result": record.result,
         "lifecycle_status": record.lifecycle_status,
         "remark": record.remark,
+        "step_source": step_source,
+        "steps": steps,
         "parameters": [_parameter_payload(parameter) for parameter in record.parameters],
         "attachments": [
             _attachment_payload(attachment)
@@ -1280,10 +1412,26 @@ def build_record_docx_export(record, attachment_path_resolver=None, template_key
         ("结果判定", payload["result"]),
         ("记录状态", payload["lifecycle_status"]),
     ))
-    _add_docx_callout(profile, document, "实验目的", payload["objective"], "EDF3FF")
+    _add_docx_callout(profile, document, "实验目的", payload["objective"], profile["soft"])
     _add_docx_callout(profile, document, "实验条件 / 仪器设备 / 原理", payload["conditions"], "F3F6F7")
     _add_docx_callout(profile, document, "实验过程与观察记录", payload["content"], "FFFFFF")
     _add_docx_callout(profile, document, "实验结果 / 结论 / 备注", payload["remark"], "FFF4D6")
+
+    document.add_heading(
+        "本批次实验步骤" if payload["step_source"] == "batch" else "方案阶段（历史记录参考）",
+        level=1,
+    )
+    if payload["step_source"] == "batch":
+        _add_docx_callout(
+            profile, document, "BATCH EXECUTION  /  批次执行",
+            f"以下内容来自 {payload['batch_code']}，记录本批次实际操作及完成情况。",
+        )
+    _add_docx_table(
+        profile, document,
+        ("序号", "实验步骤 / 方案阶段", "状态与人员", "日期记录", "要求与备注"),
+        [_execution_step_report_row(step) for step in payload["steps"]],
+        widths=(12, 43, 31, 37, 49),
+    )
 
     document.add_heading("结构化参数", level=1)
     _add_docx_table(profile, document, ("参数", "数值", "单位", "说明"), [
@@ -1322,7 +1470,7 @@ def build_record_pdf_export(record, template_key="research", attachment_path_res
     except ImportError as exc:
         raise RuntimeError("PDF 导出需要安装 reportlab 依赖。") from exc
 
-    profile = REPORT_TEMPLATES.get(template_key, REPORT_TEMPLATES["research"])
+    profile = resolve_report_template(template_key)
     payload = _record_report_payload(record)
     attachment_lookup = {
         attachment.id: attachment
@@ -1346,7 +1494,10 @@ def build_record_pdf_export(record, template_key="research", attachment_path_res
     small = ParagraphStyle("RecordSmall", parent=body, fontSize=8, leading=11, textColor=muted)
     title = ParagraphStyle("RecordTitle", parent=body, fontSize=20, leading=25, textColor=ink, spaceAfter=4)
     kicker = ParagraphStyle("RecordKicker", parent=small, fontSize=8.2, leading=10.5, textColor=accent_text, spaceAfter=7)
-    section = ParagraphStyle("RecordSection", parent=body, fontSize=11.5, leading=15, textColor=accent_text, spaceBefore=9, spaceAfter=6)
+    section = ParagraphStyle(
+        "RecordSection", parent=body, fontSize=11.5, leading=15,
+        textColor=accent_text, spaceBefore=9, spaceAfter=6, keepWithNext=True,
+    )
     label = ParagraphStyle(
         "RecordLabel", parent=small, fontSize=8, leading=10.5,
         textColor=colors.HexColor("#344054"),
@@ -1459,7 +1610,11 @@ def build_record_pdf_export(record, template_key="research", attachment_path_res
         result.append(folder_box)
         return [KeepTogether(result)]
 
+    accent_rule = Table([[""]], colWidths=[document.width], rowHeights=[1.6 * mm])
+    accent_rule.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), accent)]))
     story = [
+        accent_rule,
+        Spacer(1, 4 * mm),
         Paragraph(_pdf_value(profile["kicker"]), kicker),
         Paragraph(_pdf_value(payload["experiment_title"], "实验记录"), title),
         Paragraph(_pdf_value(f"{payload['project_title'] or '未归属项目'}  ·  {payload['batch_code']}"), body),
@@ -1477,6 +1632,12 @@ def build_record_pdf_export(record, template_key="research", attachment_path_res
         section_heading("实验条件与过程"), field_box("条件 / 仪器 / 原理", payload["conditions"], colors.HexColor("#F3F6F7")),
         field_box("过程与观察记录", payload["content"]),
         section_heading("实验结果"), field_box("结果 / 结论 / 备注", payload["remark"], colors.HexColor("#FFF4D6")),
+        section_heading(
+            "本批次实验步骤" if payload["step_source"] == "batch" else "方案阶段（历史记录参考）"
+        ),
+        table(("序号", "实验步骤 / 方案阶段", "状态与人员", "日期记录", "要求与备注"), [
+            _execution_step_report_row(step) for step in payload["steps"]
+        ], [12 * mm, 44 * mm, 32 * mm, 38 * mm, document.width - 126 * mm]),
         section_heading("结构化参数"),
         table(("参数", "数值", "单位", "说明"), [
             (parameter["name"], parameter["value"], parameter["unit"], parameter["notes"])
@@ -1489,6 +1650,18 @@ def build_record_pdf_export(record, template_key="research", attachment_path_res
 
     def on_page(canvas, doc):
         canvas.saveState()
+        if doc.page > 1:
+            canvas.setFont(font_name, 7.5)
+            canvas.setFillColor(muted)
+            canvas.drawString(doc.leftMargin, A4[1] - 10 * mm, "实验记录报告")
+            canvas.drawRightString(
+                A4[0] - doc.rightMargin,
+                A4[1] - 10 * mm,
+                f"{payload['experiment_code'] or '未设置编号'}  ·  {payload['batch_code']}",
+            )
+            canvas.setStrokeColor(line)
+            canvas.setLineWidth(0.4)
+            canvas.line(doc.leftMargin, A4[1] - 13 * mm, A4[0] - doc.rightMargin, A4[1] - 13 * mm)
         canvas.setStrokeColor(line)
         canvas.setLineWidth(0.5)
         canvas.line(doc.leftMargin, 12 * mm, A4[0] - doc.rightMargin, 12 * mm)
@@ -1503,26 +1676,35 @@ def build_record_pdf_export(record, template_key="research", attachment_path_res
 
 
 def _add_xlsx_sheet(workbook, title, headers, rows):
-    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
 
     sheet = workbook.create_sheet(title)
+    sheet.sheet_view.showGridLines = False
     sheet.append(list(headers))
     for row in rows:
         sheet.append([_text(value) for value in row])
-    header_fill = PatternFill("solid", fgColor="2166F3")
+    header_fill = PatternFill("solid", fgColor="D71920")
+    alternate_fill = PatternFill("solid", fgColor="F7F7F4")
+    row_rule = Border(bottom=Side(style="hair", color="D8D8D3"))
+    sheet.row_dimensions[1].height = 28
     for cell in sheet[1]:
         cell.fill = header_fill
-        cell.font = Font(color="FFFFFF", bold=True)
-        cell.alignment = Alignment(vertical="center")
+        cell.font = Font(name="Microsoft YaHei", size=10, color="FFFFFF", bold=True)
+        cell.alignment = Alignment(vertical="center", wrap_text=True)
     sheet.freeze_panes = "A2"
     sheet.auto_filter.ref = sheet.dimensions
     for column_index, header in enumerate(headers, start=1):
         values = [header, *[row[column_index - 1] for row in rows if len(row) >= column_index]]
         width = min(max(max((len(_text(value)) for value in values), default=8) + 2, 10), 48)
         sheet.column_dimensions[get_column_letter(column_index)].width = width
-    for row in sheet.iter_rows(min_row=2):
+    for row_index, row in enumerate(sheet.iter_rows(min_row=2), start=2):
+        sheet.row_dimensions[row_index].height = 24
         for cell in row:
+            if row_index % 2 == 0:
+                cell.fill = alternate_fill
+            cell.border = row_rule
+            cell.font = Font(name="Microsoft YaHei", size=9, color="111111")
             cell.alignment = Alignment(vertical="top", wrap_text=True)
     return sheet
 
@@ -1550,7 +1732,7 @@ def build_xlsx_export(item):
         (parameter["position"], parameter["name"], parameter["value"], parameter["unit"], parameter["notes"])
         for parameter in payload["plan_parameters"]
     ])
-    _add_xlsx_sheet(workbook, "实验步骤", ("序号", "步骤", "计划执行人", "计划日期", "说明"), [
+    _add_xlsx_sheet(workbook, "方案阶段", ("序号", "阶段", "负责人", "目标日期", "阶段目标与验收要求"), [
         (step["position"], step["title"], step["operator"], step["planned_date"], step["description"])
         for step in payload["steps"]
     ])
@@ -1564,13 +1746,13 @@ def build_xlsx_export(item):
          execution["requires_repeat"], len(execution["records"]))
         for execution in groups
     ])
-    _add_xlsx_sheet(workbook, "批次步骤", (
-        "批次 ID", "批次编号", "步骤 ID", "来源计划步骤 ID", "序号", "状态", "步骤",
-        "实验人员", "计划日期", "完成日期", "说明",
+    _add_xlsx_sheet(workbook, "实验步骤", (
+        "批次 ID", "批次编号", "步骤 ID", "序号", "状态", "实验步骤",
+        "实验人员", "安排日期", "完成日期", "操作要求与备注",
     ), [
         (
-            execution["id"], execution["batch_code"], step["id"], step["source_step_id"],
-            step["position"], "已完成" if step["is_done"] else "待完成", step["title"],
+            execution["id"], execution["batch_code"], step["id"],
+            step["position"], "已完成" if step["is_done"] else "待执行", step["title"],
             step["operator"], step["planned_date"], step["completed_date"], step["description"],
         )
         for execution in groups for step in execution["steps"]

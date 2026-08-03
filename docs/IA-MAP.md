@@ -35,28 +35,18 @@
 │ 「实验分析专家 / 打开 AI 助手」──► 展开 AI Dock           │
 └───────────────────────────────────────────────────────────┘
 
-浮层（5 个）
- ① 外观设置    右上角调色板按钮 → <dialog>
- ② AI Dock     右下角 FAB「AI」/ 顶栏按钮 → 侧滑面板
-③ 发送前检查  AI 发送时 → <dialog> 确认外发内容
-④ 更新提醒    GET /updates/check → 顶部 banner
-⑤ Flash 提示  服务端 flash → 右上角堆叠
+浮层（4 个）
+ ① AI Dock     顶栏按钮 → 侧滑面板
+② 发送前检查  AI 发送时 → <dialog> 确认外发内容
+③ 更新提醒    GET /updates/check → 顶部 banner
+④ Flash 提示  服务端 flash → 右上角堆叠
 ```
 
 ※1 **它不是输入框，是一个跳转链接**，见 6.3。
 
 桌面画布按 1180px 设计。应用不提供移动导航、手机断点或移动端 AI 入口。
 
-### 1.1 外观设置浮层
-
-| 控件 | 行为 |
-|---|---|
-| 界面风格 ×4 单选 | `research` / `tech` / `minimal` / `cute` → `html[data-theme]` |
-| 夜间模式开关 | → `html[data-mode="dark"]` |
-| 背景图片上传 | PNG/JPEG/WebP ≤5MB → `--workspace-background-image` |
-| 恢复默认 / 清除背景 / 保存外观 | `POST /settings/appearance` |
-
-### 1.2 AI Dock 浮层（功能最密集的单一界面）
+### 1.1 AI Dock 浮层（功能最密集的单一界面）
 
 ```text
 头部  ├ 展开历史会话 (Ctrl+Shift+L)   ├ 新建对话 (Ctrl+N)
@@ -145,7 +135,7 @@
 |---|---|
 | 页头 | 模板中心 → `/templates?kind=steps`；新建实验计划 → `#create-experiment` |
 | 创建区 A「空白创建」 | 名称·项目·编号·负责人·状态·起止 → `POST /experiments` →「创建并进入计划」 |
-| 创建区 B「使用模板创建」 | 选步骤模板 → `POST /experiments/from-template`；查看全部模板 → `/templates` |
+| 创建区 B「使用模板创建」 | 选方案模板 → `POST /experiments/from-template`；查看全部模板 → `/templates` |
 | 状态筛选 chip | 全部 / 未开始 / 进行中 / 完成 / 暂停 → `/experiments?status=` |
 | 实验卡片 | 标题、进度条、负责人、日期 → `/experiments/<id>` |
 
@@ -163,11 +153,11 @@ Tab 区（页内锚点，非真 tab）
  ├ 概览      目标与基本信息表单 ──► POST /experiments/<id>「保存信息」
  │           移入回收站         ──► POST /experiments/<id>/delete
  ├ 实验方案
- │   步骤     添加步骤 ──► POST /experiments/<id>/steps
+ │   方案阶段  添加阶段 ──► POST /experiments/<id>/steps
  │            编辑     ──► /steps/<sid>/edit  （独立页面）
  │            删除     ──► POST /steps/<sid>/delete
  │            批量保存/批量删除 ──► POST /experiments/<id>/steps/bulk
- │            保存步骤模板 ──► POST /experiments/<id>/save-template
+ │            保存方案模板 ──► POST /experiments/<id>/save-template
  │            调用模板   ──► POST /experiments/<id>/apply-step-template
  │            查看模板   ──► /templates/<tid>
  │   参数     添加/删除/批量 ──► POST /experiments/<id>/parameters[/bulk]
@@ -175,22 +165,26 @@ Tab 区（页内锚点，非真 tab）
  │   样本     关联/解除/批量 ──► POST /experiments/<id>/samples[/bulk]
  │                            ──► POST /experiment-samples/<sid>/delete
  │   记录模板 绑定 ──► POST /experiments/<id>/record-template
- └ 实验执行  执行列表 ──► /batches/<bid>
-             新建执行 ──► POST /experiments/<id>/batches
+ └ 实验批次  批次列表 ──► /batches/<bid>
+             新建批次 ──► POST /experiments/<id>/batches（实验步骤从空清单开始）
              最近记录 ──► /records/<rid>
              附件缩略 ──► /attachments/<aid>/download
              进入实验文件中心 ──► /experiments/<id>/files
 ```
 
-### 2.6 实验执行详情 `GET|POST /batches/<id>` → `batch_detail.html`（**165 行**）
+### 2.6 实验批次详情 `GET|POST /batches/<id>` → `batch_detail.html`
 
 ```text
 面包屑  项目 ──► /projects/<pid>   计划 ──► /experiments/<eid>
 
-执行步骤（本次快照，独立完成状态）
+实验步骤（仅属于当前批次，与方案阶段独立）
+  新增             ──► POST /batches/<id>/steps
   标记完成 / 未完成 ──► POST /batch-steps/<sid>/toggle
   编辑             ──► POST /batch-steps/<sid>/edit
-  保存本次步骤      ──► POST /batches/<id>/steps/bulk
+  删除             ──► POST /batch-steps/<sid>/delete
+  上移 / 下移       ──► POST /batch-steps/<sid>/move
+  批量状态 / 排期 / 删除 ──► POST /batches/<id>/steps/bulk
+  排期方式：统一日期 / 按间隔顺排 / 整体偏移 / 清空日期
 
 新增过程记录 #new-record
   记录模板：查看 ──► /record-templates/<tid>
@@ -272,16 +266,16 @@ Tab ④ 模板与修订
 
 ### 3.6 模板中心 `GET /templates` → `template_center.html`
 
-两个 tab：**步骤模板** / **记录模板**（`?kind=steps|records`）。
+两个 tab：**方案模板** / **记录模板**（`?kind=steps|records`）。
 
-| 步骤模板 | 记录模板 |
+| 方案模板 | 记录模板 |
 |---|---|
 | 新建空白（名称+说明）→ 创建并编辑 | 同左 |
 | 从参考网页/文本生成本地模板（AI 提取）`POST /templates/import` | — |
 | 应用到实验 + 追加/替换 → `POST /templates/<id>/apply` | 目标实验执行 → `GET /record-templates/<id>/use` |
 | 查看与编辑 →`/templates/<id>` · 复制 · 删除 | 查看与编辑 →`/record-templates/<id>` · 复制 · 删除 |
 
-子页 `/templates/<id>`：复制模板 / 保存步骤模板 / 添加步骤 / 保存步骤 / 删除步骤 / 启用此模板。
+子页 `/templates/<id>`：复制模板 / 保存方案模板 / 添加阶段 / 保存阶段 / 删除阶段 / 调用此模板。
 子页 `/record-templates/<id>`：复制 / 保存 / 参数增删 / 在新增记录中调用 / 删除。
 
 ### 3.7 物品管理 `GET|POST /samples` → `samples.html`
@@ -300,7 +294,7 @@ Tab ④ 模板与修订
 | 页面 | 路由 | 主要控件 |
 |---|---|---|
 | API 设置 | `/settings/api` | 显示/隐藏密钥 · 拉取模型 `POST /settings/api/models` · 保存 · 预设列表（设为当前/删除）· 保存预设 · 账号安全跳转 |
-| 回收站 | `/recycle-bin` | 类型导航（项目/计划/执行/记录/附件/任务/周报/步骤模板/记录模板/Skill）· 搜索 · 分页 · 恢复 `POST .../restore` · 永久删除（需输入「永久删除」二次确认）`POST .../purge` |
+| 回收站 | `/recycle-bin` | 类型导航（项目/计划/批次/记录/附件/任务/周报/方案模板/记录模板/Skill）· 搜索 · 分页 · 恢复 `POST .../restore` · 永久删除（一次确认）`POST .../purge` |
 | 系统管理 | `/admin` | 创建邀请 `POST /admin/invitations` · 修改角色/停用/撤销全部会话 `POST /admin/users/<id>/update` |
 | 账号安全 | `/account/security` | 修改密码并撤销其他会话 |
 | 健康检查 | `/healthz` | — |
@@ -319,7 +313,7 @@ Tab ④ 模板与修订
 
 ### 6.2 同一功能多入口、无权威入口
 - 新建实验执行：`project_detail` 的 `+` 图标 / `experiment_detail` 的按钮 / `dashboard` 引导卡 —— 三处样式与文案都不同。
-- 应用步骤模板：`template_center` 的「应用模板」/ `experiment_detail` 的「调用」/ `experiments` 的「使用模板创建」。
+- 应用方案模板：`template_center` 的「应用模板」/ `experiment_detail` 的「调用」/ `experiments` 的「使用模板创建」。
 - API 设置：侧栏 + 账号菜单 + AI Dock 头部，三个入口。
 
 ### 6.3 顶栏"搜索框"不是搜索框，且全站没有全局搜索
@@ -347,8 +341,8 @@ Ctrl+K **确实有绑定**（`app/static/js/app.js:1766-1774`），但它只做�
 ### 6.9 详情页缺少真正的分区
 `experiment_detail.html`（251 行）在一屏内堆叠了 概览/方案/步骤/参数/样本/执行/记录/附件/模板/删除 十个区块，仅靠锚点跳转。对照 `record_detail.html` 已经用了四标签页，效果明显更好 —— 这个模式没有推广。
 
-### 6.10 设计令牌分散
-`:root` 在 `app.css` 顶部，主题覆盖在 `themes.css`，`--surface-soft` 等又只在 `themes.css` 的 `html` 上定义。且 `app.css` 采用单行超长压缩写法，实际维护成本很高。
+### 6.10 设计令牌已集中
+调色板与基础尺度统一在 `tokens.css`，组件规则位于 `app.css` / `assistant.css`。旧 `themes.css`、主题属性和外观路由均已退役，界面固定为黑白灰 + 信号红。
 
 ---
 

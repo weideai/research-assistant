@@ -116,6 +116,30 @@ def test_weekly_report_page_exposes_bulk_edit_and_delete_controls(client, auth, 
     assert "删除周报" in body
 
 
+def test_weekly_generator_uses_bounded_searchable_selection_directories(client, auth, app):
+    auth.register()
+    with app.app_context():
+        user_id = User.query.one().id
+        db.session.add_all([
+            Experiment(user_id=user_id, title=f"目录实验 {index:02d}", code=f"DIR-{index:02d}")
+            for index in range(9)
+        ])
+        db.session.commit()
+
+    body = client.get("/reports/presentation").get_data(as_text=True)
+    assert body.count("data-local-directory") == 2
+    assert 'data-directory-mode="multiple"' in body
+    assert 'data-directory-mode="single"' in body
+    assert "查找实验名称、编号或状态" in body
+    assert "查找 Skill 名称、用途或主题" in body
+    assert body.count('data-directory-page-size') == 2
+    assert all(f'<option value="{value}">{value}</option>' in body for value in (8, 16, 32))
+    assert "全选本页" in body
+    assert "选择筛选全部" in body
+    assert "翻页不会清除已选择实验" in body
+    assert body.count("data-directory-item") >= 11
+
+
 def test_weekly_report_bulk_update_and_delete_preserve_files(client, auth, app):
     auth.register()
     client.post("/projects", data={"title": "周报归档项目"})

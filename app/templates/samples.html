@@ -21,12 +21,12 @@
   <span class="muted">找到 {{ pagination.total }} 个样本</span>
 </div>
 
-<form id="sample-bulk-form" method="post" action="{{ url_for('main.sample_bulk') }}" class="resource-bulk-form index-resource-bulk" data-bulk-form data-bulk-label="样本">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="q" value="{{ keyword }}"><input type="hidden" name="return_status" value="{{ status }}"><input type="hidden" name="page" value="{{ pagination.page }}"><input type="hidden" name="per_page" value="{{ page_size }}">
-  <details class="resource-bulk-panel"><summary><span><i data-lucide="list-checks"></i><b>批量编辑当前页样本</b></span><span data-bulk-selected>已选择 0 个</span></summary><div class="resource-bulk-body">
-    <div class="bulk-head"><label class="bulk-select-all"><input type="checkbox" data-bulk-select-all> 全选当前页</label><small>适合批量调整库存状态或迁移存放位置</small></div>
+<form id="sample-bulk-form" method="post" action="{{ url_for('main.sample_bulk') }}" class="resource-bulk-form index-resource-bulk" data-bulk-form data-bulk-label="样本" data-bulk-total="{{ pagination.total }}" data-bulk-delete-message="确定永久删除选中的 {count} 个样本及其关联记录吗？此操作无法撤销。">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="q" value="{{ keyword }}"><input type="hidden" name="return_status" value="{{ status }}"><input type="hidden" name="page" value="{{ pagination.page }}"><input type="hidden" name="per_page" value="{{ page_size }}"><input type="hidden" name="selection_scope" value="page" data-bulk-selection-scope>
+  <details class="resource-bulk-panel"><summary><span><i data-lucide="list-checks"></i><b>批量管理样本</b></span><span data-bulk-selected>已选择 0 个</span></summary><div class="resource-bulk-body">
+    <div class="bulk-head"><label class="bulk-select-all"><input type="checkbox" data-bulk-select-all> 全选本页</label><button class="btn ghost select-all-matches" type="button" data-bulk-select-all-matches aria-pressed="false"><i data-lucide="list-checks"></i> 选择当前筛选全部 {{ pagination.total }} 个</button><small>适合批量调整库存状态或迁移存放位置</small></div>
     <div class="bulk-fields"><label>样本状态<select name="bulk_status"><option value="__keep__">保持不变</option>{% for value in sample_statuses %}<option>{{ value }}</option>{% endfor %}</select></label><label>位置操作<select name="location_mode"><option value="keep">保持不变</option><option value="replace">统一替换</option><option value="clear">清空</option></select></label><label class="bulk-grow">存放位置<input name="location" maxlength="180" placeholder="新的统一位置"></label></div>
-    <div class="bulk-actions"><button class="btn secondary" name="action" value="update" disabled><i data-lucide="save"></i> 批量保存</button></div>
+    <div class="bulk-actions"><button class="btn secondary" name="action" value="update" disabled><i data-lucide="save"></i> 批量保存</button><button class="btn danger" name="action" value="delete" disabled><i data-lucide="trash-2"></i> 批量删除</button></div>
   </div></details>
 </form>
 

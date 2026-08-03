@@ -98,6 +98,10 @@ def test_step_and_record_can_be_viewed_edited_and_exported(client, auth, app):
         "description": "终浓度 5 μM",
     })
     batch_id = _start_execution(client, app, experiment_id)
+    client.post(f"/batches/{batch_id}/steps", data={
+        "title": "本批次加药", "operator": "李同学", "planned_date": "2026-07-21",
+        "description": "按批次记录实际加药操作",
+    })
     client.post(f"/batches/{batch_id}/records", data={
         "batch_id": batch_id,
         "record_date": "2026-07-21", "operator": "李同学", "conditions": "37°C",

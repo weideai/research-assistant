@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}批量报告预览{% endblock %}
+{% block content %}
+<header class="page-head report-export-preview-head">
+  <div>
+    <p class="eyebrow">REPORT EXPORT REVIEW</p>
+    <h1>批量报告预览</h1>
+    <p class="muted">核对所选报告及实验步骤后，再统一确认导出。</p>
+  </div>
+  <div class="page-head-actions"><a class="btn ghost" href="{{ return_url }}"><i data-lucide="arrow-left"></i> 返回重新选择</a></div>
+</header>
+
+<section class="report-export-summary" aria-label="所选报告概览">
+  <div class="report-export-summary-copy">
+    <span class="report-export-summary-icon"><i data-lucide="scan-search"></i></span>
+    <span><small>{{ '当前筛选全部结果' if selection_scope == 'all' else '手动勾选结果' }}</small><b>已载入 {{ report_stats.reports }} 份实验报告</b><em>以下预览内容将与最终 ZIP 内的报告一一对应</em></span>
+  </div>
+  <dl class="report-export-metrics">
+    <div><dt>报告</dt><dd>{{ report_stats.reports }}</dd></div>
+    <div><dt>实验计划</dt><dd>{{ report_stats.experiments }}</dd></div>
+    <div><dt>实验批次</dt><dd>{{ report_stats.batches }}</dd></div>
+    <div><dt>附件</dt><dd>{{ report_stats.attachments }}</dd></div>
+  </dl>
+</section>
+
+<div class="report-export-preview-layout">
+  <main class="report-preview-groups">
+    {% for group in report_groups %}
+    <section class="report-preview-group">
+      <header class="report-preview-group-head">
+        <div><p class="eyebrow">{{ group.experiment.project.title if group.experiment.project else '未归类项目' }}</p><h2>{{ group.experiment.title }}</h2><span>{{ group.experiment.code or '未设置实验编号' }}</span></div>
+        <strong>{{ group.records|length }} 份</strong>
+      </header>
+
+      <div class="report-preview-list">
+        {% for record in group.records %}
+        {% set report_steps = record.batch.steps if record.batch else record.experiment.steps %}
+        {% set completed_steps = report_steps|selectattr('is_done')|list|length if record.batch else 0 %}
+        {% set report_attachments = record.attachments|rejectattr('is_deleted')|list %}
+        {% set report_images = report_attachments|selectattr('is_previewable_image')|list %}
+        <details class="report-preview-sheet" {{ 'open' if loop.first }}>
+          <summary>
+            <span class="report-preview-sheet-index">{{ '%02d'|format(loop.index) }}</span>
+            <span class="report-preview-sheet-title"><small>{{ record.record_date }} · {{ record.batch.batch_code if record.batch else '历史记录' }} · R-{{ record.id }}</small><b>{{ record.remark|truncate(88, True) if record.remark else record.content|truncate(88, True) }}</b><em>{{ record.operator or '未填写实验人员' }} · {{ report_steps|length }} 个实验步骤 · {{ report_attachments|length }} 个附件</em></span>
+            <span class="badge" data-state="{{ record.result | state_tone }}">{{ record.result }}</span>
+            <i data-lucide="chevron-down" class="report-preview-chevron"></i>
+          </summary>
+
+          <div class="report-preview-sheet-body">
+            <dl class="report-preview-meta">
+              <div><dt>实验日期</dt><dd>{{ record.record_date }}</dd></div>
+              <div><dt>实验批次</dt><dd>{{ record.batch.batch_code if record.batch else '历史记录' }}</dd></div>
+              <div><dt>实验人员</dt><dd>{{ record.operator or '未填写' }}</dd></div>
+              <div><dt>记录状态</dt><dd>{{ record.lifecycle_status }}</dd></div>
+            </dl>
+
+            <section class="report-preview-prose report-preview-objective"><h3>实验目的</h3><p>{{ record.experiment.objective or '未填写' }}</p></section>
+            <div class="report-preview-prose-grid">
+              <section class="report-preview-prose"><h3>实验条件 / 仪器设备 / 原理</h3><p>{{ record.conditions or '未填写' }}</p></section>
+              <section class="report-preview-prose"><h3>实验过程 / 观察记录</h3><p>{{ record.content or '未填写' }}</p></section>
+            </div>
+            <section class="report-preview-prose report-preview-conclusion"><h3>实验结果 / 结论与备注</h3><p>{{ record.remark or '未填写' }}</p></section>
+
+            <section class="report-preview-steps">
+              <div class="report-preview-section-head"><span><h3>{{ '本批次实验步骤' if record.batch else '方案阶段（历史记录参考）' }}</h3><small>{{ ('实际执行记录 · %d/%d 已完成'|format(completed_steps, report_steps|length)) if record.batch else '历史记录未关联批次，仅展示方案大纲' }}</small></span><b>{{ report_steps|length }} 项</b></div>
+              <div class="report-preview-step-list">
+                {% for step in report_steps %}
+                <div class="report-preview-step">
+                  <span class="report-preview-step-number">{{ '%02d'|format(step.position) }}</span>
+                  <span><b>{{ step.title }}</b><small>{{ step.description or '未填写操作要求' }}</small></span>
+                  <span class="report-preview-step-meta">{{ step.operator or record.operator or '未填写' }}<small>{{ step.completed_date or step.planned_date or '未设置日期' }}</small></span>
+                  {% if record.batch %}<span class="report-step-status" data-state="{{ 'success' if step.is_done else 'neutral' }}">{{ '已完成' if step.is_done else '待执行' }}</span>{% endif %}
+                </div>
+                {% else %}<div class="report-preview-empty">{{ '当前批次没有实验步骤' if record.batch else '实验方案尚未定义阶段' }}</div>{% endfor %}
+              </div>
+            </section>
+
+            <section class="report-preview-attachments">
+              <div class="report-preview-section-head"><span><h3>原始数据与附件</h3><small>导出报告会保留附件目录和可用的图片预览</small></span><b>{{ report_attachments|length }} 个</b></div>
+              {% if report_attachments %}
+              <div class="report-preview-attachment-list">
+                {% for attachment in report_images[:3] %}<a href="{{ url_for('main.attachment_preview', item_id=attachment.id) }}" target="_blank" rel="noopener"><img src="{{ url_for('main.attachment_preview', item_id=attachment.id) }}" alt="{{ attachment.original_name }}" loading="lazy"><span>{{ attachment.original_name }}</span></a>{% endfor %}
+                {% for attachment in report_attachments if attachment not in report_images %}<span class="report-preview-file"><i data-lucide="file"></i><span><b>{{ attachment.original_name }}</b><small>{{ attachment.category }} · {{ attachment.size_label }}</small></span></span>{% endfor %}
+              </div>
+              {% else %}<div class="report-preview-empty">暂无原始数据或附件</div>{% endif %}
+            </section>
+          </div>
+        </details>
+        {% endfor %}
+      </div>
+    </section>
+    {% endfor %}
+  </main>
+
+  <aside class="report-export-confirm-wrap">
+    <form method="post" action="{{ url_for('main.experiment_report_export_selected') }}" class="report-export-confirm">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="return_url" value="{{ return_url }}">
+      {% for record in records %}<input type="hidden" name="record_ids" value="{{ record.id }}">{% endfor %}
+      <header><p class="eyebrow">EXPORT SETTINGS</p><h2>导出设置</h2><span>仅导出本页已预览的 {{ report_stats.reports }} 份报告</span></header>
+
+      <fieldset class="report-export-format"><legend>文件格式</legend>
+        <label><input type="radio" name="format" value="docx" {{ 'checked' if export_format == 'docx' }}><span><i data-lucide="file-text"></i><b>Word</b><small>便于继续编辑</small></span></label>
+        <label><input type="radio" name="format" value="pdf" {{ 'checked' if export_format == 'pdf' }}><span><i data-lucide="file-check-2"></i><b>PDF</b><small>固定排版归档</small></span></label>
+      </fieldset>
+
+      <label class="report-export-template"><span>报告模板</span><select name="report_template" aria-label="选择批量报告模板">{% for value, label in report_templates %}<option value="{{ value }}" {{ 'selected' if report_template == value }}>{{ label }}</option>{% endfor %}</select></label>
+      <p class="report-export-package-note"><i data-lucide="archive"></i><span><b>ZIP 分层归档</b><small>按项目 / 实验计划 / 报告组织文件</small></span></p>
+      <button class="btn primary full" type="submit"><i data-lucide="download"></i> 确认导出 {{ report_stats.reports }} 份报告</button>
+    </form>
+  </aside>
+</div>
+{% endblock %}

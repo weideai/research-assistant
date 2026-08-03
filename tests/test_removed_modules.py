@@ -21,8 +21,12 @@ def test_assistant_surface_exposes_scope_and_api_controls(client, auth):
     body = client.get("/dashboard").get_data(as_text=True)
 
     assert 'id="ai-api-settings"' in body
-    assert 'id="ai-context-label"' in body
-    assert 'id="ai-context-state"' in body
+    assert 'id="ai-context-bar"' in body
+    assert 'id="ai-experiment-source-open"' in body
+    assert 'id="ai-knowledge-source-open"' in body
+    assert 'id="ai-context-page"' in body
+    assert 'id="ai-context-label"' not in body
+    assert 'id="ai-context-state"' not in body
     assert 'id="ai-input-count"' in body
     assert 'maxlength="20000"' in body
     assert "论文" not in body

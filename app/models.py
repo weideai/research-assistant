@@ -141,6 +141,7 @@ class AIConversation(TimestampMixin, db.Model):
     page_id = db.Column(db.Integer)
     selected_experiment_ids_json = db.Column(db.Text, nullable=False, default="[]")
     selected_batch_ids_json = db.Column(db.Text, nullable=False, default="[]")
+    selected_record_ids_json = db.Column(db.Text, nullable=False, default="[]")
     selected_knowledge_base_ids_json = db.Column(db.Text, nullable=False, default="[]")
     messages = db.relationship(
         "AIMessage", backref="conversation", cascade="all, delete-orphan",

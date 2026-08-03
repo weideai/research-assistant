@@ -1,6 +1,160 @@
 document.addEventListener("DOMContentLoaded", () => {
   if (window.lucide) window.lucide.createIcons();
 
+  const openHashDisclosure = () => {
+    if (!window.location.hash) return;
+    const target = document.querySelector(window.location.hash);
+    if (target instanceof HTMLDetailsElement) target.open = true;
+  };
+  openHashDisclosure();
+  window.addEventListener("hashchange", openHashDisclosure);
+
+  const normalizeDirectoryText = (value) => String(value || "")
+    .normalize("NFKC")
+    .toLocaleLowerCase("zh-CN");
+
+  document.querySelectorAll("[data-local-directory]").forEach((directory) => {
+    const items = Array.from(directory.querySelectorAll("[data-directory-item]"));
+    const inputs = items.map((item) => item.querySelector("[data-directory-input]")).filter(Boolean);
+    const search = directory.querySelector("[data-directory-search]");
+    const pageSize = directory.querySelector("[data-directory-page-size]");
+    const total = directory.querySelector("[data-directory-total]");
+    const selected = directory.querySelector("[data-directory-selected]");
+    const selectPage = directory.querySelector("[data-directory-select-page]");
+    const selectFiltered = directory.querySelector("[data-directory-select-filtered]");
+    const clear = directory.querySelector("[data-directory-clear]");
+    const previous = directory.querySelector("[data-directory-prev]");
+    const next = directory.querySelector("[data-directory-next]");
+    const pageLabel = directory.querySelector("[data-directory-page]");
+    const empty = directory.querySelector("[data-directory-empty]");
+    const mode = directory.dataset.directoryMode || "multiple";
+    const unit = directory.dataset.directoryUnit || "项";
+    let page = 1;
+    let filteredItems = items;
+    let pageItems = [];
+
+    const itemInput = (item) => item.querySelector("[data-directory-input]");
+    const updateSelectionState = () => {
+      const selectedCount = inputs.filter((input) => input.checked).length;
+      if (selected) selected.textContent = `已选择 ${selectedCount} ${unit}`;
+      directory.classList.toggle("has-directory-selection", selectedCount > 0);
+      if (mode !== "multiple") return;
+
+      const pageInputs = pageItems.map(itemInput).filter((input) => input?.type === "checkbox");
+      const pageSelectedCount = pageInputs.filter((input) => input.checked).length;
+      if (selectPage) {
+        selectPage.disabled = pageInputs.length === 0;
+        selectPage.checked = pageInputs.length > 0 && pageSelectedCount === pageInputs.length;
+        selectPage.indeterminate = pageSelectedCount > 0 && pageSelectedCount < pageInputs.length;
+      }
+      const filteredInputs = filteredItems.map(itemInput).filter((input) => input?.type === "checkbox");
+      const allFilteredSelected = filteredInputs.length > 0 && filteredInputs.every((input) => input.checked);
+      if (selectFiltered) {
+        selectFiltered.disabled = filteredInputs.length === 0;
+        selectFiltered.classList.toggle("is-active", allFilteredSelected);
+        selectFiltered.setAttribute("aria-pressed", allFilteredSelected ? "true" : "false");
+      }
+      if (clear) clear.disabled = selectedCount === 0;
+    };
+
+    const renderDirectory = () => {
+      const query = normalizeDirectoryText(search?.value.trim());
+      const perPage = Number.parseInt(pageSize?.value || "8", 10) || 8;
+      filteredItems = items.filter((item) => normalizeDirectoryText(
+        item.dataset.directorySearchValue || item.textContent,
+      ).includes(query));
+      const pages = Math.max(1, Math.ceil(filteredItems.length / perPage));
+      page = Math.min(Math.max(1, page), pages);
+      const start = (page - 1) * perPage;
+      pageItems = filteredItems.slice(start, start + perPage);
+      const visibleItems = new Set(pageItems);
+      items.forEach((item) => { item.hidden = !visibleItems.has(item); });
+      if (empty) empty.hidden = filteredItems.length > 0;
+      if (total) total.textContent = query
+        ? `${filteredItems.length} / ${items.length} ${unit}`
+        : `${items.length} ${unit}`;
+      if (pageLabel) pageLabel.textContent = `第 ${page} / ${pages} 页`;
+      if (previous) previous.disabled = page <= 1;
+      if (next) next.disabled = page >= pages;
+      updateSelectionState();
+    };
+
+    search?.addEventListener("input", () => { page = 1; renderDirectory(); });
+    pageSize?.addEventListener("change", () => { page = 1; renderDirectory(); });
+    previous?.addEventListener("click", () => { page -= 1; renderDirectory(); });
+    next?.addEventListener("click", () => { page += 1; renderDirectory(); });
+    selectPage?.addEventListener("change", () => {
+      pageItems.map(itemInput).filter((input) => input?.type === "checkbox")
+        .forEach((input) => { input.checked = selectPage.checked; });
+      updateSelectionState();
+    });
+    selectFiltered?.addEventListener("click", () => {
+      filteredItems.map(itemInput).filter((input) => input?.type === "checkbox")
+        .forEach((input) => { input.checked = true; });
+      updateSelectionState();
+    });
+    clear?.addEventListener("click", () => {
+      inputs.filter((input) => input.type === "checkbox").forEach((input) => { input.checked = false; });
+      updateSelectionState();
+    });
+    inputs.forEach((input) => input.addEventListener("change", updateSelectionState));
+    renderDirectory();
+  });
+
+  document.querySelectorAll("select[data-filterable-select]").forEach((select) => {
+    const options = Array.from(select.options).filter((option) => option.value);
+    if (options.length <= 8) return;
+
+    const shell = document.createElement("span");
+    shell.className = "filterable-select-shell";
+    const queryField = document.createElement("span");
+    queryField.className = "filterable-select-query";
+    const icon = document.createElement("i");
+    icon.dataset.lucide = "search";
+    const query = document.createElement("input");
+    query.type = "search";
+    query.placeholder = select.dataset.selectSearchPlaceholder || "查找选项";
+    query.setAttribute("aria-label", query.placeholder);
+    query.autocomplete = "off";
+    const status = document.createElement("small");
+    status.className = "filterable-select-status";
+    status.setAttribute("aria-live", "polite");
+    queryField.append(icon, query);
+    select.before(shell);
+    shell.append(queryField, status, select);
+
+    const refreshOptions = () => {
+      const value = normalizeDirectoryText(query.value.trim());
+      let matchCount = 0;
+      options.forEach((option) => {
+        const matches = normalizeDirectoryText(option.textContent).includes(value);
+        if (matches) matchCount += 1;
+        const keepVisible = matches || option.selected;
+        option.hidden = !keepVisible;
+        option.disabled = !keepVisible;
+      });
+      status.textContent = value ? `${matchCount} 个匹配` : `${options.length} 个可选`;
+      select.querySelectorAll('option[value=""]').forEach((option) => {
+        option.hidden = false;
+        option.disabled = false;
+      });
+    };
+
+    query.addEventListener("input", refreshOptions);
+    query.addEventListener("keydown", (event) => {
+      if (["ArrowDown", "Enter"].includes(event.key)) {
+        event.preventDefault();
+        select.focus();
+      }
+    });
+    select.addEventListener("change", () => {
+      query.value = "";
+      refreshOptions();
+    });
+    refreshOptions();
+  });
+  if (window.lucide) window.lucide.createIcons();
+
   const modelDiscoveryRoot = document.querySelector("[data-model-discovery-url]");
   if (modelDiscoveryRoot) {
     const discoveryUrl = modelDiscoveryRoot.dataset.modelDiscoveryUrl;
@@ -143,26 +297,6 @@ document.addEventListener("DOMContentLoaded", () => {
       .catch(() => {});
   }
 
-  const appearanceDialog = document.querySelector("#appearance-dialog");
-  const appearanceForm = document.querySelector("#appearance-form");
-  const backgroundInput = document.querySelector("#background-input");
-  const backgroundPreview = document.querySelector("#background-preview");
-  let appearanceSnapshot = null;
-  let appearanceSubmitting = false;
-  let previewObjectUrl = null;
-
-  document.querySelector("#appearance-toggle")?.addEventListener("click", () => {
-    appearanceSnapshot = {
-      theme: document.documentElement.dataset.theme,
-      mode: document.documentElement.dataset.mode,
-      background: document.body.style.getPropertyValue("--workspace-background-image"),
-      hasBackground: document.body.classList.contains("has-custom-background"),
-    };
-    appearanceSubmitting = false;
-    appearanceDialog?.showModal();
-  });
-  document.querySelector("#appearance-close")?.addEventListener("click", () => appearanceDialog?.close());
-
   const openWorkspaceDialog = (dialogId) => {
     const dialog = document.getElementById(dialogId);
     if (!(dialog instanceof HTMLDialogElement)) return;
@@ -188,47 +322,14 @@ document.addEventListener("DOMContentLoaded", () => {
   const initialDialogId = window.location.hash.replace(/^#/, "");
   if (initialDialogId) openWorkspaceDialog(initialDialogId);
 
-  appearanceDialog?.addEventListener("close", () => {
-    if (!appearanceSubmitting && appearanceSnapshot) {
-      document.documentElement.dataset.theme = appearanceSnapshot.theme;
-      document.documentElement.dataset.mode = appearanceSnapshot.mode;
-      document.body.classList.toggle("has-custom-background", appearanceSnapshot.hasBackground);
-      if (appearanceSnapshot.background) {
-        document.body.style.setProperty("--workspace-background-image", appearanceSnapshot.background);
-      } else {
-        document.body.style.removeProperty("--workspace-background-image");
-      }
-      appearanceForm?.querySelector(`input[name="theme"][value="${appearanceSnapshot.theme}"]`)?.click();
-      const modeToggle = document.querySelector("#dark-mode-toggle");
-      if (modeToggle) modeToggle.checked = appearanceSnapshot.mode === "dark";
-    }
-    if (previewObjectUrl) URL.revokeObjectURL(previewObjectUrl);
-    previewObjectUrl = null;
-  });
-  appearanceForm?.addEventListener("submit", () => { appearanceSubmitting = true; });
-  appearanceForm?.querySelectorAll('input[name="theme"]').forEach((input) => {
-    input.addEventListener("change", () => {
-      if (input.checked) document.documentElement.dataset.theme = input.value;
-    });
-  });
-  document.querySelector("#dark-mode-toggle")?.addEventListener("change", (event) => {
-    document.documentElement.dataset.mode = event.target.checked ? "dark" : "light";
-  });
-  backgroundInput?.addEventListener("change", () => {
-    const file = backgroundInput.files?.[0];
-    if (!file) return;
-    if (previewObjectUrl) URL.revokeObjectURL(previewObjectUrl);
-    previewObjectUrl = URL.createObjectURL(file);
-    const imageValue = `url("${previewObjectUrl}")`;
-    backgroundPreview?.classList.add("has-image");
-    if (backgroundPreview) backgroundPreview.style.backgroundImage = imageValue;
-    document.body.classList.add("has-custom-background");
-    document.body.style.setProperty("--workspace-background-image", imageValue);
-  });
-
   document.querySelectorAll("form[data-confirm]").forEach((form) => {
     form.addEventListener("submit", (event) => {
       if (!window.confirm(form.dataset.confirm)) event.preventDefault();
+    });
+  });
+  document.querySelectorAll("button[data-confirm]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      if (!window.confirm(button.dataset.confirm)) event.preventDefault();
     });
   });
 
@@ -302,39 +403,82 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll("[data-bulk-form]").forEach((form) => {
     const checkboxes = [...document.querySelectorAll(`[data-bulk-select][form="${form.id}"]`)];
     const selectAll = form.querySelector("[data-bulk-select-all]");
+    const selectAllMatches = form.querySelector("[data-bulk-select-all-matches]");
+    const selectionScope = form.querySelector("[data-bulk-selection-scope]");
     const selectedLabel = form.querySelector("[data-bulk-selected]");
     const actionButtons = [...form.querySelectorAll('button[name="action"]')];
     const resourceLabel = form.dataset.bulkLabel || "项目";
+    const counterLabel = form.dataset.bulkCounter || "";
+    const totalCount = Number.parseInt(form.dataset.bulkTotal || `${checkboxes.length}`, 10) || 0;
+    let allMatchesSelected = selectionScope?.value === "all";
     const updateState = () => {
       const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
-      if (selectedLabel) selectedLabel.textContent = `已选择 ${selectedCount} 个`;
-      if (selectAll) {
-        selectAll.checked = checkboxes.length > 0 && selectedCount === checkboxes.length;
-        selectAll.indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
+      const effectiveCount = allMatchesSelected ? totalCount : selectedCount;
+      if (selectedLabel) {
+        selectedLabel.textContent = counterLabel
+          ? (allMatchesSelected
+            ? `已选择全部 ${totalCount} ${counterLabel}`
+            : `已选择 ${selectedCount} ${counterLabel}`)
+          : (allMatchesSelected
+            ? `已选择全部 ${totalCount} 个${resourceLabel}`
+            : `已选择 ${selectedCount} 个`);
       }
-      actionButtons.forEach((button) => { button.disabled = selectedCount === 0; });
-      form.classList.toggle("has-selection", selectedCount > 0);
+      if (selectAll) {
+        selectAll.checked = allMatchesSelected || (checkboxes.length > 0 && selectedCount === checkboxes.length);
+        selectAll.indeterminate = !allMatchesSelected && selectedCount > 0 && selectedCount < checkboxes.length;
+      }
+      if (selectionScope) selectionScope.value = allMatchesSelected ? "all" : "page";
+      selectAllMatches?.classList.toggle("is-active", allMatchesSelected);
+      selectAllMatches?.setAttribute("aria-pressed", allMatchesSelected ? "true" : "false");
+      actionButtons.forEach((button) => { button.disabled = effectiveCount === 0; });
+      form.classList.toggle("has-selection", effectiveCount > 0);
     };
     selectAll?.addEventListener("change", () => {
+      allMatchesSelected = false;
       checkboxes.forEach((checkbox) => { checkbox.checked = selectAll.checked; });
       updateState();
     });
-    checkboxes.forEach((checkbox) => checkbox.addEventListener("change", updateState));
+    selectAllMatches?.addEventListener("click", () => {
+      allMatchesSelected = !allMatchesSelected;
+      checkboxes.forEach((checkbox) => { checkbox.checked = allMatchesSelected; });
+      updateState();
+    });
+    checkboxes.forEach((checkbox) => checkbox.addEventListener("change", () => {
+      allMatchesSelected = false;
+      updateState();
+    }));
     form.addEventListener("submit", (event) => {
       const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
-      if (!selectedCount) {
+      const effectiveCount = allMatchesSelected ? totalCount : selectedCount;
+      if (!effectiveCount) {
         event.preventDefault();
         window.alert(`请先勾选至少一个${resourceLabel}。`);
         return;
       }
       if (event.submitter?.value === "delete") {
         const message = form.dataset.bulkDeleteMessage
-          ? form.dataset.bulkDeleteMessage.replace("{count}", String(selectedCount))
-          : `确定批量删除选中的 ${selectedCount} 个${resourceLabel}吗？此操作无法撤销。`;
+          ? form.dataset.bulkDeleteMessage.replace("{count}", String(effectiveCount))
+          : `确定批量删除选中的 ${effectiveCount} 个${resourceLabel}吗？此操作无法撤销。`;
         if (!window.confirm(message)) event.preventDefault();
       }
     });
     updateState();
+  });
+
+  document.querySelectorAll("[data-schedule-controls]").forEach((group) => {
+    const mode = group.querySelector("[data-schedule-mode]");
+    const dateInput = group.querySelector("[data-schedule-date]");
+    const intervalInput = group.querySelector("[data-schedule-interval]");
+    const shiftInput = group.querySelector("[data-schedule-shift]");
+    if (!mode) return;
+    const updateScheduleFields = () => {
+      const value = mode.value;
+      if (dateInput) dateInput.disabled = !["set", "sequence"].includes(value);
+      if (intervalInput) intervalInput.disabled = value !== "sequence";
+      if (shiftInput) shiftInput.disabled = value !== "shift";
+    };
+    mode.addEventListener("change", updateScheduleFields);
+    updateScheduleFields();
   });
 
   document.querySelectorAll("details[data-disclosure-key]").forEach((details) => {
@@ -614,9 +758,32 @@ document.addEventListener("DOMContentLoaded", () => {
   const aiModelLabel = document.querySelector("#ai-model-label");
   const aiHistoryList = document.querySelector("#ai-history-list");
   const aiHistoryCount = document.querySelector("#ai-history-count");
+  const aiHistorySearch = document.querySelector("#ai-history-search");
+  const aiHistoryLevel = document.querySelector("#ai-history-level");
+  const aiHistoryPerPage = document.querySelector("#ai-history-per-page");
+  const aiHistoryResults = document.querySelector("#ai-history-results");
+  const aiHistoryPrev = document.querySelector("#ai-history-prev");
+  const aiHistoryNext = document.querySelector("#ai-history-next");
+  const aiHistoryPageLabel = document.querySelector("#ai-history-page");
   const aiKnowledgeList = document.querySelector("#ai-knowledge-list");
   const aiKnowledgeCount = document.querySelector("#ai-knowledge-count");
   const aiKnowledgeCreateForm = document.querySelector("#ai-knowledge-create-form");
+  const aiKnowledgeSearch = document.querySelector("#ai-knowledge-search");
+  const aiKnowledgePerPage = document.querySelector("#ai-knowledge-per-page");
+  const aiKnowledgeSelectPage = document.querySelector("#ai-knowledge-select-page");
+  const aiKnowledgeSelectMatches = document.querySelector("#ai-knowledge-select-matches");
+  const aiKnowledgeTotal = document.querySelector("#ai-knowledge-total");
+  const aiKnowledgeSelected = document.querySelector("#ai-knowledge-selected");
+  const aiKnowledgeBulkEnabled = document.querySelector("#ai-knowledge-bulk-enabled");
+  const aiKnowledgeDescriptionMode = document.querySelector("#ai-knowledge-description-mode");
+  const aiKnowledgeDescriptionValue = document.querySelector("#ai-knowledge-description-value");
+  const aiKnowledgeInstructionMode = document.querySelector("#ai-knowledge-instruction-mode");
+  const aiKnowledgeInstructionValue = document.querySelector("#ai-knowledge-instruction-value");
+  const aiKnowledgeBulkSave = document.querySelector("#ai-knowledge-bulk-save");
+  const aiKnowledgeBulkDelete = document.querySelector("#ai-knowledge-bulk-delete");
+  const aiKnowledgePrev = document.querySelector("#ai-knowledge-prev");
+  const aiKnowledgeNext = document.querySelector("#ai-knowledge-next");
+  const aiKnowledgePageLabel = document.querySelector("#ai-knowledge-page");
   const aiPromptForm = document.querySelector("#ai-prompt-form");
   const aiCustomPrompt = document.querySelector("#ai-custom-prompt");
   const aiPromptStatus = document.querySelector("#ai-prompt-status");
@@ -627,6 +794,18 @@ document.addEventListener("DOMContentLoaded", () => {
   const aiConversationSidebar = document.querySelector("#ai-conversation-sidebar");
   const aiConversationList = document.querySelector("#ai-conversation-list");
   const aiConversationSearch = document.querySelector("#ai-conversation-search");
+  const aiConversationTotal = document.querySelector("#ai-conversation-total");
+  const aiConversationSelectPage = document.querySelector("#ai-conversation-select-page");
+  const aiConversationSelectMatches = document.querySelector("#ai-conversation-select-matches");
+  const aiConversationPerPage = document.querySelector("#ai-conversation-per-page");
+  const aiConversationSelected = document.querySelector("#ai-conversation-selected");
+  const aiConversationTitleMode = document.querySelector("#ai-conversation-title-mode");
+  const aiConversationTitleValue = document.querySelector("#ai-conversation-title-value");
+  const aiConversationBulkSave = document.querySelector("#ai-conversation-bulk-save");
+  const aiConversationBulkDelete = document.querySelector("#ai-conversation-bulk-delete");
+  const aiConversationPrev = document.querySelector("#ai-conversation-prev");
+  const aiConversationNext = document.querySelector("#ai-conversation-next");
+  const aiConversationPageLabel = document.querySelector("#ai-conversation-page");
   const aiChatTitle = document.querySelector("#ai-chat-title");
   const aiContextDialog = document.querySelector("#ai-context-dialog");
   const aiContextProvider = document.querySelector("#ai-context-provider");
@@ -634,8 +813,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const aiContextSources = document.querySelector("#ai-context-sources");
   const aiContextWarning = document.querySelector("#ai-context-warning");
   const aiContextConfirm = document.querySelector("#ai-context-confirm");
-  const aiContextLabel = document.querySelector("#ai-context-label");
-  const aiContextState = document.querySelector("#ai-context-state");
+  const aiContextPage = document.querySelector("#ai-context-page");
+  const aiExperimentSourceOpen = document.querySelector("#ai-experiment-source-open");
+  const aiKnowledgeSourceOpen = document.querySelector("#ai-knowledge-source-open");
+  const aiContextPageClose = document.querySelector("#ai-context-page-close");
+  const aiContextPageTitle = document.querySelector("#ai-context-page-title");
+  const aiContextPageDescription = document.querySelector("#ai-context-page-description");
+  const aiContextPageIcon = document.querySelector(".ai-context-page-icon");
   const aiInputCount = document.querySelector("#ai-input-count");
   const resizeAiInput = () => {
     if (!aiInput) return;
@@ -658,10 +842,23 @@ document.addEventListener("DOMContentLoaded", () => {
   let aiLoaded = false;
   let aiExperimentOptions = [];
   let aiBatchOptions = [];
+  let aiRecordOptions = [];
   let aiPageScope = {};
   let aiProjectOptions = [];
+  let aiHistoryPage = 1;
   let aiKnowledgeOptions = [];
+  let aiSelectedKnowledgeBaseIds = new Set();
+  let aiKnowledgeContextOwner = null;
+  let aiKnowledgePage = 1;
+  let aiKnowledgePagination = {page: 1, pages: 0, per_page: 8, total: 0, has_prev: false, has_next: false};
+  let aiKnowledgeSelectionScope = "page";
+  let aiKnowledgeSearchTimer = null;
+  const aiKnowledgeDocumentStates = new Map();
   let aiConversationOptions = [];
+  let aiConversationPage = 1;
+  let aiConversationPagination = {page: 1, pages: 0, per_page: 8, total: 0, has_prev: false, has_next: false};
+  let aiConversationSelectionScope = "page";
+  let aiConversationSearchTimer = null;
   let aiRequestRunning = false;
   let aiAbortController = null;
   let aiTaskStartedAt = 0;
@@ -987,14 +1184,37 @@ document.addEventListener("DOMContentLoaded", () => {
     renderConversationList();
   };
 
-  const renderConversationList = (query = aiConversationSearch?.value || "") => {
+  const updateConversationSelectionState = () => {
+    const boxes = Array.from(aiConversationList?.querySelectorAll(".ai-conversation-select input") || []);
+    const checked = boxes.filter((input) => input.checked).length;
+    const count = aiConversationSelectionScope === "all" ? aiConversationPagination.total : checked;
+    if (aiConversationSelectPage) {
+      aiConversationSelectPage.checked = Boolean(boxes.length) && checked === boxes.length;
+      aiConversationSelectPage.indeterminate = checked > 0 && checked < boxes.length;
+    }
+    if (aiConversationSelectMatches) {
+      aiConversationSelectMatches.classList.toggle("active", aiConversationSelectionScope === "all");
+      aiConversationSelectMatches.setAttribute("aria-pressed", aiConversationSelectionScope === "all" ? "true" : "false");
+      aiConversationSelectMatches.textContent = aiConversationSelectionScope === "all" ? "已选筛选全部" : "筛选全部";
+    }
+    if (aiConversationSelected) aiConversationSelected.textContent = `已选择 ${count} 个`;
+    if (aiConversationBulkSave) aiConversationBulkSave.disabled = count === 0;
+    if (aiConversationBulkDelete) aiConversationBulkDelete.disabled = count === 0;
+  };
+
+  const renderConversationList = () => {
     if (!aiConversationList) return;
-    const needle = query.trim().toLocaleLowerCase();
-    const rows = aiConversationOptions.filter((item) => !needle || `${item.title} ${item.preview}`.toLocaleLowerCase().includes(needle));
     aiConversationList.innerHTML = "";
-    rows.forEach((conversation) => {
+    aiConversationOptions.forEach((conversation) => {
       const row = makeElement("div", `ai-conversation-item${String(conversation.id) === String(aiConversationId) ? " active" : ""}`);
       row.dataset.conversationId = conversation.id;
+      const select = makeElement("label", "ai-conversation-select");
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.value = String(conversation.id);
+      checkbox.checked = aiConversationSelectionScope === "all";
+      checkbox.setAttribute("aria-label", `选择会话 ${conversation.title || "新对话"}`);
+      select.append(checkbox);
       const open = makeElement("button", "ai-conversation-open");
       open.type = "button";
       open.dataset.conversationId = conversation.id;
@@ -1005,16 +1225,26 @@ document.addEventListener("DOMContentLoaded", () => {
       const remove = makeAiActionButton("ai-delete-conversation", "trash-2", "删除会话");
       remove.dataset.conversationId = conversation.id;
       actions.append(rename, remove);
-      row.append(open, actions);
+      row.append(select, open, actions);
       aiConversationList.append(row);
     });
-    if (!rows.length) aiConversationList.append(makeElement("p", "", needle ? "没有匹配的会话" : "还没有历史聊天"));
+    if (!aiConversationOptions.length) aiConversationList.append(makeElement(
+      "p", "", (aiConversationSearch?.value || "").trim() ? "没有匹配的会话" : "还没有历史聊天",
+    ));
+    updateConversationSelectionState();
     if (window.lucide) window.lucide.createIcons();
   };
 
   const selectedBatchIds = () => Array.from(
     aiHistoryList?.querySelectorAll('input[name="batch_ids"]:checked') || []
   ).map((input) => String(input.value));
+
+  const selectedRecordIds = () => Array.from(
+    aiHistoryList?.querySelectorAll('input[name="record_ids"]:checked') || []
+  ).filter((input) => {
+    const batchParent = input.closest("[data-history-batch-group]")?.querySelector("[data-batch-select-all]");
+    return !batchParent?.checked;
+  }).map((input) => String(input.value));
 
   const selectedExperimentIds = () => {
     const selected = Array.from(
@@ -1024,13 +1254,25 @@ document.addEventListener("DOMContentLoaded", () => {
       const batch = aiBatchOptions.find((item) => String(item.id) === batchId);
       if (batch && !selected.includes(String(batch.experiment_id))) selected.push(String(batch.experiment_id));
     });
+    selectedRecordIds().forEach((recordId) => {
+      const record = aiRecordOptions.find((item) => String(item.id) === recordId);
+      if (record && !selected.includes(String(record.experiment_id))) selected.push(String(record.experiment_id));
+    });
     return selected;
   };
 
   const syncExperimentScopeControls = () => {
+    aiHistoryList?.querySelectorAll("[data-history-batch-group]").forEach((group) => {
+      const parent = group.querySelector("[data-batch-select-all]");
+      const children = Array.from(group.querySelectorAll('input[name="record_ids"]'));
+      if (!parent || !children.length) return;
+      const checkedCount = children.filter((input) => input.checked).length;
+      parent.checked = checkedCount === children.length;
+      parent.indeterminate = checkedCount > 0 && checkedCount < children.length;
+    });
     aiHistoryList?.querySelectorAll("[data-history-experiment-group]").forEach((group) => {
       const parent = group.querySelector("[data-experiment-select-all]");
-      const children = Array.from(group.querySelectorAll('input[name="batch_ids"]'));
+      const children = Array.from(group.querySelectorAll('input[name="batch_ids"], input[name="record_ids"]'));
       if (!parent || !children.length) return;
       const checkedCount = children.filter((input) => input.checked).length;
       parent.checked = checkedCount === children.length;
@@ -1038,45 +1280,137 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   };
 
+  const historyInputsMatchingFilter = () => Array.from(
+    aiHistoryList?.querySelectorAll('input[name="experiment_ids"], input[name="batch_ids"], input[name="record_ids"]') || []
+  ).filter((input) => {
+    const experimentGroup = input.closest("[data-history-experiment-group]");
+    const batchGroup = input.closest("[data-history-batch-group]");
+    const recordRow = input.closest("[data-history-record]");
+    return experimentGroup?.dataset.historyFilterMatch === "1"
+      && (!batchGroup || batchGroup.dataset.historyFilterMatch === "1")
+      && (!recordRow || recordRow.dataset.historyFilterMatch === "1");
+  });
+
+  const applyHistoryFilter = () => {
+    if (!aiHistoryList) return;
+    const needle = (aiHistorySearch?.value || "").trim().toLocaleLowerCase();
+    const level = aiHistoryLevel?.value || "all";
+    let visiblePlans = 0;
+    let visibleBatches = 0;
+    let visibleRecords = 0;
+    aiHistoryList.querySelectorAll("[data-history-experiment-group]").forEach((group) => {
+      const experimentMatches = !needle || (group.dataset.historySearch || "").includes(needle);
+      let groupHasVisibleBatch = false;
+      group.querySelectorAll("[data-history-batch-group]").forEach((batchGroup) => {
+        const batchMatches = !needle || (batchGroup.dataset.historySearch || "").includes(needle);
+        const recordRows = Array.from(batchGroup.querySelectorAll("[data-history-record]"));
+        const recordMatches = recordRows.map((row) => (
+          !needle || (row.dataset.historySearch || "").includes(needle)
+        ));
+        const hasMatchingRecord = recordMatches.some(Boolean);
+        let batchVisible;
+        if (level === "experiment") batchVisible = experimentMatches;
+        else if (level === "batch") batchVisible = batchMatches;
+        else if (level === "record") batchVisible = hasMatchingRecord;
+        else batchVisible = experimentMatches || batchMatches || hasMatchingRecord;
+        batchGroup.hidden = !batchVisible;
+        if (batchVisible) {
+          groupHasVisibleBatch = true;
+          visibleBatches += 1;
+        }
+        recordRows.forEach((row, index) => {
+          let recordVisible;
+          if (level === "experiment") recordVisible = experimentMatches;
+          else if (level === "batch") recordVisible = batchMatches;
+          else if (level === "record") recordVisible = recordMatches[index];
+          else recordVisible = experimentMatches || batchMatches || recordMatches[index];
+          row.hidden = !batchVisible || !recordVisible;
+          row.dataset.historyFilterMatch = row.hidden ? "0" : "1";
+          if (!row.hidden) visibleRecords += 1;
+        });
+        batchGroup.dataset.historyFilterMatch = batchVisible ? "1" : "0";
+        if ((needle || level !== "all") && batchGroup.tagName === "DETAILS") {
+          batchGroup.open = batchVisible;
+        }
+      });
+      const hasBatches = Boolean(group.querySelector("[data-history-batch-group]"));
+      const groupVisible = level === "experiment"
+        ? experimentMatches
+        : (groupHasVisibleBatch || (!hasBatches && level === "all" && experimentMatches));
+      group.hidden = !groupVisible;
+      group.dataset.historyFilterMatch = groupVisible ? "1" : "0";
+      if (groupVisible) visiblePlans += 1;
+      if ((needle || level !== "all") && group.tagName === "DETAILS") group.open = groupVisible;
+    });
+    const matchedGroups = Array.from(
+      aiHistoryList.querySelectorAll('[data-history-experiment-group][data-history-filter-match="1"]')
+    );
+    const requestedPerPage = Number.parseInt(aiHistoryPerPage?.value || "8", 10);
+    const perPage = [8, 16, 32].includes(requestedPerPage) ? requestedPerPage : 8;
+    const pageCount = Math.max(1, Math.ceil(matchedGroups.length / perPage));
+    aiHistoryPage = Math.min(Math.max(1, aiHistoryPage), pageCount);
+    const pageStart = (aiHistoryPage - 1) * perPage;
+    matchedGroups.forEach((group, index) => {
+      group.hidden = index < pageStart || index >= pageStart + perPage;
+    });
+    const noResults = aiHistoryList.querySelector("[data-history-no-results]");
+    if (noResults) noResults.hidden = visiblePlans > 0;
+    if (aiHistoryPageLabel) aiHistoryPageLabel.textContent = `第 ${aiHistoryPage} / ${pageCount} 页`;
+    if (aiHistoryPrev) aiHistoryPrev.disabled = aiHistoryPage <= 1;
+    if (aiHistoryNext) aiHistoryNext.disabled = aiHistoryPage >= pageCount;
+    if (aiHistoryResults) {
+      aiHistoryResults.textContent = `${visiblePlans} 个计划 · ${visibleBatches} 个批次 · ${visibleRecords} 条记录`;
+    }
+  };
+
   const updateHistoryCount = () => {
     syncExperimentScopeControls();
+    const recordCount = selectedRecordIds().length;
     const executionCount = selectedBatchIds().length;
     const planCount = aiHistoryList?.querySelectorAll('input[name="experiment_ids"]:checked').length || 0;
     if (aiHistoryCount) {
-      aiHistoryCount.textContent = executionCount
-        ? `已选择 ${executionCount} 个批次${planCount ? `、${planCount} 个计划` : ""}`
-        : (planCount ? `已选择 ${planCount} 个计划` : "未选择实验批次");
+      const parts = [];
+      if (recordCount) parts.push(`${recordCount} 条记录`);
+      if (executionCount) parts.push(`${executionCount} 个批次`);
+      if (planCount) parts.push(`${planCount} 个计划`);
+      aiHistoryCount.textContent = parts.length ? `已选择 ${parts.join("、")}` : "计划、批次与记录";
     }
     const pptLink = document.querySelector("#ai-create-ppt");
     if (pptLink) {
       const query = selectedExperimentIds().map((id) => `experiment_id=${encodeURIComponent(id)}`).join("&");
       pptLink.href = `/reports/presentation${query ? `?${query}` : ""}`;
     }
-    updateAiContextStatus();
   };
 
-  const renderExperimentScope = (experiments, batches, selectedIds = [], selectedExecutionIds = [], pageScope = {}) => {
+  const renderExperimentScope = (
+    experiments, batches, records, selectedIds = [], selectedExecutionIds = [],
+    selectedRecordScopeIds = [], pageScope = {}, recordTotal = 0,
+  ) => {
     if (!aiHistoryList) return;
     aiExperimentOptions = experiments || [];
     aiBatchOptions = batches || [];
+    aiRecordOptions = records || [];
     aiPageScope = pageScope || {};
     const selectedPlans = new Set((selectedIds || []).map(String));
     const selectedExecutions = new Set((selectedExecutionIds || []).map(String));
+    const selectedRecords = new Set((selectedRecordScopeIds || []).map(String));
     // Conversations created before execution-level scope stored only experiment IDs.
     selectedPlans.forEach((experimentId) => {
       aiBatchOptions
         .filter((batch) => String(batch.experiment_id) === experimentId)
         .forEach((batch) => selectedExecutions.add(String(batch.id)));
     });
-    if (!selectedPlans.size && !selectedExecutions.size && aiPageScope.batch_id) {
+    if (!selectedPlans.size && !selectedExecutions.size && !selectedRecords.size && aiPageScope.record_id) {
+      selectedRecords.add(String(aiPageScope.record_id));
+    } else if (!selectedPlans.size && !selectedExecutions.size && !selectedRecords.size && aiPageScope.batch_id) {
       selectedExecutions.add(String(aiPageScope.batch_id));
-    } else if (!selectedPlans.size && !selectedExecutions.size && aiPageScope.experiment_id) {
+    } else if (!selectedPlans.size && !selectedExecutions.size && !selectedRecords.size && aiPageScope.experiment_id) {
       const currentBatches = aiBatchOptions.filter(
         (batch) => String(batch.experiment_id) === String(aiPageScope.experiment_id)
       );
       if (currentBatches.length) currentBatches.forEach((batch) => selectedExecutions.add(String(batch.id)));
       else selectedPlans.add(String(aiPageScope.experiment_id));
-    } else if (!selectedPlans.size && !selectedExecutions.size && aiPageScope.project_id) {
+    } else if (!selectedPlans.size && !selectedExecutions.size && !selectedRecords.size && aiPageScope.project_id) {
       aiExperimentOptions
         .filter((experiment) => String(experiment.project_id || "") === String(aiPageScope.project_id))
         .forEach((experiment) => {
@@ -1086,87 +1420,155 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
     aiHistoryList.innerHTML = "";
-    aiExperimentOptions.forEach((experiment) => {
-      const group = makeElement("section", "ai-history-experiment-group");
-      group.dataset.historyExperimentGroup = String(experiment.id);
-      const label = makeElement("label", "ai-history-option ai-history-experiment");
-      const input = document.createElement("input");
-      input.type = "checkbox";
-      input.value = String(experiment.id);
+    aiExperimentOptions.forEach((experiment, experimentIndex) => {
       const experimentBatches = aiBatchOptions.filter(
         (batch) => String(batch.experiment_id) === String(experiment.id)
       );
+      const group = makeElement("details", "ai-history-experiment-group");
+      group.dataset.historyExperimentGroup = String(experiment.id);
+      group.dataset.historySearch = [
+        experiment.title, experiment.code, experiment.status, experiment.updated_label,
+      ].filter(Boolean).join(" ").toLocaleLowerCase();
+      const experimentHasSelection = selectedPlans.has(String(experiment.id))
+        || experimentBatches.some((batch) => selectedExecutions.has(String(batch.id)))
+        || aiRecordOptions.some((record) => (
+          String(record.experiment_id) === String(experiment.id) && selectedRecords.has(String(record.id))
+        ));
+      group.open = experimentIndex === 0 || experimentHasSelection;
+      const summary = makeElement("summary", "ai-history-option ai-history-experiment");
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.value = String(experiment.id);
+      input.setAttribute("aria-label", `选择实验计划 ${experiment.title}`);
       if (experimentBatches.length) input.dataset.experimentSelectAll = String(experiment.id);
       else input.name = "experiment_ids";
       input.checked = selectedPlans.has(String(experiment.id));
-      const copy = makeElement("span", "");
+      const copy = makeElement("span", "ai-history-node-copy");
       copy.append(makeElement("b", "", experiment.title));
-      copy.append(makeElement("small", "", `${experiment.code} · ${experiment.status} · ${experimentBatches.length} 个批次`));
-      label.append(input, copy);
-      group.append(label);
+      const experimentMeta = makeElement(
+        "small", "", `${experiment.code} · ${experiment.status} · ${experimentBatches.length} 个批次 · 最后编辑 ${experiment.updated_label}`
+      );
+      experimentMeta.title = experiment.updated_title || experiment.updated_at || "";
+      copy.append(experimentMeta);
+      const chevron = document.createElement("i");
+      chevron.dataset.lucide = "chevron-down";
+      chevron.className = "ai-history-chevron";
+      summary.append(input, copy, chevron);
+      group.append(summary);
       if (experimentBatches.length) {
         const executionList = makeElement("div", "ai-history-execution-list");
-        experimentBatches.forEach((batch) => {
-          const executionLabel = makeElement("label", "ai-history-option ai-history-execution");
+        experimentBatches.forEach((batch, batchIndex) => {
+          const batchRecords = aiRecordOptions.filter(
+            (record) => String(record.batch_id) === String(batch.id)
+          );
+          const batchGroup = makeElement(batchRecords.length ? "details" : "section", "ai-history-batch-group");
+          batchGroup.dataset.historyBatchGroup = String(batch.id);
+          batchGroup.dataset.historySearch = [
+            batch.code, batch.repeat_kind, batch.repeat_number, batch.group_name,
+            batch.status, batch.start_date, batch.end_date, batch.updated_label,
+          ].filter(Boolean).join(" ").toLocaleLowerCase();
+          if (batchGroup.tagName === "DETAILS") {
+            batchGroup.open = (experimentIndex === 0 && batchIndex === 0)
+              || selectedExecutions.has(String(batch.id))
+              || batchRecords.some((record) => selectedRecords.has(String(record.id)));
+          }
+          const executionLabel = makeElement(
+            batchRecords.length ? "summary" : "label", "ai-history-option ai-history-execution"
+          );
           const executionInput = document.createElement("input");
           executionInput.type = "checkbox";
           executionInput.name = "batch_ids";
           executionInput.value = String(batch.id);
           executionInput.dataset.experimentId = String(experiment.id);
+          executionInput.setAttribute("aria-label", `选择实验批次 ${batch.code}`);
+          if (batchRecords.length) executionInput.dataset.batchSelectAll = String(batch.id);
           executionInput.checked = selectedExecutions.has(String(batch.id));
-          const executionCopy = makeElement("span", "");
+          const executionCopy = makeElement("span", "ai-history-node-copy");
           executionCopy.append(makeElement("b", "", batch.code));
           const repeat = `${batch.repeat_kind} #${batch.repeat_number}`;
-          const dates = [batch.start_date, batch.end_date].filter(Boolean).join(" 至 ") || "未设置日期";
-          executionCopy.append(makeElement(
-            "small", "", [repeat, batch.group_name, batch.status, dates].filter(Boolean).join(" · ")
-          ));
+          const batchMeta = makeElement(
+            "small", "", [repeat, batch.group_name, batch.status, `${batch.record_count || 0} 条记录`, `最后编辑 ${batch.updated_label}`].filter(Boolean).join(" · ")
+          );
+          batchMeta.title = batch.updated_title || batch.updated_at || "";
+          executionCopy.append(batchMeta);
           executionLabel.append(executionInput, executionCopy);
-          executionList.append(executionLabel);
+          if (batchRecords.length) {
+            const batchChevron = document.createElement("i");
+            batchChevron.dataset.lucide = "chevron-down";
+            batchChevron.className = "ai-history-chevron";
+            executionLabel.append(batchChevron);
+          }
+          batchGroup.append(executionLabel);
+          if (batchRecords.length) {
+            const recordList = makeElement("div", "ai-history-record-list");
+            batchRecords.forEach((record) => {
+              const recordLabel = makeElement("label", "ai-history-option ai-history-record");
+              recordLabel.dataset.historyRecord = String(record.id);
+              recordLabel.dataset.historySearch = [
+                `R-${record.id}`, record.record_date, record.operator, record.result,
+                record.lifecycle_status, record.summary, record.updated_label,
+              ].filter(Boolean).join(" ").toLocaleLowerCase();
+              const recordInput = document.createElement("input");
+              recordInput.type = "checkbox";
+              recordInput.name = "record_ids";
+              recordInput.value = String(record.id);
+              recordInput.dataset.batchId = String(batch.id);
+              recordInput.dataset.experimentId = String(experiment.id);
+              recordInput.checked = selectedExecutions.has(String(batch.id)) || selectedRecords.has(String(record.id));
+              recordInput.setAttribute("aria-label", `选择实验记录 R-${record.id}`);
+              const recordCopy = makeElement("span", "ai-history-node-copy");
+              recordCopy.append(makeElement("b", "", `R-${record.id} · ${record.record_date}`));
+              const recordMeta = makeElement(
+                "small", "", `${record.result} · ${record.operator} · ${record.summary} · 最后编辑 ${record.updated_label}`
+              );
+              recordMeta.title = record.updated_title || record.updated_at || "";
+              recordCopy.append(recordMeta);
+              recordLabel.append(recordInput, recordCopy);
+              recordList.append(recordLabel);
+            });
+            batchGroup.append(recordList);
+          }
+          executionList.append(batchGroup);
         });
         group.append(executionList);
       } else {
-        copy.querySelector("small").textContent = `${experiment.code} · ${experiment.status} · 尚无实验批次，仅发送计划信息`;
+        experimentMeta.textContent = `${experiment.code} · ${experiment.status} · 尚无实验批次 · 最后编辑 ${experiment.updated_label}`;
       }
       aiHistoryList.append(group);
     });
-    if (!aiExperimentOptions.length) aiHistoryList.append(makeElement("p", "", "还没有可选择的实验计划或批次"));
+    if (!aiExperimentOptions.length) {
+      aiHistoryList.append(makeElement("p", "", "还没有可选择的实验计划、批次或记录"));
+    } else {
+      const noResults = makeElement("p", "ai-history-no-results", "没有匹配的实验目录内容");
+      noResults.dataset.historyNoResults = "1";
+      noResults.hidden = true;
+      aiHistoryList.append(noResults);
+    }
+    if (recordTotal > aiRecordOptions.length && aiHistoryResults) {
+      aiHistoryResults.title = `记录较多，当前目录载入最近编辑的 ${aiRecordOptions.length}/${recordTotal} 条记录`;
+    } else if (aiHistoryResults) {
+      aiHistoryResults.removeAttribute("title");
+    }
+    if (window.lucide) window.lucide.createIcons();
+    applyHistoryFilter();
     updateHistoryCount();
   };
 
   const appendExperimentScope = (data) => {
     data.set("experiment_scope_present", "1");
     data.set("batch_scope_present", "1");
+    data.set("record_scope_present", "1");
     Array.from(aiHistoryList?.querySelectorAll('input[name="experiment_ids"]:checked') || [])
       .forEach((input) => data.append("experiment_ids", input.value));
     selectedBatchIds().forEach((itemId) => data.append("batch_ids", itemId));
+    selectedRecordIds().forEach((itemId) => data.append("record_ids", itemId));
   };
 
-  const selectedKnowledgeBaseIds = () => Array.from(
-    aiKnowledgeList?.querySelectorAll('.ai-knowledge-select input[type="checkbox"]:checked') || []
-  ).map((input) => String(input.value));
+  const selectedKnowledgeBaseIds = () => Array.from(aiSelectedKnowledgeBaseIds);
 
   const updateKnowledgeCount = () => {
     const count = selectedKnowledgeBaseIds().length;
-    if (aiKnowledgeCount) aiKnowledgeCount.textContent = count ? `已选择 ${count} 个知识库` : "未选择知识库";
-    updateAiContextStatus();
-  };
-
-  const updateAiContextStatus = () => {
-    const executionCount = selectedBatchIds().length;
-    const planCount = aiHistoryList?.querySelectorAll('input[name="experiment_ids"]:checked').length || 0;
-    const knowledgeCount = selectedKnowledgeBaseIds().length;
-    const scopeLabel = executionCount
-      ? `${executionCount} 个实验批次${planCount ? ` · ${planCount} 个计划` : ""}`
-      : planCount
-        ? `${planCount} 个实验计划`
-        : (aiPageScope.batch_id ? "当前实验批次" : (aiPageScope.experiment_id ? "当前实验计划" : "未限定实验范围"));
-    if (aiContextLabel) aiContextLabel.textContent = `${scopeLabel} · ${knowledgeCount ? `${knowledgeCount} 个知识库` : "未选知识库"}`;
-    if (aiContextState) {
-      aiContextState.textContent = executionCount || planCount || aiPageScope.experiment_id || aiPageScope.batch_id
-        ? "范围已限定" : "仅使用当前会话";
-      aiContextState.classList.toggle("is-ready", Boolean(executionCount || planCount || aiPageScope.experiment_id || aiPageScope.batch_id));
-    }
+    if (aiKnowledgeCount) aiKnowledgeCount.textContent = count ? `已选择 ${count} 个知识库` : "本地文档与使用说明";
   };
 
   const postAiForm = async (url, data) => {
@@ -1177,44 +1579,313 @@ document.addEventListener("DOMContentLoaded", () => {
     return result;
   };
 
-  const renderKnowledgeBases = (items, selectedIds = []) => {
-    if (!aiKnowledgeList) return;
-    aiKnowledgeOptions = items || [];
-    const selected = new Set((selectedIds || []).map(String));
-    aiKnowledgeList.innerHTML = "";
-    aiKnowledgeOptions.forEach((base) => {
-      const item = makeElement("article", "ai-knowledge-item");
-      const select = makeElement("label", "ai-knowledge-select");
+  const knowledgeBaseItem = (baseId) => aiKnowledgeList?.querySelector(
+    `[data-knowledge-base-id="${CSS.escape(String(baseId))}"]`,
+  );
+
+  const updateKnowledgeSelectionState = () => {
+    const boxes = Array.from(aiKnowledgeList?.querySelectorAll(".ai-knowledge-manage-select input") || []);
+    const checked = boxes.filter((input) => input.checked).length;
+    const count = aiKnowledgeSelectionScope === "all" ? aiKnowledgePagination.total : checked;
+    if (aiKnowledgeSelectPage) {
+      aiKnowledgeSelectPage.checked = Boolean(boxes.length) && checked === boxes.length;
+      aiKnowledgeSelectPage.indeterminate = checked > 0 && checked < boxes.length;
+    }
+    if (aiKnowledgeSelectMatches) {
+      aiKnowledgeSelectMatches.classList.toggle("active", aiKnowledgeSelectionScope === "all");
+      aiKnowledgeSelectMatches.setAttribute("aria-pressed", aiKnowledgeSelectionScope === "all" ? "true" : "false");
+      aiKnowledgeSelectMatches.textContent = aiKnowledgeSelectionScope === "all" ? "已选筛选全部" : "选择筛选全部";
+    }
+    if (aiKnowledgeSelected) aiKnowledgeSelected.textContent = `已选择 ${count} 个`;
+    if (aiKnowledgeBulkSave) aiKnowledgeBulkSave.disabled = count === 0;
+    if (aiKnowledgeBulkDelete) aiKnowledgeBulkDelete.disabled = count === 0;
+  };
+
+  const documentStateForBase = (base) => {
+    const key = String(base.id);
+    const initialPagination = base.document_pagination || {
+      page: 1, pages: 0, per_page: 8, total: base.documents?.length || 0,
+      has_prev: false, has_next: false, page_sizes: [8, 16, 32],
+    };
+    let state = aiKnowledgeDocumentStates.get(key);
+    const requiresRefresh = Boolean(state && (
+      state.query || state.page !== 1 || state.perPage !== initialPagination.per_page
+    ));
+    if (!state) {
+      state = {
+        query: "", page: 1, perPage: initialPagination.per_page || 8,
+        pagination: initialPagination, documents: base.documents || [],
+        selectionScope: "page", searchTimer: null, loading: false, requestId: 0,
+      };
+      aiKnowledgeDocumentStates.set(key, state);
+    } else if (!requiresRefresh) {
+      state.pagination = initialPagination;
+      state.documents = base.documents || [];
+    }
+    return {state, requiresRefresh};
+  };
+
+  const updateKnowledgeDocumentSelectionState = (baseId) => {
+    const item = knowledgeBaseItem(baseId);
+    const state = aiKnowledgeDocumentStates.get(String(baseId));
+    if (!item || !state) return;
+    const boxes = Array.from(item.querySelectorAll(".ai-knowledge-document-select input"));
+    const checked = boxes.filter((input) => input.checked).length;
+    const count = state.selectionScope === "all" ? state.pagination.total : checked;
+    const selectPage = item.querySelector("[data-knowledge-document-select-page]");
+    if (selectPage) {
+      selectPage.checked = Boolean(boxes.length) && checked === boxes.length;
+      selectPage.indeterminate = checked > 0 && checked < boxes.length;
+    }
+    const selectMatches = item.querySelector("[data-knowledge-document-select-matches]");
+    if (selectMatches) {
+      selectMatches.classList.toggle("active", state.selectionScope === "all");
+      selectMatches.setAttribute("aria-pressed", state.selectionScope === "all" ? "true" : "false");
+      selectMatches.textContent = state.selectionScope === "all" ? "已选筛选全部" : "选择筛选全部";
+    }
+    const selected = item.querySelector("[data-knowledge-document-selected]");
+    if (selected) selected.textContent = `已选择 ${count} 个`;
+    item.querySelectorAll("[data-knowledge-document-bulk-action]").forEach((button) => {
+      button.disabled = count === 0;
+    });
+  };
+
+  const renderKnowledgeDocumentRows = (baseId) => {
+    const item = knowledgeBaseItem(baseId);
+    const state = aiKnowledgeDocumentStates.get(String(baseId));
+    if (!item || !state) return;
+    const list = item.querySelector("[data-knowledge-document-list]");
+    if (!list) return;
+    list.innerHTML = "";
+    state.documents.forEach((document) => {
+      const row = makeElement("div", "ai-knowledge-document");
+      const select = makeElement("label", "ai-knowledge-document-select");
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
-      checkbox.value = String(base.id);
-      checkbox.checked = selected.has(String(base.id));
-      checkbox.disabled = !base.is_enabled;
-      const label = makeElement("span", "");
-      label.append(makeElement("b", "", base.name), makeElement("small", "", `${base.documents.length} 个条目 · ${base.is_enabled ? "已启用" : "已停用"}`));
-      select.append(checkbox, label);
-      item.append(select);
+      checkbox.value = String(document.id);
+      checkbox.checked = state.selectionScope === "all";
+      checkbox.setAttribute("aria-label", `选择知识文档 ${document.title}`);
+      select.append(checkbox);
+      const copy = makeElement("div", "ai-knowledge-document-copy");
+      const link = makeElement("a", "", document.title);
+      link.href = `/assistant/knowledge-documents/${document.id}/download`;
+      const source = document.name || "手工文字";
+      const meta = makeElement("small", "", `${source} · ${document.size}${document.readable ? "" : " · 未提取文字"} · ${document.updated_at}`);
+      meta.title = `最后编辑：${document.updated_at}`;
+      copy.append(link, meta);
+      const remove = makeAiActionButton("ai-delete-knowledge-document", "trash-2", "删除知识文档");
+      remove.dataset.documentId = String(document.id);
+      remove.dataset.baseId = String(baseId);
+      remove.dataset.documentTitle = document.title;
+      row.append(select, copy, remove);
+      list.append(row);
+    });
+    if (!state.documents.length) {
+      list.append(makeElement("p", "ai-knowledge-document-empty", state.query ? "没有匹配的知识文档" : "这个知识库还没有文档"));
+    }
+    const pagination = state.pagination;
+    const summary = item.querySelector("[data-knowledge-document-summary]");
+    if (summary) summary.textContent = `${pagination.total || 0} 个知识文档`;
+    const total = item.querySelector("[data-knowledge-document-total]");
+    if (total) total.textContent = `${pagination.total || 0} 个匹配文档`;
+    const pageLabel = item.querySelector("[data-knowledge-document-page]");
+    if (pageLabel) pageLabel.textContent = `第 ${pagination.page || 1} / ${Math.max(1, pagination.pages || 0)} 页`;
+    const previous = item.querySelector("[data-knowledge-document-prev]");
+    const next = item.querySelector("[data-knowledge-document-next]");
+    if (previous) previous.disabled = !pagination.has_prev || state.loading;
+    if (next) next.disabled = !pagination.has_next || state.loading;
+    const perPage = item.querySelector("[data-knowledge-document-per-page]");
+    if (perPage) perPage.value = String(pagination.per_page || state.perPage || 8);
+    item.classList.toggle("is-loading", state.loading);
+    updateKnowledgeDocumentSelectionState(baseId);
+    if (window.lucide) window.lucide.createIcons();
+  };
 
-      const documents = makeElement("div", "ai-knowledge-documents");
-      base.documents.forEach((document) => {
-        const row = makeElement("div", "ai-knowledge-document");
-        const link = makeElement("a", "", `${document.title} · ${document.size}${document.readable ? "" : " · 未提取文字"}`);
-        link.href = `/assistant/knowledge-documents/${document.id}/download`;
-        const remove = makeElement("button", "", "×");
-        remove.type = "button";
-        remove.title = "删除知识条目";
-        remove.addEventListener("click", async () => {
-          if (!window.confirm(`删除知识条目“${document.title}”？`)) return;
-          try { await postAiForm(`/assistant/knowledge-documents/${document.id}/delete`, new FormData()); await loadAiState(); }
-          catch (error) { window.alert(error.message); }
-        });
-        row.append(link, remove);
-        documents.append(row);
+  const loadKnowledgeDocuments = async (baseId) => {
+    const state = aiKnowledgeDocumentStates.get(String(baseId));
+    if (!state) return;
+    const requestId = (state.requestId || 0) + 1;
+    state.requestId = requestId;
+    state.loading = true;
+    renderKnowledgeDocumentRows(baseId);
+    const query = new URLSearchParams({
+      page: String(state.page), per_page: String(state.perPage),
+    });
+    if (state.query) query.set("q", state.query);
+    try {
+      const response = await fetch(`/assistant/knowledge-bases/${baseId}/documents?${query.toString()}`, {
+        headers: {"Accept": "application/json"},
       });
-      item.append(documents);
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "无法读取知识文档");
+      if (state.requestId !== requestId) return;
+      state.documents = payload.documents || [];
+      state.pagination = payload.pagination || state.pagination;
+      state.page = state.pagination.page || 1;
+      state.perPage = state.pagination.per_page || state.perPage;
+      if (!state.documents.length && state.pagination.total > 0 && state.page > state.pagination.pages) {
+        state.loading = false;
+        state.page = Math.max(1, state.pagination.pages);
+        await loadKnowledgeDocuments(baseId);
+        return;
+      }
+    } catch (error) {
+      if (state.requestId === requestId) window.alert(error.message);
+    } finally {
+      if (state.requestId === requestId) {
+        state.loading = false;
+        renderKnowledgeDocumentRows(baseId);
+      }
+    }
+  };
+
+  const createKnowledgeDocumentPanel = (base, state) => {
+    const details = makeElement("details", "ai-knowledge-document-panel");
+    const summary = makeElement("summary", "");
+    const summaryLabel = makeElement("span", "");
+    summaryLabel.innerHTML = '<i data-lucide="files"></i>';
+    const summaryText = makeElement("b", "", `${state.pagination.total || 0} 个知识文档`);
+    summaryText.dataset.knowledgeDocumentSummary = "1";
+    summaryLabel.append(summaryText);
+    summary.append(summaryLabel);
+    const chevron = document.createElement("i");
+    chevron.dataset.lucide = "chevron-down";
+    summary.append(chevron);
+    details.append(summary);
+
+    const body = makeElement("div", "ai-knowledge-document-body");
+    const toolbar = makeElement("div", "ai-knowledge-document-toolbar");
+    const searchLabel = makeElement("label", "ai-knowledge-document-search");
+    searchLabel.innerHTML = '<i data-lucide="search"></i>';
+    const search = document.createElement("input");
+    search.type = "search";
+    search.maxLength = 120;
+    search.placeholder = "搜索文档标题或内容";
+    search.value = state.query;
+    search.dataset.knowledgeDocumentSearch = String(base.id);
+    search.setAttribute("aria-label", `搜索 ${base.name} 的知识文档`);
+    searchLabel.append(search);
+    const perPage = document.createElement("select");
+    perPage.dataset.knowledgeDocumentPerPage = String(base.id);
+    perPage.setAttribute("aria-label", "每页知识文档数量");
+    (state.pagination.page_sizes || [8, 16, 32]).forEach((size) => {
+      const option = document.createElement("option");
+      option.value = String(size);
+      option.textContent = `${size} / 页`;
+      perPage.append(option);
+    });
+    toolbar.append(searchLabel, perPage);
+
+    const selectionTools = makeElement("div", "ai-knowledge-document-page-tools");
+    const selectPageLabel = makeElement("label", "", " 全选本页");
+    const selectPage = document.createElement("input");
+    selectPage.type = "checkbox";
+    selectPage.dataset.knowledgeDocumentSelectPage = String(base.id);
+    selectPageLabel.prepend(selectPage);
+    const selectMatches = makeElement("button", "", "选择筛选全部");
+    selectMatches.type = "button";
+    selectMatches.dataset.knowledgeDocumentSelectMatches = String(base.id);
+    const total = makeElement("small", "", `${state.pagination.total || 0} 个匹配文档`);
+    total.dataset.knowledgeDocumentTotal = "1";
+    selectionTools.append(selectPageLabel, selectMatches, total);
+
+    const bulk = makeElement("details", "ai-knowledge-document-bulk");
+    const bulkSummary = makeElement("summary", "");
+    const bulkTitle = makeElement("span", "", "批量管理文档");
+    const selected = makeElement("small", "", "已选择 0 个");
+    selected.dataset.knowledgeDocumentSelected = "1";
+    bulkSummary.append(bulkTitle, selected);
+    const bulkFields = makeElement("div", "ai-knowledge-document-bulk-fields");
+    const titleMode = document.createElement("select");
+    titleMode.dataset.knowledgeDocumentTitleMode = "1";
+    titleMode.setAttribute("aria-label", "文档标题批量操作");
+    [["keep", "标题不变"], ["prefix", "添加前缀"], ["suffix", "添加后缀"]].forEach(([value, label]) => {
+      const option = document.createElement("option"); option.value = value; option.textContent = label; titleMode.append(option);
+    });
+    const titleValue = document.createElement("input");
+    titleValue.maxLength = 80;
+    titleValue.placeholder = "标题前缀或后缀";
+    titleValue.dataset.knowledgeDocumentTitleValue = "1";
+    const save = makeElement("button", "btn", "保存修改");
+    save.type = "button";
+    save.dataset.knowledgeDocumentBulkAction = "update";
+    save.dataset.baseId = String(base.id);
+    save.disabled = true;
+    const remove = makeElement("button", "btn danger", "批量删除");
+    remove.type = "button";
+    remove.dataset.knowledgeDocumentBulkAction = "delete";
+    remove.dataset.baseId = String(base.id);
+    remove.disabled = true;
+    bulkFields.append(titleMode, titleValue, save, remove);
+    bulk.append(bulkSummary, bulkFields);
+
+    const list = makeElement("div", "ai-knowledge-documents");
+    list.dataset.knowledgeDocumentList = "1";
+    const pagination = makeElement("nav", "ai-knowledge-document-pagination");
+    pagination.setAttribute("aria-label", `${base.name} 知识文档翻页`);
+    const previous = makeAiActionButton("", "chevron-left", "上一页");
+    previous.dataset.knowledgeDocumentPrev = String(base.id);
+    const page = makeElement("span", "", "第 1 / 1 页");
+    page.dataset.knowledgeDocumentPage = "1";
+    const next = makeAiActionButton("", "chevron-right", "下一页");
+    next.dataset.knowledgeDocumentNext = String(base.id);
+    pagination.append(previous, page, next);
+    body.append(toolbar, selectionTools, bulk, list, pagination);
+    details.append(body);
+    return details;
+  };
+
+  const makeKnowledgeCommand = (icon, label, className = "") => {
+    const button = makeElement("button", className);
+    button.type = "button";
+    button.innerHTML = `<i data-lucide="${icon}"></i>`;
+    button.append(document.createTextNode(label));
+    return button;
+  };
+
+  const renderKnowledgeBases = (items) => {
+    if (!aiKnowledgeList) return;
+    aiKnowledgeOptions = items || [];
+    aiKnowledgeList.innerHTML = "";
+    const refreshDocuments = [];
+    aiKnowledgeOptions.forEach((base) => {
+      const item = makeElement("article", "ai-knowledge-item");
+      item.dataset.knowledgeBaseId = String(base.id);
+      const header = makeElement("div", "ai-knowledge-item-head");
+      const manage = makeElement("label", "ai-knowledge-manage-select");
+      const manageCheckbox = document.createElement("input");
+      manageCheckbox.type = "checkbox";
+      manageCheckbox.value = String(base.id);
+      manageCheckbox.checked = aiKnowledgeSelectionScope === "all";
+      manageCheckbox.setAttribute("aria-label", `批量选择知识库 ${base.name}`);
+      manage.append(manageCheckbox);
+      const copy = makeElement("div", "ai-knowledge-item-copy");
+      const title = makeElement("div", "ai-knowledge-item-title");
+      title.append(makeElement("b", "", base.name), makeElement("span", `status-pill ${base.is_enabled ? "is-enabled" : "is-disabled"}`, base.is_enabled ? "已启用" : "已停用"));
+      const documentTotal = base.document_pagination?.total ?? base.documents.length;
+      const meta = makeElement("small", "", `${documentTotal} 个知识文档 · 最后编辑 ${base.updated_at}`);
+      meta.title = `最后编辑：${base.updated_at}`;
+      copy.append(title, meta);
+      if (base.description) {
+        const description = makeElement("p", "", base.description);
+        description.title = base.description;
+        copy.append(description);
+      }
+      const contextSelect = makeElement("label", "ai-knowledge-select");
+      const contextCheckbox = document.createElement("input");
+      contextCheckbox.type = "checkbox";
+      contextCheckbox.value = String(base.id);
+      contextCheckbox.checked = aiSelectedKnowledgeBaseIds.has(String(base.id)) && base.is_enabled;
+      contextCheckbox.disabled = !base.is_enabled;
+      contextCheckbox.setAttribute("aria-label", `本次对话使用知识库 ${base.name}`);
+      if (!base.is_enabled) aiSelectedKnowledgeBaseIds.delete(String(base.id));
+      contextSelect.append(contextCheckbox, makeElement("span", "", "用于本次对话"));
+      header.append(manage, copy, contextSelect);
+      item.append(header);
 
       const actions = makeElement("div", "ai-knowledge-actions");
-      const uploadLabel = makeElement("label", "ai-knowledge-file-label", "上传文件");
+      const uploadLabel = makeElement("label", "ai-knowledge-file-label");
+      uploadLabel.innerHTML = '<i data-lucide="upload"></i><span>上传文件</span>';
       const upload = document.createElement("input");
       upload.type = "file";
       upload.multiple = true;
@@ -1226,8 +1897,7 @@ document.addEventListener("DOMContentLoaded", () => {
         catch (error) { window.alert(error.message); }
       });
       uploadLabel.append(upload);
-      const addText = makeElement("button", "", "添加文字");
-      addText.type = "button";
+      const addText = makeKnowledgeCommand("file-plus-2", "添加文字");
       addText.addEventListener("click", async () => {
         const title = window.prompt("知识条目标题", "手工知识条目");
         if (title === null) return;
@@ -1239,8 +1909,7 @@ document.addEventListener("DOMContentLoaded", () => {
         try { await postAiForm(`/assistant/knowledge-bases/${base.id}/documents`, data); await loadAiState(); }
         catch (error) { window.alert(error.message); }
       });
-      const edit = makeElement("button", "", "编辑");
-      edit.type = "button";
+      const edit = makeKnowledgeCommand("pencil", "编辑");
       edit.addEventListener("click", async () => {
         const name = window.prompt("知识库名称", base.name);
         if (!name?.trim()) return;
@@ -1255,27 +1924,43 @@ document.addEventListener("DOMContentLoaded", () => {
         try { await postAiForm(`/assistant/knowledge-bases/${base.id}`, data); await loadAiState(); }
         catch (error) { window.alert(error.message); }
       });
-      const toggle = makeElement("button", "", base.is_enabled ? "停用" : "启用");
-      toggle.type = "button";
+      const toggle = makeKnowledgeCommand(base.is_enabled ? "pause" : "play", base.is_enabled ? "停用" : "启用");
       toggle.addEventListener("click", async () => {
         const data = new FormData(); data.set("action", "toggle");
-        try { await postAiForm(`/assistant/knowledge-bases/${base.id}`, data); await loadAiState(); }
+        try {
+          const result = await postAiForm(`/assistant/knowledge-bases/${base.id}`, data);
+          if (!result.is_enabled) aiSelectedKnowledgeBaseIds.delete(String(base.id));
+          await loadAiState();
+        }
         catch (error) { window.alert(error.message); }
       });
-      const removeBase = makeElement("button", "", "删除");
-      removeBase.type = "button";
+      const removeBase = makeKnowledgeCommand("trash-2", "删除", "danger");
       removeBase.addEventListener("click", async () => {
         if (!window.confirm(`删除知识库“${base.name}”及其中的文件？`)) return;
         const data = new FormData(); data.set("action", "delete");
-        try { await postAiForm(`/assistant/knowledge-bases/${base.id}`, data); await loadAiState(); }
+        try {
+          await postAiForm(`/assistant/knowledge-bases/${base.id}`, data);
+          aiSelectedKnowledgeBaseIds.delete(String(base.id));
+          aiKnowledgeDocumentStates.delete(String(base.id));
+          await loadAiState();
+        }
         catch (error) { window.alert(error.message); }
       });
       actions.append(uploadLabel, addText, edit, toggle, removeBase);
       item.append(actions);
+      const {state, requiresRefresh} = documentStateForBase(base);
+      item.append(createKnowledgeDocumentPanel(base, state));
       aiKnowledgeList.append(item);
+      renderKnowledgeDocumentRows(base.id);
+      if (requiresRefresh) refreshDocuments.push(base.id);
     });
-    if (!aiKnowledgeOptions.length) aiKnowledgeList.append(makeElement("p", "", "还没有知识库，可以在下方创建。"));
+    if (!aiKnowledgeOptions.length) aiKnowledgeList.append(makeElement(
+      "p", "", (aiKnowledgeSearch?.value || "").trim() ? "没有匹配的知识库" : "还没有知识库，可以在下方创建。",
+    ));
+    updateKnowledgeSelectionState();
     updateKnowledgeCount();
+    if (window.lucide) window.lucide.createIcons();
+    refreshDocuments.forEach((baseId) => loadKnowledgeDocuments(baseId));
   };
 
   const appendKnowledgeScope = (data) => {
@@ -1286,6 +1971,14 @@ document.addEventListener("DOMContentLoaded", () => {
   const loadAiState = async () => {
     const query = new URLSearchParams();
     if (aiConversationId) query.set("conversation_id", aiConversationId);
+    const conversationQuery = (aiConversationSearch?.value || "").trim();
+    if (conversationQuery) query.set("conversation_q", conversationQuery);
+    query.set("conversation_page", String(aiConversationPage));
+    query.set("conversation_per_page", String(aiConversationPerPage?.value || aiConversationPagination.per_page || 8));
+    const knowledgeQuery = (aiKnowledgeSearch?.value || "").trim();
+    if (knowledgeQuery) query.set("knowledge_q", knowledgeQuery);
+    query.set("knowledge_page", String(aiKnowledgePage));
+    query.set("knowledge_per_page", String(aiKnowledgePerPage?.value || aiKnowledgePagination.per_page || 8));
     if (assistantPage.type && assistantPage.id) {
       query.set("page_type", assistantPage.type);
       query.set("page_id", assistantPage.id);
@@ -1303,17 +1996,49 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     if (!response.ok) throw new Error("无法读取 AI 会话");
     const state = await response.json();
+    const nextKnowledgePagination = state.knowledge_pagination || aiKnowledgePagination;
+    if (!(state.knowledge_bases || []).length && nextKnowledgePagination.total > 0
+        && nextKnowledgePagination.page > nextKnowledgePagination.pages) {
+      aiKnowledgePage = Math.max(1, nextKnowledgePagination.pages);
+      return loadAiState();
+    }
     aiConversationOptions = state.conversations || [];
+    aiConversationPagination = state.conversation_pagination || aiConversationPagination;
+    aiConversationPage = aiConversationPagination.page || 1;
+    if (aiConversationPerPage) aiConversationPerPage.value = String(aiConversationPagination.per_page || 8);
+    if (aiConversationTotal) aiConversationTotal.textContent = `${aiConversationPagination.total || 0} 个匹配会话`;
+    if (aiConversationPageLabel) aiConversationPageLabel.textContent = `第 ${aiConversationPagination.page || 1} / ${aiConversationPagination.pages || 1} 页`;
+    if (aiConversationPrev) aiConversationPrev.disabled = !aiConversationPagination.has_prev;
+    if (aiConversationNext) aiConversationNext.disabled = !aiConversationPagination.has_next;
     aiProjectOptions = state.projects || [];
     setConversation(state.conversation);
+    renderConversationList();
     renderExperimentScope(
       state.experiments,
       state.batches,
+      state.records,
       state.conversation?.selected_experiment_ids || [],
       state.conversation?.selected_batch_ids || [],
+      state.conversation?.selected_record_ids || [],
       state.page_scope || {},
+      state.record_total || 0,
     );
-    renderKnowledgeBases(state.knowledge_bases, state.conversation?.selected_knowledge_base_ids || []);
+    aiKnowledgePagination = nextKnowledgePagination;
+    aiKnowledgePage = aiKnowledgePagination.page || 1;
+    if (aiKnowledgePerPage) aiKnowledgePerPage.value = String(aiKnowledgePagination.per_page || 8);
+    if (aiKnowledgeTotal) aiKnowledgeTotal.textContent = `${aiKnowledgePagination.total || 0} 个匹配知识库`;
+    if (aiKnowledgePageLabel) aiKnowledgePageLabel.textContent = `第 ${aiKnowledgePagination.page || 1} / ${Math.max(1, aiKnowledgePagination.pages || 0)} 页`;
+    if (aiKnowledgePrev) aiKnowledgePrev.disabled = !aiKnowledgePagination.has_prev;
+    if (aiKnowledgeNext) aiKnowledgeNext.disabled = !aiKnowledgePagination.has_next;
+    if (aiKnowledgeSearch && document.activeElement !== aiKnowledgeSearch) aiKnowledgeSearch.value = state.knowledge_query || "";
+    const knowledgeContextOwner = state.conversation ? String(state.conversation.id) : "draft";
+    if (aiKnowledgeContextOwner !== knowledgeContextOwner) {
+      aiSelectedKnowledgeBaseIds = new Set(
+        (state.conversation?.selected_knowledge_base_ids || []).map(String),
+      );
+      aiKnowledgeContextOwner = knowledgeContextOwner;
+    }
+    renderKnowledgeBases(state.knowledge_bases);
     if (aiCustomPrompt) aiCustomPrompt.value = state.preference.custom_prompt || "";
     if (aiPromptStatus) aiPromptStatus.textContent = state.preference.using_default ? "使用默认提示词" : "已使用自定义提示词";
     if (aiModelLabel) {
@@ -1332,6 +2057,38 @@ document.addEventListener("DOMContentLoaded", () => {
     aiLoaded = true;
   };
 
+  const setAiContextPage = (view = "") => {
+    if (!aiContextPage) return;
+    const open = view === "experiment" || view === "knowledge";
+    if (open && aiContextPage.parentElement !== document.body) document.body.append(aiContextPage);
+    if (open) {
+      aiContextPage.dataset.sourceView = view;
+      const experimentView = view === "experiment";
+      if (aiContextPageTitle) aiContextPageTitle.textContent = experimentView ? "选择实验资料" : "选择知识库";
+      if (aiContextPageDescription) aiContextPageDescription.textContent = experimentView
+        ? "按实验计划、实验批次和实验记录限定本次对话的读取范围。"
+        : "选择本次对话可检索的知识库，并管理其中的本地文档。";
+      if (aiContextPageIcon) aiContextPageIcon.innerHTML = `<i data-lucide="${experimentView ? "flask-conical" : "library-big"}"></i>`;
+    }
+    aiContextPage.hidden = !open;
+    aiExperimentSourceOpen?.classList.toggle("active", view === "experiment");
+    aiKnowledgeSourceOpen?.classList.toggle("active", view === "knowledge");
+    aiExperimentSourceOpen?.setAttribute("aria-pressed", view === "experiment" ? "true" : "false");
+    aiKnowledgeSourceOpen?.setAttribute("aria-pressed", view === "knowledge" ? "true" : "false");
+    if (open) {
+      if (!aiContextPage.dataset.positioned) {
+        const rect = aiContextPage.getBoundingClientRect();
+        aiContextPage.style.left = `${Math.max(12, Math.round((window.innerWidth - rect.width) / 2))}px`;
+        aiContextPage.style.top = `${Math.max(12, Math.round((window.innerHeight - rect.height) / 2))}px`;
+        aiContextPage.dataset.positioned = "1";
+      }
+      if (window.lucide) window.lucide.createIcons();
+      aiContextPageClose?.focus();
+    } else {
+      aiInput?.focus();
+    }
+  };
+
   const openAiAssistant = async () => {
     hideAiNotice();
     aiDock?.classList.add("open");
@@ -1344,14 +2101,51 @@ document.addEventListener("DOMContentLoaded", () => {
     aiInput?.focus();
   };
   aiOpenButton?.addEventListener("click", openAiAssistant);
+  aiExperimentSourceOpen?.addEventListener("click", () => setAiContextPage("experiment"));
+  aiKnowledgeSourceOpen?.addEventListener("click", () => setAiContextPage("knowledge"));
+  aiContextPageClose?.addEventListener("click", () => setAiContextPage());
   if (new URLSearchParams(window.location.search).get("assistant") === "open") {
     window.setTimeout(openAiAssistant, 0);
   }
   document.querySelector("#ai-close")?.addEventListener("click", () => {
+    setAiContextPage();
     aiDock?.classList.remove("open");
     aiDock?.setAttribute("aria-hidden", "true");
   });
   aiCompletionToast?.addEventListener("click", openAiAssistant);
+
+  const fitAiContextPageToViewport = () => {
+    if (!aiContextPage || aiContextPage.hidden) return;
+    const rect = aiContextPage.getBoundingClientRect();
+    const maxLeft = Math.max(8, window.innerWidth - Math.min(rect.width, window.innerWidth - 16) - 8);
+    const maxTop = Math.max(8, window.innerHeight - Math.min(rect.height, window.innerHeight - 16) - 8);
+    aiContextPage.style.left = `${Math.min(Math.max(8, rect.left), maxLeft)}px`;
+    aiContextPage.style.top = `${Math.min(Math.max(8, rect.top), maxTop)}px`;
+  };
+  aiContextPage?.querySelector("[data-ai-context-drag-handle]")?.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || event.target.closest("button, input, select, textarea, a")) return;
+    const rect = aiContextPage.getBoundingClientRect();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startLeft = rect.left;
+    const startTop = rect.top;
+    aiContextPage.classList.add("is-dragging");
+    const move = (moveEvent) => {
+      const maxLeft = Math.max(8, window.innerWidth - aiContextPage.offsetWidth - 8);
+      const maxTop = Math.max(8, window.innerHeight - aiContextPage.offsetHeight - 8);
+      aiContextPage.style.left = `${Math.min(Math.max(8, startLeft + moveEvent.clientX - startX), maxLeft)}px`;
+      aiContextPage.style.top = `${Math.min(Math.max(8, startTop + moveEvent.clientY - startY), maxTop)}px`;
+    };
+    const end = () => {
+      aiContextPage.classList.remove("is-dragging");
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+  });
 
   document.querySelector("#ai-maximize")?.addEventListener("click", () => {
     if (!aiDock) return;
@@ -1449,6 +2243,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }).observe(aiDock);
   }
   window.addEventListener("resize", fitAiWindowToViewport);
+  window.addEventListener("resize", fitAiContextPageToViewport);
   applyAiWindowState();
 
   const createAiConversation = async () => {
@@ -1461,6 +2256,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const response = await fetch("/assistant/conversations", {method: "POST", body: data});
     if (!response.ok) return;
     const conversation = await response.json();
+    if (aiConversationSearch) aiConversationSearch.value = "";
+    aiConversationPage = 1;
+    aiConversationSelectionScope = "page";
     setConversation({...conversation, messages: []});
     aiChannel?.postMessage({type: "conversation", id: aiConversationId});
     await loadAiState();
@@ -1479,7 +2277,78 @@ document.addEventListener("DOMContentLoaded", () => {
       if (aiDock.classList.contains("show-conversations")) aiConversationSearch?.focus();
     }
   });
-  aiConversationSearch?.addEventListener("input", () => renderConversationList());
+  aiConversationSearch?.addEventListener("input", () => {
+    window.clearTimeout(aiConversationSearchTimer);
+    aiConversationSearchTimer = window.setTimeout(async () => {
+      aiConversationPage = 1;
+      aiConversationSelectionScope = "page";
+      await loadAiState();
+    }, 260);
+  });
+  aiConversationPerPage?.addEventListener("change", async () => {
+    aiConversationPage = 1;
+    aiConversationSelectionScope = "page";
+    await loadAiState();
+  });
+  aiConversationPrev?.addEventListener("click", async () => {
+    if (!aiConversationPagination.has_prev) return;
+    aiConversationPage = Math.max(1, aiConversationPage - 1);
+    aiConversationSelectionScope = "page";
+    await loadAiState();
+  });
+  aiConversationNext?.addEventListener("click", async () => {
+    if (!aiConversationPagination.has_next) return;
+    aiConversationPage += 1;
+    aiConversationSelectionScope = "page";
+    await loadAiState();
+  });
+  aiConversationSelectPage?.addEventListener("change", () => {
+    aiConversationSelectionScope = "page";
+    aiConversationList?.querySelectorAll(".ai-conversation-select input").forEach((input) => {
+      input.checked = aiConversationSelectPage.checked;
+    });
+    updateConversationSelectionState();
+  });
+  aiConversationSelectMatches?.addEventListener("click", () => {
+    aiConversationSelectionScope = aiConversationSelectionScope === "all" ? "page" : "all";
+    aiConversationList?.querySelectorAll(".ai-conversation-select input").forEach((input) => {
+      input.checked = aiConversationSelectionScope === "all";
+    });
+    updateConversationSelectionState();
+  });
+  aiConversationList?.addEventListener("change", (event) => {
+    if (!event.target.matches(".ai-conversation-select input")) return;
+    aiConversationSelectionScope = "page";
+    updateConversationSelectionState();
+  });
+  const runConversationBulkAction = async (action) => {
+    const selectedIds = Array.from(
+      aiConversationList?.querySelectorAll(".ai-conversation-select input:checked") || [],
+    ).map((input) => input.value);
+    const count = aiConversationSelectionScope === "all" ? aiConversationPagination.total : selectedIds.length;
+    if (!count) return;
+    if (action === "delete" && !window.confirm(`确定删除选中的 ${count} 个历史会话及其聊天记录吗？`)) return;
+    const data = new FormData();
+    data.set("action", action);
+    data.set("selection_scope", aiConversationSelectionScope);
+    data.set("conversation_q", (aiConversationSearch?.value || "").trim());
+    data.set("current_conversation_id", aiConversationId);
+    data.set("title_mode", aiConversationTitleMode?.value || "keep");
+    data.set("title_value", aiConversationTitleValue?.value || "");
+    selectedIds.forEach((itemId) => data.append("conversation_ids", itemId));
+    try {
+      const result = await postAiForm("/assistant/conversations/bulk", data);
+      if (result.current_deleted) {
+        aiConversationId = result.next_conversation_id ? String(result.next_conversation_id) : "";
+        if (aiConversationId) window.localStorage.setItem("research-assistant-conversation", aiConversationId);
+        else window.localStorage.removeItem("research-assistant-conversation");
+      }
+      aiConversationSelectionScope = "page";
+      await loadAiState();
+    } catch (error) { window.alert(error.message); }
+  };
+  aiConversationBulkSave?.addEventListener("click", () => runConversationBulkAction("update"));
+  aiConversationBulkDelete?.addEventListener("click", () => runConversationBulkAction("delete"));
   aiConversationList?.addEventListener("click", async (event) => {
     const open = event.target.closest(".ai-conversation-open");
     const rename = event.target.closest(".ai-rename-conversation");
@@ -1523,25 +2392,63 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   aiHistoryList?.addEventListener("change", (event) => {
-    const parent = event.target.closest("[data-experiment-select-all]");
-    if (parent) {
-      const group = parent.closest("[data-history-experiment-group]");
-      group?.querySelectorAll('input[name="batch_ids"]').forEach((input) => {
-        input.checked = parent.checked;
+    const experimentParent = event.target.closest("[data-experiment-select-all]");
+    if (experimentParent) {
+      const group = experimentParent.closest("[data-history-experiment-group]");
+      group?.querySelectorAll('input[name="batch_ids"], input[name="record_ids"]').forEach((input) => {
+        input.checked = experimentParent.checked;
+      });
+    }
+    const batchParent = event.target.closest("[data-batch-select-all]");
+    if (batchParent) {
+      const group = batchParent.closest("[data-history-batch-group]");
+      group?.querySelectorAll('input[name="record_ids"]').forEach((input) => {
+        input.checked = batchParent.checked;
       });
     }
     updateHistoryCount();
   });
+  aiHistoryList?.addEventListener("click", (event) => {
+    if (event.target.matches('summary input[type="checkbox"]')) event.stopPropagation();
+  });
+  aiHistorySearch?.addEventListener("input", () => {
+    aiHistoryPage = 1;
+    applyHistoryFilter();
+  });
+  aiHistoryLevel?.addEventListener("change", () => {
+    aiHistoryPage = 1;
+    applyHistoryFilter();
+  });
+  aiHistoryPerPage?.addEventListener("change", () => {
+    aiHistoryPage = 1;
+    applyHistoryFilter();
+  });
+  aiHistoryPrev?.addEventListener("click", () => {
+    aiHistoryPage = Math.max(1, aiHistoryPage - 1);
+    applyHistoryFilter();
+  });
+  aiHistoryNext?.addEventListener("click", () => {
+    aiHistoryPage += 1;
+    applyHistoryFilter();
+  });
   aiKnowledgeList?.addEventListener("change", updateKnowledgeCount);
   document.querySelector("#ai-select-current")?.addEventListener("click", () => {
     aiHistoryList?.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.checked = false; });
-    if (aiPageScope.batch_id) {
-      const current = aiHistoryList?.querySelector(`input[name="batch_ids"][value="${CSS.escape(String(aiPageScope.batch_id))}"]`);
+    if (aiPageScope.record_id) {
+      const current = aiHistoryList?.querySelector(`input[name="record_ids"][value="${CSS.escape(String(aiPageScope.record_id))}"]`);
       if (current) current.checked = true;
+    } else if (aiPageScope.batch_id) {
+      const current = aiHistoryList?.querySelector(`input[name="batch_ids"][value="${CSS.escape(String(aiPageScope.batch_id))}"]`);
+      if (current) {
+        current.checked = true;
+        current.closest("[data-history-batch-group]")?.querySelectorAll('input[name="record_ids"]').forEach((input) => {
+          input.checked = true;
+        });
+      }
     } else if (aiPageScope.experiment_id) {
       const group = aiHistoryList?.querySelector(`[data-history-experiment-group="${CSS.escape(String(aiPageScope.experiment_id))}"]`);
-      const executions = group?.querySelectorAll('input[name="batch_ids"]') || [];
-      if (executions.length) executions.forEach((input) => { input.checked = true; });
+      const descendants = group?.querySelectorAll('input[name="batch_ids"], input[name="record_ids"]') || [];
+      if (descendants.length) descendants.forEach((input) => { input.checked = true; });
       else {
         const plan = group?.querySelector('input[name="experiment_ids"]');
         if (plan) plan.checked = true;
@@ -1551,8 +2458,8 @@ document.addEventListener("DOMContentLoaded", () => {
         .filter((experiment) => String(experiment.project_id || "") === String(aiPageScope.project_id))
         .forEach((experiment) => {
           const group = aiHistoryList?.querySelector(`[data-history-experiment-group="${CSS.escape(String(experiment.id))}"]`);
-          const executions = group?.querySelectorAll('input[name="batch_ids"]') || [];
-          if (executions.length) executions.forEach((input) => { input.checked = true; });
+          const descendants = group?.querySelectorAll('input[name="batch_ids"], input[name="record_ids"]') || [];
+          if (descendants.length) descendants.forEach((input) => { input.checked = true; });
           else {
             const plan = group?.querySelector('input[name="experiment_ids"]');
             if (plan) plan.checked = true;
@@ -1562,7 +2469,7 @@ document.addEventListener("DOMContentLoaded", () => {
     updateHistoryCount();
   });
   document.querySelector("#ai-select-all")?.addEventListener("click", () => {
-    aiHistoryList?.querySelectorAll('input[name="experiment_ids"], input[name="batch_ids"]').forEach((input) => { input.checked = true; });
+    historyInputsMatchingFilter().forEach((input) => { input.checked = true; });
     updateHistoryCount();
   });
   document.querySelector("#ai-clear-selection")?.addEventListener("click", () => {
@@ -1570,11 +2477,209 @@ document.addEventListener("DOMContentLoaded", () => {
     updateHistoryCount();
   });
 
+  aiKnowledgeSearch?.addEventListener("input", () => {
+    window.clearTimeout(aiKnowledgeSearchTimer);
+    aiKnowledgeSearchTimer = window.setTimeout(async () => {
+      aiKnowledgePage = 1;
+      aiKnowledgeSelectionScope = "page";
+      await loadAiState();
+    }, 260);
+  });
+  aiKnowledgePerPage?.addEventListener("change", async () => {
+    aiKnowledgePage = 1;
+    aiKnowledgeSelectionScope = "page";
+    await loadAiState();
+  });
+  aiKnowledgePrev?.addEventListener("click", async () => {
+    if (!aiKnowledgePagination.has_prev) return;
+    aiKnowledgePage = Math.max(1, aiKnowledgePage - 1);
+    aiKnowledgeSelectionScope = "page";
+    await loadAiState();
+  });
+  aiKnowledgeNext?.addEventListener("click", async () => {
+    if (!aiKnowledgePagination.has_next) return;
+    aiKnowledgePage += 1;
+    aiKnowledgeSelectionScope = "page";
+    await loadAiState();
+  });
+  aiKnowledgeSelectPage?.addEventListener("change", () => {
+    aiKnowledgeSelectionScope = "page";
+    aiKnowledgeList?.querySelectorAll(".ai-knowledge-manage-select input").forEach((input) => {
+      input.checked = aiKnowledgeSelectPage.checked;
+    });
+    updateKnowledgeSelectionState();
+  });
+  aiKnowledgeSelectMatches?.addEventListener("click", () => {
+    aiKnowledgeSelectionScope = aiKnowledgeSelectionScope === "all" ? "page" : "all";
+    aiKnowledgeList?.querySelectorAll(".ai-knowledge-manage-select input").forEach((input) => {
+      input.checked = aiKnowledgeSelectionScope === "all";
+    });
+    updateKnowledgeSelectionState();
+  });
+
+  const runKnowledgeBulkAction = async (action) => {
+    const selectedIds = Array.from(
+      aiKnowledgeList?.querySelectorAll(".ai-knowledge-manage-select input:checked") || [],
+    ).map((input) => input.value);
+    const count = aiKnowledgeSelectionScope === "all" ? aiKnowledgePagination.total : selectedIds.length;
+    if (!count) return;
+    if (action === "delete" && !window.confirm(`确定删除选中的 ${count} 个知识库及其中全部文件吗？`)) return;
+    const data = new FormData();
+    data.set("action", action);
+    data.set("selection_scope", aiKnowledgeSelectionScope);
+    data.set("knowledge_q", (aiKnowledgeSearch?.value || "").trim());
+    data.set("bulk_enabled", aiKnowledgeBulkEnabled?.value || "__keep__");
+    data.set("description_mode", aiKnowledgeDescriptionMode?.value || "keep");
+    data.set("description", aiKnowledgeDescriptionValue?.value || "");
+    data.set("instruction_mode", aiKnowledgeInstructionMode?.value || "keep");
+    data.set("custom_instructions", aiKnowledgeInstructionValue?.value || "");
+    selectedIds.forEach((itemId) => data.append("knowledge_base_item_ids", itemId));
+    try {
+      const result = await postAiForm("/assistant/knowledge-bases/bulk", data);
+      const affectedIds = (result.ids || selectedIds).map(String);
+      if (action === "delete" || aiKnowledgeBulkEnabled?.value === "disabled") {
+        affectedIds.forEach((itemId) => aiSelectedKnowledgeBaseIds.delete(itemId));
+      }
+      if (action === "delete") {
+        affectedIds.forEach((itemId) => aiKnowledgeDocumentStates.delete(itemId));
+      }
+      aiKnowledgeSelectionScope = "page";
+      await loadAiState();
+    } catch (error) { window.alert(error.message); }
+  };
+  aiKnowledgeBulkSave?.addEventListener("click", () => runKnowledgeBulkAction("update"));
+  aiKnowledgeBulkDelete?.addEventListener("click", () => runKnowledgeBulkAction("delete"));
+
+  const runKnowledgeDocumentBulkAction = async (baseId, action) => {
+    const item = knowledgeBaseItem(baseId);
+    const state = aiKnowledgeDocumentStates.get(String(baseId));
+    if (!item || !state) return;
+    const selectedIds = Array.from(
+      item.querySelectorAll(".ai-knowledge-document-select input:checked"),
+    ).map((input) => input.value);
+    const count = state.selectionScope === "all" ? state.pagination.total : selectedIds.length;
+    if (!count) return;
+    if (action === "delete" && !window.confirm(`确定删除选中的 ${count} 个知识文档吗？`)) return;
+    const data = new FormData();
+    data.set("action", action);
+    data.set("selection_scope", state.selectionScope);
+    data.set("q", state.query);
+    data.set("title_mode", item.querySelector("[data-knowledge-document-title-mode]")?.value || "keep");
+    data.set("title_value", item.querySelector("[data-knowledge-document-title-value]")?.value || "");
+    selectedIds.forEach((documentId) => data.append("document_ids", documentId));
+    try {
+      await postAiForm(`/assistant/knowledge-bases/${baseId}/documents/bulk`, data);
+      state.selectionScope = "page";
+      await loadKnowledgeDocuments(baseId);
+    } catch (error) { window.alert(error.message); }
+  };
+
+  aiKnowledgeList?.addEventListener("input", (event) => {
+    const search = event.target.closest("[data-knowledge-document-search]");
+    if (!search) return;
+    const baseId = search.dataset.knowledgeDocumentSearch;
+    const state = aiKnowledgeDocumentStates.get(String(baseId));
+    if (!state) return;
+    state.query = search.value.trim();
+    window.clearTimeout(state.searchTimer);
+    state.searchTimer = window.setTimeout(() => {
+      state.page = 1;
+      state.selectionScope = "page";
+      loadKnowledgeDocuments(baseId);
+    }, 260);
+  });
+  aiKnowledgeList?.addEventListener("change", (event) => {
+    const context = event.target.closest(".ai-knowledge-select input");
+    if (context) {
+      if (context.checked) aiSelectedKnowledgeBaseIds.add(String(context.value));
+      else aiSelectedKnowledgeBaseIds.delete(String(context.value));
+      updateKnowledgeCount();
+      return;
+    }
+    const manage = event.target.closest(".ai-knowledge-manage-select input");
+    if (manage) {
+      aiKnowledgeSelectionScope = "page";
+      updateKnowledgeSelectionState();
+      return;
+    }
+    const documentSelect = event.target.closest(".ai-knowledge-document-select input");
+    if (documentSelect) {
+      const baseId = documentSelect.closest("[data-knowledge-base-id]")?.dataset.knowledgeBaseId;
+      const state = aiKnowledgeDocumentStates.get(String(baseId));
+      if (state) state.selectionScope = "page";
+      updateKnowledgeDocumentSelectionState(baseId);
+      return;
+    }
+    const selectPage = event.target.closest("[data-knowledge-document-select-page]");
+    if (selectPage) {
+      const baseId = selectPage.dataset.knowledgeDocumentSelectPage;
+      const state = aiKnowledgeDocumentStates.get(String(baseId));
+      if (state) state.selectionScope = "page";
+      knowledgeBaseItem(baseId)?.querySelectorAll(".ai-knowledge-document-select input").forEach((input) => {
+        input.checked = selectPage.checked;
+      });
+      updateKnowledgeDocumentSelectionState(baseId);
+      return;
+    }
+    const perPage = event.target.closest("[data-knowledge-document-per-page]");
+    if (perPage) {
+      const baseId = perPage.dataset.knowledgeDocumentPerPage;
+      const state = aiKnowledgeDocumentStates.get(String(baseId));
+      if (!state) return;
+      state.perPage = Number.parseInt(perPage.value, 10) || 8;
+      state.page = 1;
+      state.selectionScope = "page";
+      loadKnowledgeDocuments(baseId);
+    }
+  });
+  aiKnowledgeList?.addEventListener("click", async (event) => {
+    const selectMatches = event.target.closest("[data-knowledge-document-select-matches]");
+    if (selectMatches) {
+      const baseId = selectMatches.dataset.knowledgeDocumentSelectMatches;
+      const state = aiKnowledgeDocumentStates.get(String(baseId));
+      if (!state) return;
+      state.selectionScope = state.selectionScope === "all" ? "page" : "all";
+      knowledgeBaseItem(baseId)?.querySelectorAll(".ai-knowledge-document-select input").forEach((input) => {
+        input.checked = state.selectionScope === "all";
+      });
+      updateKnowledgeDocumentSelectionState(baseId);
+      return;
+    }
+    const previous = event.target.closest("[data-knowledge-document-prev]");
+    const next = event.target.closest("[data-knowledge-document-next]");
+    if (previous || next) {
+      const baseId = previous?.dataset.knowledgeDocumentPrev || next?.dataset.knowledgeDocumentNext;
+      const state = aiKnowledgeDocumentStates.get(String(baseId));
+      if (!state) return;
+      state.page = Math.max(1, state.page + (previous ? -1 : 1));
+      state.selectionScope = "page";
+      await loadKnowledgeDocuments(baseId);
+      return;
+    }
+    const bulkAction = event.target.closest("[data-knowledge-document-bulk-action]");
+    if (bulkAction) {
+      await runKnowledgeDocumentBulkAction(bulkAction.dataset.baseId, bulkAction.dataset.knowledgeDocumentBulkAction);
+      return;
+    }
+    const remove = event.target.closest(".ai-delete-knowledge-document");
+    if (!remove) return;
+    if (!window.confirm(`删除知识文档“${remove.dataset.documentTitle}”？`)) return;
+    try {
+      await postAiForm(`/assistant/knowledge-documents/${remove.dataset.documentId}/delete`, new FormData());
+      const state = aiKnowledgeDocumentStates.get(String(remove.dataset.baseId));
+      if (state) state.selectionScope = "page";
+      await loadKnowledgeDocuments(remove.dataset.baseId);
+    } catch (error) { window.alert(error.message); }
+  });
+
   aiKnowledgeCreateForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
       await postAiForm("/assistant/knowledge-bases", new FormData(aiKnowledgeCreateForm));
       aiKnowledgeCreateForm.reset();
+      if (aiKnowledgeSearch) aiKnowledgeSearch.value = "";
+      aiKnowledgePage = 1;
+      aiKnowledgeSelectionScope = "page";
       await loadAiState();
     } catch (error) { window.alert(error.message); }
   });
@@ -1872,11 +2977,14 @@ document.addEventListener("DOMContentLoaded", () => {
       createAiConversation();
     } else if (modifier && event.key.toLowerCase() === "k") {
       event.preventDefault();
+      setAiContextPage();
       aiInput?.focus();
     } else if (modifier && event.shiftKey && event.key.toLowerCase() === "l") {
       event.preventDefault();
       if (aiDock.getBoundingClientRect().width >= 760) aiDock.classList.toggle("conversations-collapsed");
       else aiDock.classList.toggle("show-conversations");
+    } else if (event.key === "Escape" && aiContextPage && !aiContextPage.hidden) {
+      setAiContextPage();
     } else if (event.key === "Escape" && aiDock.classList.contains("show-conversations")) {
       aiDock.classList.remove("show-conversations");
     } else if (event.altKey && ["ArrowUp", "ArrowDown"].includes(event.key) && aiConversationOptions.length) {

@@ -1,7 +1,7 @@
 import json
 
 from app import db
-from app.models import ApiPreset, Experiment, ExperimentBatch, PresentationSkill
+from app.models import ApiPreset, Experiment, ExperimentBatch, PresentationSkill, User
 
 
 def _start_execution(client, app, experiment_id, batch_code="BATCH-01"):
@@ -131,6 +131,44 @@ def test_disabled_default_preset_is_not_presented_as_current(client, auth, app):
     assert client.get("/assistant/state").get_json()["api"]["enabled"] is False
 
 
+def test_api_presets_support_filtered_bulk_edit_and_pagination(client, auth, app):
+    auth.register()
+    with app.app_context():
+        user_id = User.query.one().id
+        for index in range(9):
+            db.session.add(ApiPreset(
+                user_id=user_id, name=f"分页预设 {index + 1:02d}",
+                api_url=f"https://api-{index + 1}.example.test/v1",
+                text_model=f"model-{index + 1}",
+                is_enabled=True, sensitive_warning_enabled=True,
+            ))
+        db.session.add(ApiPreset(
+            user_id=user_id, name="保留预设", api_url="https://keep.example.test/v1",
+            text_model="keep-model", is_enabled=True, sensitive_warning_enabled=True,
+        ))
+        db.session.commit()
+        first_id = ApiPreset.query.filter_by(name="分页预设 01").one().id
+        last_id = ApiPreset.query.filter_by(name="分页预设 09").one().id
+
+    body = client.get("/settings/api?page=2&per_page=8").get_data(as_text=True)
+    assert f'name="preset_ids" value="{first_id}"' in body
+    assert f'name="preset_ids" value="{last_id}"' not in body
+    assert "第 2 / 2 页" in body
+
+    assert client.post("/settings/api/bulk", data={
+        "selection_scope": "all", "q": "分页预设 0", "action": "update",
+        "bulk_enabled": "disabled", "bulk_warning": "disabled",
+    }).status_code == 302
+    with app.app_context():
+        for preset in ApiPreset.query.all():
+            if preset.name.startswith("分页预设"):
+                assert preset.is_enabled is False
+                assert preset.sensitive_warning_enabled is False
+            elif preset.name == "保留预设":
+                assert preset.is_enabled is True
+                assert preset.sensitive_warning_enabled is True
+
+
 def test_presentation_skill_editor_is_reachable_from_the_weekly_report_page(client, auth, app):
     """Every skill route needs a UI entry point, or the feature is unusable."""
     auth.register()
@@ -157,6 +195,50 @@ def test_presentation_skill_editor_is_reachable_from_the_weekly_report_page(clie
     removed = client.post(f"/reports/presentation/skills/{skill_id}/delete")
     assert removed.status_code == 302
     assert "可达性检查" not in client.get("/reports/presentation").get_data(as_text=True)
+
+
+def test_custom_presentation_skills_support_filtered_bulk_edit_and_pagination(client, auth, app):
+    auth.register()
+    for index in range(9):
+        client.post("/reports/presentation/skills", data={
+            "name": f"分页 Skill {index + 1:02d}",
+            "description": "筛选目标" if index < 2 else "其他用途",
+            "theme": "evidence", "instructions": "原叙事说明",
+            "slides": "封面\n结论",
+        })
+    with app.app_context():
+        matching_ids = {
+            item.id for item in PresentationSkill.query.filter(
+                PresentationSkill.description == "筛选目标"
+            ).all()
+        }
+        first_skill_id = PresentationSkill.query.filter_by(name="分页 Skill 01").one().id
+        last_skill_id = PresentationSkill.query.filter_by(name="分页 Skill 09").one().id
+
+    body = client.get(
+        "/reports/presentation?skill_page=2&skill_per_page=8#custom-skills"
+    ).get_data(as_text=True)
+    assert f'name="skill_ids" value="{first_skill_id}"' in body
+    assert f'name="skill_ids" value="{last_skill_id}"' not in body
+    assert "第 2 / 2 页" in body
+    assert "选择当前筛选全部 9 个" in body
+
+    response = client.post("/reports/presentation/skills/bulk", data={
+        "selection_scope": "all", "skill_q": "筛选目标", "action": "update",
+        "bulk_enabled": "disabled", "bulk_theme": "review",
+        "description_mode": "append", "description": "批量复核",
+        "instruction_mode": "keep",
+    })
+    assert response.status_code == 302
+    with app.app_context():
+        for skill in PresentationSkill.query.all():
+            if skill.id in matching_ids:
+                assert skill.is_enabled is False
+                assert skill.theme == "review"
+                assert skill.description.endswith("批量复核")
+            else:
+                assert skill.is_enabled is True
+                assert skill.theme == "evidence"
 
 
 def test_custom_presentation_skill_can_preview_evidence(client, auth, app):
