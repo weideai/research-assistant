@@ -2,17 +2,17 @@
 
 **01 · STYLE GUIDE**
 
-> ## Data-Dense Swiss
-> ### 数据密集型瑞士风格
+> ## R/LAB Research Instrument
+> ### 科研仪器工作台
 >
-> 以网格系统、理性排版、无衬线字体、客观的信息层级和高效的视觉传达为核心特征。
+> 以冷静网格、紧凑排版、靛蓝主操作和薄荷青进度反馈构成可信赖的科研工作界面。
 > **为快速比对与扫读优化，不为视觉炫技优化。**
 
-**KEYWORDS** — Grid System · Typography First · Clarity · Functionality · Objectivity · Minimalism
+**KEYWORDS** — Research Instrument · Grid System · Clarity · Traceability · Functionality · Calm
 
 **产品** R/LAB Research Assistant · 单人科研工作台
-**载体** 桌面固定画布的 Flask + Jinja2 多页应用，唯一 Swiss 研究主题
-**版本** v1.1 · 2026-08-02
+**载体** 桌面固定画布的 Flask + Jinja2 多页应用，科研浅色为默认外观，保留科研深色与经典 Swiss
+**版本** v1.2 · 2026-08-03
 
 ---
 
@@ -24,53 +24,56 @@
 
 ## 02 · COLOR PALETTE
 
-### 信号色 PRIMARY
+### 主色 PRIMARY
 
 | 色卡 | Token | 值 | 用途 |
 |---|---|---|---|
-| ██ | `--blue` | `#d71920` | 主按钮、链接、聚焦环、eyebrow、活动指示 |
-| ██ | `--blue-ink` | `#a51218` | 浅红底上的文字，实测 7.03:1 |
-| ░░ | `--blue-soft` | `#fff0f1` | 信息底色、选中态 |
+| ██ | `--blue` | `#5560e6` | 主按钮、链接、聚焦环、eyebrow、活动指示 |
+| ██ | `--blue-ink` | `#3947c6` | 靛蓝浅底上的文字 |
+| ░░ | `--blue-soft` | `#eef0ff` | 信息底色、选中态 |
 
-> `--blue` 是为兼容现有组件保留的语义令牌名；默认 `research` 主题中它映射为 Swiss Style 信号红。状态成功、警告与危险仍使用各自语义令牌。
+> `--blue` 是为兼容现有组件保留的语义令牌名；默认科研浅色中映射为 Indigo。经典 Swiss 外观再把它映射为信号红。
 
 ### 强调色 ACCENT
 
 | 色卡 | Token | 值 | 用途 |
 |---|---|---|---|
-| ██ | `--brand-accent` | `#d71920` | 品牌方块、侧栏活动指示条 |
+| ██ | `--brand-accent` | `#5560e6` | 品牌方块、侧栏活动指示条 |
+| ██ | `--accent` | `#5bcfc5` | 进度条、继续工作、完成反馈 |
+| ██ | `--accent-ink` | `#157c76` | 薄荷浅底上的文字与图标 |
+| ░░ | `--accent-soft` | `#e8f8f6` | 薄荷强调底色 |
 
-> 品牌红上的文字统一使用 `--on-accent #fff`，实测对比度 **5.19:1**。信号红只承担品牌、主操作和活动指示，不作为大面积页面底色。
+> 主色底上的文字统一使用 `--on-accent`。薄荷青只承担进度与辅助强调，不替代主操作色，也不作为大面积页面底色。
 
 ### 中性色 NEUTRAL
 
 | 色卡 | Token | 值 | 用途 |
 |---|---|---|---|
-| ░░ | `--bg` | `#f2f2ef` | 页面底色 |
+| ░░ | `--bg` | `#f5f7fb` | 页面底色 |
 | ░░ | `--surface` | `#ffffff` | 面板、卡片、输入框 |
-| ░░ | `--surface-soft` | `#f7f7f4` | 表头、次级填充 |
-| ▒▒ | `--line` | `#d8d8d3` | 所有 1px 描边 |
-| ▓▓ | `--muted` | **`#5f5f5b`** | 次要文字、说明文案 |
-| ██ | `--ink` | `#111111` | 正文与标题 |
-| ░░ | `--sidebar` | `#f7f7f4` | 浅色侧栏底色 |
-| ██ | `--sidebar-ink` | `#111111` | 侧栏主文字 |
+| ░░ | `--surface-soft` | `#f8fcfb` | 表头、次级填充 |
+| ▒▒ | `--line` | `#dce6e8` | 所有 1px 描边 |
+| ▓▓ | `--muted` | **`#5c7480`** | 次要文字、说明文案 |
+| ██ | `--ink` | `#0f1f2e` | 正文与标题 |
+| ░░ | `--sidebar` | `#ffffff` | 浅色侧栏底色 |
+| ██ | `--sidebar-ink` | `#0f1f2e` | 侧栏主文字 |
 
-> 默认主题的 `--muted` 在 `--bg` 上实测 **5.72:1**、在白色面板上 **6.41:1**。侧栏文字独立使用 `--sidebar-ink`，避免浅色侧栏继续继承白字。
+> 次要文字统一使用 `--muted`，主文字使用 `--ink`；侧栏文字独立使用 `--sidebar-ink`，三套外观都必须满足 WCAG AA。
 
 ### 语义色 SEMANTIC —— 双档制
 
-每个语义色分**填充档**与**文字档**。填充档三色在白底上均不足 4.5:1，**绝不能直接作正文颜色**。
+每个语义色分**填充档**与**文字档**。填充档只用于背景、描边或圆点，**绝不能直接作正文颜色**。
 
 | 语义 | 填充档（背景 / 描边 / 圆点） | 白底对比度 | 文字档 | 浅底 |
 |---|---|---|---|---|
-| 成功 | `--green` `#008a62` | 4.36:1 ❌ | `--green-ink` `#006b4b` | `#e3f7ef` |
-| 危险 | `--red` `#e5484d` | 3.91:1 ❌ | `--red-ink` `#b4232a` | `#ffeaec` |
-| 警告 | `--yellow` `#c77c02` | 3.31:1 ❌ | `--yellow-ink` `#8b5903` | `#fff3d6` |
-| 信息 / 主操作 | `--blue` `#d71920` | 5.19:1 ✅ | `--blue-ink` `#a51218` | `#fff0f1` |
+| 成功 | `--green` `#29b69f` | 仅作填充 | `--green-ink` `#137667` | `#e4f7f3` |
+| 危险 | `--red` `#eb5757` | 仅作填充 | `--red-ink` `#b52f35` | `#fdedee` |
+| 警告 | `--yellow` `#f2c94c` | 仅作填充 | `--yellow-ink` `#765b00` | `#fff7d8` |
+| 信息 | `--info` `#4a90d9` | 仅作填充 | `--info-ink` `#2b68a3` | `#eaf3fc` |
 
 ```css
 /* ✅ 正确 */
-.badge-success { background: var(--green-soft); border-color: #bce8d7; color: var(--green-ink); }
+.badge-success { background: var(--green-soft); border-color: var(--green-soft); color: var(--green-ink); }
 .status-dot    { background: var(--green); }
 
 /* ❌ 错误 —— 填充档色不能作文字 */
@@ -79,12 +82,12 @@
 
 代码里 `.result-成功`、`.priority-高` 已经自发用了 `-ink` 值，本规范把这个做法固化为制度。
 
-### 固定界面约束
+### 外观约束
 
-软件只保留一套黑白灰 + 信号红的 Swiss 桌面界面，不提供皮肤、暗色模式或自定义背景。
+软件提供三套受控外观：`ide-light` 科研浅色（默认）、`ide-dark` 科研深色、`swiss` 经典兼容。用户只能在这三套外观中切换，不提供任意自定义背景。
 
-> **所有组件只能引用 `var(--token)`，禁止硬编码 hex。**
-> 调色板集中在 `tokens.css`；`app.css` 与 `assistant.css` 中保持 **0 个裸色值**。
+> **所有组件颜色只能引用 `var(--token)`，禁止硬编码 hex。**
+> 默认调色板集中在 `tokens.css`，外观映射集中在 `skins.css`；组件样式不得自行复制主题色值。
 
 ---
 
@@ -101,9 +104,9 @@
 
 | Token | 值 | 用途 |
 |---|---|---|
-| `--fs-display` | 32px | 大数字指标 |
-| `--fs-h1` | `clamp(26px, 3vw, 34px)` | 页面标题 |
-| `--fs-h2` | 20px | 面板标题 |
+| `--fs-display` | 28px | 大数字指标 |
+| `--fs-h1` | 24px | 页面标题 |
+| `--fs-h2` | 16px | 面板标题 |
 | `--fs-h3` | 16px | 区块标题 |
 | `--fs-body` | **14px** | 正文（基准） |
 | `--fs-sm` | 13px | 次要正文、表格辅助信息 |
@@ -213,11 +216,11 @@
 > 其中两处位移最大：`5→6`（22 处，输入框与小磁贴）、`7→8`（17 处，弹层与卡片）。
 > AI dock 的 `10→12` 有 1 处；旧响应布局中的另一处声明已随该布局删除。
 >
-> 固定界面使用 `--radius-panel: 2px` 与 `--radius-control: 2px`；不设置主题例外，
-> 组件也不允许单独写像素圆角。
+> 默认科研浅色使用 `--radius-panel: 8px` 与 `--radius-control: 6px`；科研深色可使用 `12px / 8px`，
+> 经典 Swiss 兼容模式使用 `2px / 2px`。组件不得绕过这两个别名单独指定面板或控件圆角。
 >
 > 静态校验见 `tests/test_design_tokens.py`：`test_no_literal_pixel_radius_outside_the_token_layer`
-> 守住 0 硬编码，`test_retired_theme_stylesheet_is_not_restored` 防止旧皮肤层回流。
+> 守住组件 0 硬编码，`test_supported_palettes_are_declared` 固定三套受控外观。
 
 ---
 
@@ -225,9 +228,9 @@
 
 ```css
 --border:   1px solid var(--line);
---shadow-1: 0 1px  2px rgba(20, 30, 36, .06);   /* 小型浮层 */
---shadow-2: 0 8px 24px rgba( 9, 18, 24, .10);   /* popover · dropdown */
---shadow-3: 0 14px 36px rgba( 9, 18, 24, .24);  /* dialog · AI dock */
+--shadow-1: 0 1px 3px rgba(15, 31, 46, .06);    /* panel · card */
+--shadow-2: 0 8px 24px rgba(15, 31, 46, .10);   /* popover · dropdown */
+--shadow-3: 0 18px 48px rgba(15, 31, 46, .20);  /* dialog · AI dock */
 ```
 
 只允许这三档，**禁止多层叠加阴影**。
@@ -238,14 +241,14 @@
 
 ### BUTTONS
 
-高 `40` · 内边距 `8 15` · 圆角 `6` · 字重 `700` · 图标 `18px` · 图标与文字间距 `8`
+高 `40` · 内边距 `8 16` · 圆角取 `--radius-control` · 字重 `700` · 图标 `18px` · 图标与文字间距 `8`
 
 | 级别 | 规格 |
 |---|---|
 | `primary` | `--blue` 底 / 当前主题高对比前景色 · hover `--blue-hover` |
 | `secondary` | `--surface` 底 / `--line` 边 · hover 边框加深 |
 | `ghost` | 透明 · hover `--surface-soft` |
-| `danger` | `--red-soft` 底 / `--red-ink` 字 / `--red` 边 |
+| `danger` | `--red-ink` 底 / `--on-danger` 字 |
 
 **图标按钮**：视觉 `36×36`，**命中区 `44×44`** —— 用 `::after` 扩展，不影响布局：
 
@@ -263,12 +266,12 @@
 
 ### PANEL
 
-`--surface` + `1px --line` + 圆角取 `--radius-panel`。默认 `research` 主题使用 `2px` 且无常驻阴影；其他主题可通过令牌调整圆角与层级。
+`--surface` + `1px --line` + 圆角取 `--radius-panel` + `--shadow-1`。外观只能通过令牌调整圆角与层级。
 面板头 `20 24`，底部 `1px --line` 分隔。
 
 ### METRIC 指标卡
 
-总览使用连续四列栅格、`112px` 最小高、细分隔线与 `3px` 信号红强调；数字使用 `tabular-nums`。
+总览使用四张独立指标卡、`36px` pastel 图标片和 `20px` 数据值；数字使用 `tabular-nums`。
 **每项必须可点击下钻**到对应筛选列表。
 
 ### BADGE
@@ -359,7 +362,7 @@
 4. **禁止硬编码 hex** —— 组件样式统一使用 token；仅主题预览色块豁免
 5. **禁止 emoji 作 UI 图标**
 6. **禁止非交互元素伪装成输入框** —— 顶栏 `.topbar-search` 现为 `<a>` 却长得像搜索框且带 `⌘K` 角标
-7. **禁止单页堆叠 4 个以上区块** —— 超过必须分标签页，参照 `record_detail.html` 的四标签页做法
+7. **禁止堆叠 4 个以上同权区块** —— 总览可使用“指标 / 继续工作 / 双栏概览 / 记录”的分层结构，详情页超出则使用标签页
 8. **禁止在浏览页常驻低频创建表单**
 
 ---
@@ -373,6 +376,6 @@
 
 ## 14 · NOTES
 
-瑞士风格强调信息传达的清晰与视觉的客观性，适用于需要建立信任、传达严谨、强调效率与专业性的产品与工具。**减少装饰，尊重内容本身。**
+科研仪器风格强调信息传达的清晰、状态反馈的可靠与视觉的客观性。经典 Swiss 保留为兼容外观，但不再是默认基线。**减少装饰，尊重内容本身。**
 
 对本产品而言这尤其重要：科研记录的价值在于**可追溯与可复现**，任何为视觉效果牺牲可读性、可扫描性的决定，都是在损害产品的核心价值。

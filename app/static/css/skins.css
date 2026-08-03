@@ -1,0 +1,157 @@
+/* R/LAB 可切换外观。默认浅色令牌位于 tokens.css，确保脚本不可用时
+ * 页面仍按 Page 1.svg 的第一套设计系统渲染。
+ *
+ * 加载顺序：tokens.css -> app.css -> assistant.css -> skins.css -> ide.css
+ * 本文件只通过 html[data-skin="..."] 覆盖 tokens.css 中的变量，不改写任何组件规则，
+ * 因此切换皮肤会级联作用到全部页面；无 data-skin 时保持默认科研浅色外观。
+ *
+ * 三套皮肤：
+ *   ide-light R/LAB 科研浅色（默认，令牌见 tokens.css）
+ *   ide-dark  IDE 工作台 · 深色玻璃（深海蓝底 + 玻璃拟态）
+ *   swiss     经典瑞士科研风（兼容保留）
+ */
+
+/* 显式写入 ide-light 时与默认令牌保持一致。skin.js 对默认值会移除属性，
+ * 此块主要服务测试、预览和外部嵌入。 */
+html[data-skin="ide-light"] {
+  /* 冷调浅蓝灰画布 + 白卡片 */
+  --bg: #f5f7fb;
+  --surface: #ffffff;
+  --surface-soft: #f8fcfb;
+  --surface-hover: #f1f6f7;
+  --line: #dce6e8;
+  --line-strong: #c8d7db;
+  --ink: #0f1f2e;
+  --muted: #5c7480;
+
+  /* 侧栏：白底、选中为靛蓝浅底 */
+  --sidebar: #ffffff;
+  --sidebar-ink: #0f1f2e;
+  --sidebar-muted: #5c7480;
+  --sidebar-hover: #f1f4fb;
+  --sidebar-line: #dce6e8;
+  --sidebar-active-bg: #eef0ff;
+  --sidebar-active-ink: #3947c6;
+
+  /* 靛蓝主行动色 */
+  --brand-accent: #5560e6;
+  --on-accent: #ffffff;
+  --on-danger: #ffffff;
+  --blue: #5560e6;   --blue-ink: #3947c6;   --blue-soft: #eef0ff;   --blue-hover: #4652d5;
+  --red: #eb5757;    --red-ink: #b52f35;    --red-soft: #fdedee;
+  --green: #29b69f;  --green-ink: #137667;  --green-soft: #e4f7f3;
+  --yellow: #f2c94c; --yellow-ink: #765b00; --yellow-soft: #fff7d8;
+  --accent: #5bcfc5; --accent-ink: #157c76; --accent-soft: #e8f8f6;
+  --info: #4a90d9;   --info-ink: #2b68a3;   --info-soft: #eaf3fc;
+
+  /* pastel 图标片（工作台统计卡专用，ide.css 引用） */
+  --chip-blue: #eef0ff;    --chip-blue-ink: #5560e6;
+  --chip-purple: #f3edfd;  --chip-purple-ink: #8b5cf6;
+  --chip-green: #e4f7f3;   --chip-green-ink: #137667;
+  --chip-orange: #fcf1e4;  --chip-orange-ink: #f2994a;
+
+  /* 更圆润、更柔和的现代感 */
+  --radius-panel: 8px;
+  --radius-control: 6px;
+  --shadow-1: 0 1px 3px rgba(21, 28, 56, .05);
+  --shadow-2: 0 8px 24px rgba(21, 28, 56, .08);
+  --shadow-3: 0 14px 36px rgba(21, 28, 56, .16);
+
+  /* IDE 组件变量（ide.css 引用） */
+  --rail-bg: #ffffff;
+}
+
+/* ── IDE 深色玻璃 ────────────────────────────────────────────────────── */
+html[data-skin="ide-dark"] {
+  color-scheme: dark;
+
+  /* 深海蓝画布 + 深色玻璃卡片 */
+  --bg: #0b0e14;
+  --surface: #12161f;
+  --surface-soft: #171d29;
+  --surface-hover: #1a2130;
+  --line: #262e3d;
+  --line-strong: #374154;
+  --ink: #e8ecf4;
+  --muted: #9aa4b8;
+
+  /* 侧栏：近黑玻璃 */
+  --sidebar: #0e121b;
+  --sidebar-ink: #e8ecf4;
+  --sidebar-muted: #9aa4b8;
+  --sidebar-hover: #171e2b;
+  --sidebar-line: #222a3a;
+  --sidebar-active-bg: #1e2640;
+  --sidebar-active-ink: #aab3ff;
+
+  /* 亮靛蓝主行动色（深色底上保证对比度） */
+  --brand-accent: #8b96ff;
+  --on-accent: #0b0e14;
+  --on-danger: #0b0e14;
+  --blue: #8b96ff;   --blue-ink: #aab3ff;   --blue-soft: #1d2440;   --blue-hover: #7c89f5;
+  --red: #eb5757;    --red-ink: #f08a8a;    --red-soft: #33191c;
+  --green: #5bcfc5;  --green-ink: #7fe0d8;  --green-soft: #12302e;
+  --yellow: #f2c94c; --yellow-ink: #f5d67e; --yellow-soft: #2e2712;
+  --accent: #5bcfc5; --accent-ink: #7fe0d8; --accent-soft: #12302e;
+  --info: #6aa9e9;   --info-ink: #a8d0f5;   --info-soft: #14283d;
+
+  /* pastel 图标片的深色对应（低明度同色相底） */
+  --chip-blue: #1d2440;    --chip-blue-ink: #aab3ff;
+  --chip-purple: #251c3d;  --chip-purple-ink: #b79df7;
+  --chip-green: #12302e;   --chip-green-ink: #7fe0d8;
+  --chip-orange: #2e2712;  --chip-orange-ink: #f5c98a;
+
+  --radius-panel: 12px;
+  --radius-control: 8px;
+  --shadow-1: 0 1px 3px rgba(0, 0, 0, .4);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, .5);
+  --shadow-3: 0 14px 36px rgba(0, 0, 0, .6);
+  --scrim: rgba(0, 0, 0, .6);
+
+  /* IDE 组件变量（ide.css 引用） */
+  --rail-bg: #0e121b;
+}
+
+/* ── 经典 Swiss（兼容旧界面偏好）──────────────────────────────────── */
+html[data-skin="swiss"] {
+  --bg: #f2f2ef;
+  --surface: #ffffff;
+  --surface-soft: #f7f7f4;
+  --surface-hover: #fafaf8;
+  --line: #d8d8d3;
+  --line-strong: #bdbdb7;
+  --ink: #111111;
+  --muted: #5f5f5b;
+  --sidebar: #f7f7f4;
+  --sidebar-ink: #111111;
+  --sidebar-muted: #5f5f5b;
+  --sidebar-hover: #ecece8;
+  --sidebar-line: #d8d8d3;
+  --sidebar-active-bg: #111111;
+  --sidebar-active-ink: #ffffff;
+  --brand-accent: #d71920;
+  --on-accent: #ffffff;
+  --on-danger: #ffffff;
+  --blue: #d71920;   --blue-ink: #a51218;   --blue-soft: #fff0f1;   --blue-hover: #b81219;
+  --red: #e5484d;    --red-ink: #d31e24;    --red-soft: #ffeaec;
+  --green: #008a62;  --green-ink: #007c58;  --green-soft: #e3f7ef;
+  --yellow: #c77c02; --yellow-ink: #955d01; --yellow-soft: #fff3d6;
+  --accent: #d71920; --accent-ink: #a51218; --accent-soft: #fff0f1;
+  --info: #3878b8;   --info-ink: #245b91;   --info-soft: #eaf3fb;
+  --chip-blue: #fff0f1;   --chip-blue-ink: #a51218;
+  --chip-purple: #f1edf8; --chip-purple-ink: #67439d;
+  --chip-green: #e3f7ef;  --chip-green-ink: #007c58;
+  --chip-orange: #fff3d6; --chip-orange-ink: #955d01;
+  --radius-panel: 2px;
+  --radius-control: 2px;
+  --rail-bg: #ffffff;
+  --scrim: rgba(17, 17, 17, .5);
+}
+
+/* 深色玻璃皮肤：侧栏与顶栏叠加背景模糊，营造玻璃拟态 */
+html[data-skin="ide-dark"] .sidebar,
+html[data-skin="ide-dark"] .activity-rail {
+  background: color-mix(in srgb, var(--sidebar) 82%, transparent);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}

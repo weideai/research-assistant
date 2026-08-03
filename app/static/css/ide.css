@@ -1,0 +1,206 @@
+/* R/LAB IDE 工作台组件样式 —— 活动栏、状态栏、皮肤切换器、项目树与工作台统计卡。
+ *
+ * 加载顺序：tokens.css -> app.css -> assistant.css -> skins.css -> ide.css（最后加载，可微调既有布局）
+ * 所有颜色引用 skins.css / tokens.css 的变量，三套皮肤下自动换肤；本文件不出现字面色值。
+ */
+
+/* ── 布局让位：登录后 body.has-rail 时，为活动栏与状态栏腾出空间 ───────── */
+body.has-rail .sidebar { left: 48px; }
+body.has-rail .main-shell { margin-left: 296px; padding-bottom: 96px; }
+
+/* ── 活动栏（IDE icon rail）────────────────────────────────────────── */
+.activity-rail {
+  position: fixed; inset: 0 auto 0 0; z-index: 30;
+  width: 48px; display: flex; flex-direction: column; align-items: center;
+  padding: 10px 0; gap: 4px;
+  background: var(--rail-bg, var(--surface));
+  border-right: 1px solid var(--sidebar-line);
+}
+.rail-logo {
+  display: grid; place-items: center; width: 30px; height: 30px; margin-bottom: 6px;
+  border-radius: var(--radius-md); background: var(--brand-accent); color: var(--on-accent);
+  font: 900 12px/1 Arial, sans-serif;
+}
+.rail-btn {
+  display: grid; place-items: center; width: 32px; height: 32px;
+  border-radius: var(--radius-md); color: var(--muted);
+  transition: background var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+.rail-btn:hover { background: var(--sidebar-hover); color: var(--ink); }
+.rail-btn.active { background: var(--blue-soft); color: var(--blue); }
+.rail-btn svg { width: 16px; height: 16px; }
+.rail-spacer { flex: 1; }
+.rail-avatar {
+  display: grid; place-items: center; width: 26px; height: 26px;
+  border-radius: 50%; background: var(--ink); color: var(--bg);
+  font-size: 11px; font-weight: 700;
+}
+
+/* ── 设计系统基础组件覆盖 ─────────────────────────────────────────── */
+.page-head h1 { font-size: var(--fs-h1); }
+.panel { border-radius: var(--radius-panel); box-shadow: var(--shadow-1); }
+.panel-head h2 { font-size: var(--fs-h2); }
+.btn.primary { color: var(--on-accent); }
+.btn.danger { background: var(--red-ink); color: var(--on-danger); }
+
+/* ── 顶栏皮肤切换器（details 无 JS 开合，skin.js 负责应用选择）───────── */
+.workspace-topbar { grid-template-columns: minmax(170px, .8fr) minmax(260px, 1.35fr) auto auto; }
+.skin-switcher { position: relative; }
+.skin-switcher summary {
+  display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 0 12px;
+  border: 1px solid var(--line); border-radius: var(--radius-control);
+  background: var(--surface); color: var(--muted); font-size: 13px; font-weight: 600;
+  cursor: pointer; list-style: none; user-select: none;
+}
+.skin-switcher summary::-webkit-details-marker { display: none; }
+.skin-switcher summary:hover { color: var(--ink); border-color: var(--line-strong); }
+.skin-switcher summary svg { width: 15px; height: 15px; }
+.skin-menu {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 40; min-width: 188px;
+  display: grid; gap: 2px; padding: 6px;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-2);
+}
+.skin-menu button {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px;
+  border: 0; border-radius: var(--radius-control); background: none;
+  color: var(--ink); font-size: 13px; text-align: left;
+}
+.skin-menu button:hover { background: var(--surface-hover); }
+.skin-menu button[aria-checked="true"] { background: var(--blue-soft); color: var(--blue-ink); font-weight: 700; }
+.skin-dot { width: 12px; height: 12px; border-radius: 50%; border: 1px solid var(--line-strong); flex: 0 0 auto; }
+/* 三个皮肤色点，使用固定色以便在任何皮肤下都能辨识预览 */
+.skin-dot[data-dot="swiss"] { background: linear-gradient(135deg, #f2f2ef 55%, #d71920 55%); }
+.skin-dot[data-dot="ide-light"] { background: linear-gradient(135deg, #f5f7fb 55%, #5560e6 55%); }
+.skin-dot[data-dot="ide-dark"] { background: linear-gradient(135deg, #0b0e14 55%, #8b96ff 55%); }
+
+/* ── 侧栏项目树（IDE 资源管理器）────────────────────────────────────── */
+.project-tree { display: grid; gap: 2px; margin-top: 20px; }
+.tree-group-label {
+  padding: 0 12px 4px; color: var(--sidebar-muted);
+  font-size: 11px; font-weight: 700; letter-spacing: 0; text-transform: uppercase;
+}
+.tree-item {
+  display: flex; align-items: center; gap: 7px; min-height: 30px; padding: 0 8px;
+  border-radius: var(--radius-control); color: var(--sidebar-muted); font-size: 12.5px;
+  overflow: hidden;
+}
+.tree-item:hover { background: var(--sidebar-hover); color: var(--sidebar-ink); }
+.tree-item.lvl-2 { padding-left: 26px; font-size: 12px; }
+.tree-item.active { background: var(--sidebar-active-bg); color: var(--sidebar-active-ink); font-weight: 700; }
+.tree-item svg { width: 13px; height: 13px; flex: 0 0 auto; }
+.tree-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--line-strong); flex: 0 0 auto; }
+.tree-item.active .tree-dot { background: var(--brand-accent); }
+
+/* ── 工作台 pastel 统计卡（dashboard 使用，数据与旧 metric 一致）────────── */
+.wb-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+.wb-stat {
+  display: flex; align-items: center; gap: 12px; padding: 14px 16px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-panel);
+  transition: border-color var(--motion-fast) var(--motion-ease);
+}
+a.wb-stat:hover { border-color: color-mix(in srgb, var(--blue) 45%, var(--line)); }
+.wb-stat-icon {
+  display: grid; place-items: center; width: 36px; height: 36px; border-radius: var(--radius-md); flex: 0 0 auto;
+  background: var(--chip-blue, var(--blue-soft)); color: var(--chip-blue-ink, var(--blue));
+}
+.wb-stat-icon svg { width: 17px; height: 17px; }
+.wb-stat-icon[data-tone="purple"] { background: var(--chip-purple, var(--blue-soft)); color: var(--chip-purple-ink, var(--blue)); }
+.wb-stat-icon[data-tone="green"] { background: var(--chip-green, var(--green-soft)); color: var(--chip-green-ink, var(--green)); }
+.wb-stat-icon[data-tone="orange"] { background: var(--chip-orange, var(--yellow-soft)); color: var(--chip-orange-ink, var(--yellow-ink)); }
+.wb-stat-text { min-width: 0; }
+.wb-stat-text small { display: block; color: var(--muted); font-size: 11px; font-weight: 600; }
+.wb-stat-text b { display: block; margin-top: 1px; font-size: 20px; line-height: 1.2; }
+
+/* ── 科研工作台 ───────────────────────────────────────────────────── */
+.dashboard-head { align-items: flex-end; margin-bottom: 16px; }
+.dashboard-head > div { min-width: 0; }
+.dashboard-head h1 { margin: 4px 0 3px; }
+.dashboard-head .muted { font-size: var(--fs-caption); }
+
+.dashboard-resume {
+  display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center;
+  gap: 14px; min-width: 0; margin-bottom: 16px; padding: 15px 16px;
+  border: 1px solid var(--line); border-left: 3px solid var(--accent);
+  border-radius: var(--radius-panel); background: var(--surface-soft); box-shadow: var(--shadow-1);
+}
+.dashboard-resume-icon {
+  display: grid; place-items: center; width: 42px; height: 42px;
+  border-radius: var(--radius-control); background: var(--accent-soft); color: var(--accent-ink);
+}
+.dashboard-resume-icon svg { width: 18px; height: 18px; fill: currentColor; }
+.dashboard-resume-copy { display: grid; min-width: 0; gap: 3px; }
+.dashboard-resume-copy h2, .dashboard-resume-copy p { margin: 0; }
+.dashboard-resume-copy h2 {
+  overflow: hidden; font-size: var(--fs-h2); line-height: var(--lh-tight);
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.dashboard-resume-copy p { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 8px; color: var(--muted); font-size: var(--fs-micro); }
+.dashboard-resume-copy p b { color: var(--ink); }
+.dashboard-resume-copy .progress { margin-top: 3px; }
+.dashboard-resume-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+
+.dashboard-overview-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch; gap: 16px; min-width: 0; margin-bottom: 16px;
+}
+.dashboard-overview-grid > .panel { min-width: 0; overflow: hidden; }
+.dashboard-overview-grid .dashboard-focus { margin-bottom: 0; }
+.dashboard-overview-grid .dashboard-focus .task-list { display: grid; grid-template-columns: 1fr; gap: 0; }
+.dashboard-overview-grid .dashboard-focus .task-row { border-bottom: 1px solid var(--line); }
+.dashboard-overview-grid .dashboard-focus .task-row:last-child { border-bottom: 0; }
+.dashboard-overview-grid .empty { min-height: 178px; }
+
+.experiment-mini { grid-template-columns: 34px minmax(0, 1fr) 18px; gap: 10px; }
+.experiment-mini-icon {
+  display: grid; place-items: center; width: 34px; height: 34px;
+  border: 1px solid transparent; border-radius: var(--radius-control);
+}
+.experiment-mini-icon svg { width: 16px; height: 16px; }
+.dashboard-records-panel { margin-bottom: 16px; overflow: hidden; }
+
+/* ── 进度条（继续上次工作卡片使用，数值来自真实步骤完成度）────────────── */
+.progress { width: 120px; height: 5px; border-radius: var(--radius-full); background: var(--line); overflow: hidden; }
+.progress > i { display: block; height: 100%; border-radius: var(--radius-full); background: var(--accent); }
+.progress > i[data-tone="green"] { background: var(--green); }
+
+/* ── 提醒条（逾期任务提示，出现条件由模板控制）────────────────────────── */
+.wb-alert {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 16px;
+  padding: 10px 14px; border-radius: var(--radius-panel);
+  background: var(--yellow-soft); color: var(--yellow-ink); font-size: 12px; font-weight: 600;
+}
+.wb-alert svg { width: 15px; height: 15px; }
+.wb-alert a { margin-left: auto; color: var(--yellow-ink); font-weight: 800; text-decoration: underline; }
+
+/* ── 深色玻璃皮肤下的面板玻璃化 ─────────────────────────────────────── */
+html[data-skin="ide-dark"] .continue-work,
+html[data-skin="ide-dark"] .dashboard-resume,
+html[data-skin="ide-dark"] .panel,
+html[data-skin="ide-dark"] .wb-stat {
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+@media (max-width: 1180px) {
+  .workspace-topbar { grid-template-columns: minmax(130px, .7fr) minmax(200px, 1fr) auto auto; gap: 12px; }
+  .skin-switcher summary > span { display: none; }
+  .skin-switcher summary { width: 40px; justify-content: center; padding: 0; }
+  .skin-switcher summary > svg:last-child { display: none; }
+}
+
+@media (max-width: 980px) {
+  .wb-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dashboard-overview-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 640px) {
+  .dashboard-head { align-items: stretch; }
+  .dashboard-resume { grid-template-columns: 42px minmax(0, 1fr); align-items: start; }
+  .dashboard-resume-actions { grid-column: 1 / -1; justify-content: stretch; }
+  .dashboard-resume-actions .btn { flex: 1 1 auto; }
+  .wb-stats { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .wb-stat { padding: 12px; }
+}

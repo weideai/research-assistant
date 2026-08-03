@@ -14,12 +14,14 @@ import pytest
 
 CSS_DIR = Path(__file__).resolve().parent.parent / "app" / "static" / "css"
 TOKENS_CSS = CSS_DIR / "tokens.css"
+SKINS_CSS = CSS_DIR / "skins.css"
 APP_CSS = CSS_DIR / "app.css"
+IDE_CSS = CSS_DIR / "ide.css"
 THEMES_CSS = CSS_DIR / "themes.css"
 
 MIN_CONTRAST = 4.5
 MIN_FONT_SIZE_PX = 11
-SEMANTICS = ("blue", "red", "green", "yellow")
+SEMANTICS = ("blue", "red", "green", "yellow", "info")
 
 
 def _relative_luminance(value):
@@ -63,12 +65,9 @@ def _iter_rule_blocks(text):
 
 
 def _resolved_theme_palettes():
-    """Return the palettes defined by the token layer.
-
-    The application now has one fixed palette. Retaining this parser keeps the
-    contrast tests useful while making any reintroduced theme selector visible.
-    """
+    """Return the default palette and every supported skin resolved over it."""
     blocks = list(_iter_rule_blocks(TOKENS_CSS.read_text(encoding="utf-8")))
+    blocks += list(_iter_rule_blocks(SKINS_CSS.read_text(encoding="utf-8")))
 
     def declarations(body):
         return dict(re.findall(r"(--[a-z0-9-]+):\s*(#[0-9a-fA-F]{3,8})", body))
@@ -80,23 +79,16 @@ def _resolved_theme_palettes():
 
     palettes = [(":root", dict(base))]
     for selector, body in blocks:
-        if selector.startswith("html["):
+        overrides = declarations(body)
+        if selector.startswith("html[") and overrides:
             resolved = dict(base)
-            resolved.update(declarations(body))
-            # Dark variants layer on top of the shared dark block.
-            if "data-mode=\"dark\"" in selector and "data-theme" in selector:
-                for other_selector, other_body in blocks:
-                    if other_selector == 'html[data-mode="dark"]':
-                        merged = dict(base)
-                        merged.update(declarations(other_body))
-                        merged.update(declarations(body))
-                        resolved = merged
+            resolved.update(overrides)
             palettes.append((selector, resolved))
     return palettes
 
 
 def _theme_palettes():
-    """(selector, muted, bg, surface) for the fixed palette."""
+    """(selector, muted, bg, surface) for every supported palette."""
     out = []
     for selector, tokens in _resolved_theme_palettes():
         if all(key in tokens for key in ("--muted", "--bg", "--surface")):
@@ -125,9 +117,14 @@ def _ink_pairs():
     return pairs
 
 
-def test_only_the_fixed_palette_is_declared():
+def test_supported_palettes_are_declared():
     palettes = _theme_palettes()
-    assert [palette[0] for palette in palettes] == [":root"]
+    assert [palette[0] for palette in palettes] == [
+        ":root",
+        'html[data-skin="ide-light"]',
+        'html[data-skin="ide-dark"]',
+        'html[data-skin="swiss"]',
+    ]
 
 
 @pytest.mark.parametrize("selector,ink,muted,background", _sidebar_palettes())
@@ -151,7 +148,7 @@ def test_semantic_ink_grade_is_readable_on_its_own_soft_background(selector, nam
     )
 
 
-def test_fixed_palette_defines_both_grades_for_every_semantic_colour():
+def test_supported_palettes_define_both_grades_for_every_semantic_colour():
     """A missing -ink token silently falls back to the unreadable fill grade."""
     gaps = []
     for selector, tokens in _resolved_theme_palettes():
@@ -163,13 +160,13 @@ def test_fixed_palette_defines_both_grades_for_every_semantic_colour():
     assert not gaps, "语义色档位不完整：" + "; ".join(gaps)
 
 
-LITERAL_HEX_ALLOWED_MARKERS = ()
+LITERAL_HEX_ALLOWED_MARKERS = ('.skin-dot[data-dot=',)
 
 
 def test_no_literal_hex_outside_the_token_layer():
     """Component colours must stay sourced from the shared token layer."""
     offenders = []
-    for path in (APP_CSS, THEMES_CSS, CSS_DIR / "assistant.css"):
+    for path in (APP_CSS, IDE_CSS, THEMES_CSS, CSS_DIR / "assistant.css"):
         if not path.exists():
             continue
         for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
@@ -188,11 +185,12 @@ def test_no_literal_hex_outside_the_token_layer():
 def test_token_layer_defines_no_malformed_colour():
     """A stray character in a hex value fails silently — the theme just looks wrong."""
     malformed = []
-    for match in re.finditer(r"(--[a-z0-9-]+):\s*(#[^;\s]*)", TOKENS_CSS.read_text(encoding="utf-8")):
-        digits = match.group(2)[1:]
-        if len(digits) not in (3, 6, 8) or not re.fullmatch(r"[0-9a-fA-F]+", digits):
-            malformed.append(f"{match.group(1)}: {match.group(2)}")
-    assert not malformed, "tokens.css 存在非法颜色值：" + ", ".join(malformed)
+    for path in (TOKENS_CSS, SKINS_CSS):
+        for match in re.finditer(r"(--[a-z0-9-]+):\s*(#[^;\s]*)", path.read_text(encoding="utf-8")):
+            digits = match.group(2)[1:]
+            if len(digits) not in (3, 6, 8) or not re.fullmatch(r"[0-9a-fA-F]+", digits):
+                malformed.append(f"{path.name} {match.group(1)}: {match.group(2)}")
+    assert not malformed, "主题令牌存在非法颜色值：" + ", ".join(malformed)
 
 
 LITERAL_RADIUS_ALLOWED_MARKERS = ()
@@ -205,6 +203,7 @@ RADIUS_ALIASES = ("--radius-panel", "--radius-control")
 def _resolved_radius_scales():
     """(selector, {token: px}), with var() aliases followed to a number."""
     blocks = list(_iter_rule_blocks(TOKENS_CSS.read_text(encoding="utf-8")))
+    blocks += list(_iter_rule_blocks(SKINS_CSS.read_text(encoding="utf-8")))
 
     def declarations(body):
         return dict(re.findall(r"(--radius-[a-z0-9-]+):\s*([^;]+?)\s*(?:;|$)", body))
@@ -225,7 +224,8 @@ def _resolved_radius_scales():
         return int(pixels.group(1)) if pixels else None
 
     scales = []
-    for selector, body in [(":root", "")] + [b for b in blocks if b[0].startswith("html[")]:
+    themed_blocks = [b for b in blocks if b[0].startswith("html[") and declarations(b[1])]
+    for selector, body in [(":root", "")] + themed_blocks:
         tokens = dict(base)
         tokens.update(declarations(body))
         scales.append((selector, {name: resolve(tokens, raw) for name, raw in tokens.items()}))
@@ -248,7 +248,7 @@ def test_radius_scale_steps_stay_visually_distinguishable():
     )
 
 
-def test_fixed_palette_defines_both_radius_aliases():
+def test_supported_palettes_define_both_radius_aliases():
     gaps = []
     for selector, scale in _resolved_radius_scales():
         for alias in RADIUS_ALIASES:
@@ -260,7 +260,7 @@ def test_fixed_palette_defines_both_radius_aliases():
 def test_no_literal_pixel_radius_outside_the_token_layer():
     """A literal radius ignores the theme, so minimal/tech stop looking square."""
     offenders = []
-    for path in (APP_CSS, THEMES_CSS, CSS_DIR / "assistant.css"):
+    for path in (APP_CSS, IDE_CSS, THEMES_CSS, CSS_DIR / "assistant.css"):
         if not path.exists():
             continue
         for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
@@ -413,7 +413,7 @@ def test_muted_text_meets_wcag_aa(selector, muted, bg, surface):
 
 def _declared_font_sizes():
     hits = []
-    for path in (APP_CSS, THEMES_CSS, CSS_DIR / "assistant.css"):
+    for path in (APP_CSS, IDE_CSS, THEMES_CSS, CSS_DIR / "assistant.css"):
         if not path.exists():
             continue
         for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):

@@ -1,14 +1,14 @@
 /* R/LAB design tokens — the single source of truth for design.md.
  *
- * Load order: tokens.css -> app.css -> assistant.css
+ * Load order: tokens.css -> app.css -> assistant.css -> skins.css -> ide.css
  * Rules elsewhere must reference var(--token); no literal hex values.
  *
  * Semantic colours come in two grades:
  *   --x        fill grade: backgrounds, borders, status dots. NOT for text.
  *   --x-ink    text grade: verified >= 4.5:1 on the matching --x-soft.
  *   --x-soft   tinted background.
- * The fill grade sits between 3.0 and 4.4:1 on white, so using it for body text
- * fails WCAG AA. Every --x-ink below was computed, not eyeballed; see
+ * Fill grades are reserved for non-text UI. Every --x-ink is verified against
+ * its matching soft background rather than inferred from the fill colour; see
  * tests/test_design_tokens.py, which recomputes the ratios on every run.
  */
 
@@ -17,9 +17,9 @@
   --font-sans: "Inter", "Microsoft YaHei UI", "Noto Sans SC", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
 
-  --fs-display: 32px;
-  --fs-h1: clamp(26px, 3vw, 34px);
-  --fs-h2: 20px;
+  --fs-display: 28px;
+  --fs-h1: 24px;
+  --fs-h2: 16px;
   --fs-h3: 16px;
   --fs-body: 14px;
   --fs-sm: 13px;
@@ -35,7 +35,7 @@
   --lh-tight: 1.25;
   --lh-body: 1.55;
   --lh-dense: 1.4;
-  --ls-eyebrow: .08em;
+  --ls-eyebrow: 0;
 
   /* Spacing — 4pt grid */
   --space-1: 4px;   --space-2: 8px;   --space-3: 12px;  --space-4: 16px;
@@ -51,13 +51,13 @@
   --radius-lg: 12px;         /* floating docks and bottom sheets */
   --radius-full: 999px;      /* pills; circles keep 50% */
 
-  --radius-panel: 2px;
-  --radius-control: 2px;
+  --radius-panel: var(--radius-md);
+  --radius-control: var(--radius-sm);
 
   /* Elevation */
-  --shadow-1: 0 1px 2px rgba(20, 30, 36, .06);
-  --shadow-2: 0 8px 24px rgba(9, 18, 24, .10);
-  --shadow-3: 0 14px 36px rgba(9, 18, 24, .24);
+  --shadow-1: 0 1px 3px rgba(15, 31, 46, .06);
+  --shadow-2: 0 8px 24px rgba(15, 31, 46, .10);
+  --shadow-3: 0 18px 48px rgba(15, 31, 46, .20);
 
   /* Motion */
   --motion-fast: 120ms;
@@ -71,31 +71,43 @@
   --focus-ring: 0 0 0 3px color-mix(in srgb, var(--blue) 30%, transparent);
 }
 
-/* ── fixed Swiss research palette ─────────────────────────────────────── */
+/* R/LAB medical-instrument palette from Page 1.svg. The light palette is the
+ * default so the first frame is also the no-JavaScript fallback. Optional
+ * dark and Swiss variants live in skins.css. */
 :root {
-  --bg: #f2f2ef;
+  --bg: #f5f7fb;
   --surface: #fff;
-  --surface-soft: #f7f7f4;
-  --surface-hover: #fafaf8;
-  --line: #d8d8d3;
-  --line-strong: #bdbdb7;
-  --ink: #111;
-  --muted: #5f5f5b;
+  --surface-soft: #f8fcfb;
+  --surface-hover: #f1f6f7;
+  --line: #dce6e8;
+  --line-strong: #c8d7db;
+  --ink: #0f1f2e;
+  --muted: #5c7480;
 
-  --sidebar: #f7f7f4;
-  --sidebar-ink: #111;
-  --sidebar-muted: #5f5f5b;
-  --sidebar-hover: #ecece8;
-  --sidebar-line: #d8d8d3;
-  --sidebar-active-bg: #111;
-  --sidebar-active-ink: #fff;
-  --brand-accent: #d71920;
+  --sidebar: #fff;
+  --sidebar-ink: #0f1f2e;
+  --sidebar-muted: #5c7480;
+  --sidebar-hover: #f1f4fb;
+  --sidebar-line: #dce6e8;
+  --sidebar-active-bg: #eef0ff;
+  --sidebar-active-ink: #3947c6;
+  --brand-accent: #5560e6;
   --on-accent: #fff;
+  --on-danger: #fff;
 
-  --blue: #d71920;   --blue-ink: #a51218;   --blue-soft: #fff0f1;   --blue-hover: #b81219;
-  --red: #e5484d;    --red-ink: #d31e24;    --red-soft: #ffeaec;
-  --green: #008a62;  --green-ink: #007c58;  --green-soft: #e3f7ef;
-  --yellow: #c77c02; --yellow-ink: #955d01; --yellow-soft: #fff3d6;
+  --blue: #5560e6;   --blue-ink: #3947c6;   --blue-soft: #eef0ff;   --blue-hover: #4652d5;
+  --red: #eb5757;    --red-ink: #b52f35;    --red-soft: #fdedee;
+  --green: #29b69f;  --green-ink: #137667;  --green-soft: #e4f7f3;
+  --yellow: #f2c94c; --yellow-ink: #765b00; --yellow-soft: #fff7d8;
+  --accent: #5bcfc5; --accent-ink: #157c76; --accent-soft: #e8f8f6;
+  --info: #4a90d9;   --info-ink: #2b68a3;   --info-soft: #eaf3fc;
+  --secondary: #5c7480;
 
-  --scrim: rgba(17, 17, 17, .5);
+  --chip-blue: #eef0ff;   --chip-blue-ink: #5560e6;
+  --chip-purple: #f3edfd; --chip-purple-ink: #8254e8;
+  --chip-green: #e4f7f3;  --chip-green-ink: #137667;
+  --chip-orange: #fff2e2; --chip-orange-ink: #a85e13;
+
+  --rail-bg: #fff;
+  --scrim: rgba(15, 31, 46, .48);
 }

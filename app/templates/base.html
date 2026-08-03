@@ -3,12 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=1180">
-  <meta name="theme-color" content="#f2f2ef">
+  <meta name="theme-color" content="#f5f7fb">
   <meta name="csrf-token" content="{{ csrf_token() }}">
   <title>{% block title %}科研助手{% endblock %} · R/LAB</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/tokens.css', v=config.APP_VERSION) }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v=config.APP_VERSION) }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/assistant.css', v=config.APP_VERSION) }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/skins.css', v=config.APP_VERSION) }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/ide.css', v=config.APP_VERSION) }}">
+  <script src="{{ url_for('static', filename='js/skin.js', v=config.APP_VERSION) }}"></script>
   <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" defer></script>
 </head>
 <body class="{% if not current_user.is_authenticated %}auth-body{% endif %}" data-assistant-page-type="{{ assistant_page.type }}" data-assistant-page-id="{{ assistant_page.id or '' }}"{% if current_user.is_authenticated %} data-update-check-url="{{ url_for('updates.check') }}"{% endif %}>
@@ -70,6 +73,14 @@
     <header class="workspace-topbar">
       <div class="topbar-breadcrumb"><span>科研助手</span><i data-lucide="chevron-right"></i><b>{{ workspace_page_label }}</b></div>
       <a class="topbar-search" href="{{ url_for('main.experiment_report_index') }}"><i data-lucide="search"></i><span>搜索实验、报告和文件</span><kbd>Ctrl K</kbd></a>
+      <details class="skin-switcher" id="skin-switcher">
+        <summary title="切换界面外观" aria-label="切换界面外观"><i data-lucide="sun-moon"></i><span data-skin-current>科研浅色</span><i data-lucide="chevron-down"></i></summary>
+        <div class="skin-menu" role="menu" aria-label="界面外观">
+          <button type="button" role="menuitemradio" data-skin-choice="ide-light" aria-checked="true"><span class="skin-dot" data-dot="ide-light"></span>科研浅色</button>
+          <button type="button" role="menuitemradio" data-skin-choice="ide-dark" aria-checked="false"><span class="skin-dot" data-dot="ide-dark"></span>科研深色</button>
+          <button type="button" role="menuitemradio" data-skin-choice="swiss" aria-checked="false"><span class="skin-dot" data-dot="swiss"></span>经典 Swiss</button>
+        </div>
+      </details>
       <button class="topbar-ai" type="button" data-open-ai-assistant><span class="topbar-ai-icon"><i data-lucide="sparkles"></i></span><span><b>实验分析专家</b><small>打开 AI 助手</small></span><i data-lucide="arrow-up-right"></i></button>
     </header>
     {% endif %}

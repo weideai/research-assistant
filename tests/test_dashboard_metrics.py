@@ -16,10 +16,10 @@ METRIC_COUNT = 4
 
 
 def _metric_tags():
-    """Every element carrying the .metric class, with its tag name."""
+    """Every element carrying the .wb-stat class, with its tag name."""
     html = TEMPLATE.read_text(encoding="utf-8")
-    # `metric` must be a whole class token: `metric-grid` is the wrapper, not a card.
-    return re.findall(r'<(\w+)\s+class="metric(?:\s[^"]*)?"([^>]*)>', html)
+    # `wb-stat` must be a whole class token: `wb-stats` is the wrapper, not a card.
+    return re.findall(r'<(\w+)\s+class="wb-stat(?:\s[^"]*)?"([^>]*)>', html)
 
 
 def test_every_metric_card_is_a_link():
@@ -28,7 +28,7 @@ def test_every_metric_card_is_a_link():
     assert len(tags) == METRIC_COUNT, f"预期 {METRIC_COUNT} 张指标卡，实际 {len(tags)}"
     non_links = [tag for tag, _ in tags if tag != "a"]
     assert not non_links, (
-        f"以下指标卡不是链接：{non_links}。CSS 里的 a.metric 规则会静默失效，"
+        f"以下指标卡不是链接：{non_links}。CSS 里的 a.wb-stat 规则会静默失效，"
         f"卡片看起来一样但点不动。"
     )
 
