@@ -1,6 +1,37 @@
 document.addEventListener("DOMContentLoaded", () => {
   if (window.lucide) window.lucide.createIcons();
 
+  const workspaceSidebar = document.querySelector("#workspace-sidebar");
+  const sidebarCollapse = document.querySelector("#sidebar-collapse");
+  const sidebarReopen = document.querySelector("#sidebar-reopen");
+  if (workspaceSidebar && sidebarCollapse && sidebarReopen) {
+    const storageKey = "rlab-workspace-sidebar-collapsed";
+    const setSidebarCollapsed = (collapsed, { persist = false, moveFocus = false } = {}) => {
+      document.body.classList.toggle("sidebar-collapsed", collapsed);
+      workspaceSidebar.toggleAttribute("inert", collapsed);
+      workspaceSidebar.setAttribute("aria-hidden", collapsed ? "true" : "false");
+      [sidebarCollapse, sidebarReopen].forEach((button) => {
+        button.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      });
+      if (persist) {
+        try { window.localStorage.setItem(storageKey, collapsed ? "1" : "0"); } catch (_error) {}
+      }
+      if (moveFocus) {
+        window.requestAnimationFrame(() => (collapsed ? sidebarReopen : sidebarCollapse).focus());
+      }
+    };
+
+    let initiallyCollapsed = false;
+    try { initiallyCollapsed = window.localStorage.getItem(storageKey) === "1"; } catch (_error) {}
+    setSidebarCollapsed(initiallyCollapsed);
+    sidebarCollapse.addEventListener("click", () => {
+      setSidebarCollapsed(true, { persist: true, moveFocus: true });
+    });
+    sidebarReopen.addEventListener("click", () => {
+      setSidebarCollapsed(false, { persist: true, moveFocus: true });
+    });
+  }
+
   const openHashDisclosure = () => {
     if (!window.location.hash) return;
     const target = document.querySelector(window.location.hash);
@@ -747,7 +778,8 @@ document.addEventListener("DOMContentLoaded", () => {
     updateViewLink();
   });
 
-  const aiOpenButton = document.querySelector("[data-open-ai-assistant]");
+  const aiOpenButtons = Array.from(document.querySelectorAll("[data-open-ai-assistant]"));
+  const aiOpenButton = aiOpenButtons[0] || null;
   const aiDock = document.querySelector("#ai-dock");
   const aiMessages = document.querySelector("#ai-messages");
   const aiComposer = document.querySelector("#ai-composer");
@@ -868,7 +900,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const aiChannel = "BroadcastChannel" in window ? new BroadcastChannel("research-assistant-ai") : null;
   const hideAiNotice = () => {
     if (aiCompletionToast) aiCompletionToast.hidden = true;
-    aiOpenButton?.classList.remove("complete");
+    aiOpenButtons.forEach((button) => button.classList.remove("complete"));
     document.title = baseDocumentTitle;
   };
 
@@ -878,7 +910,7 @@ document.addEventListener("DOMContentLoaded", () => {
     aiCompletionToast.querySelector("small").textContent = message;
     aiCompletionToast.classList.toggle("failed", failed);
     aiCompletionToast.hidden = false;
-    aiOpenButton?.classList.toggle("complete", !failed);
+    aiOpenButtons.forEach((button) => button.classList.toggle("complete", !failed));
     document.title = `${failed ? "!" : "✓"} ${failed ? "AI 运行失败" : "AI 已完成"} · ${baseDocumentTitle}`;
   };
 
@@ -2100,7 +2132,23 @@ document.addEventListener("DOMContentLoaded", () => {
     syncAiInputMeta();
     aiInput?.focus();
   };
-  aiOpenButton?.addEventListener("click", openAiAssistant);
+  aiOpenButtons.forEach((button) => button.addEventListener("click", openAiAssistant));
+  const prefillAiMessage = async (message = "") => {
+    await openAiAssistant();
+    if (!aiInput || !message.trim()) return;
+    aiInput.value = message.trim();
+    syncAiInputMeta();
+    aiInput.focus();
+    aiInput.setSelectionRange(aiInput.value.length, aiInput.value.length);
+  };
+  document.querySelectorAll("[data-ai-sidecar-prompt]").forEach((button) => {
+    button.addEventListener("click", () => prefillAiMessage(button.dataset.aiSidecarPrompt || ""));
+  });
+  document.querySelector("#ai-sidecar-composer")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const input = document.querySelector("#ai-sidecar-input");
+    prefillAiMessage(input?.value || "");
+  });
   aiExperimentSourceOpen?.addEventListener("click", () => setAiContextPage("experiment"));
   aiKnowledgeSourceOpen?.addEventListener("click", () => setAiContextPage("knowledge"));
   aiContextPageClose?.addEventListener("click", () => setAiContextPage());
@@ -2798,7 +2846,7 @@ document.addEventListener("DOMContentLoaded", () => {
     setAiTaskStatus("正在分析上下文和生成回复");
     if (aiStop) aiStop.hidden = false;
     sendButton.disabled = true;
-    aiOpenButton?.classList.add("working");
+    aiOpenButtons.forEach((button) => button.classList.add("working"));
     if (aiModelLabel) aiModelLabel.textContent = "正在后台运行…";
     const pending = makeElement("div", "ai-thinking", "AI 正在分析…");
     aiMessages.append(pending);
@@ -2830,7 +2878,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (aiStop) aiStop.hidden = true;
       setAiTaskStatus("");
       sendButton.disabled = false;
-      aiOpenButton?.classList.remove("working");
+      aiOpenButtons.forEach((button) => button.classList.remove("working"));
       if (aiModelLabel) aiModelLabel.textContent = aiModelLabel.dataset.idleLabel || "准备就绪";
     }
   });

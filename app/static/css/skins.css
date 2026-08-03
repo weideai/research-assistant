@@ -14,6 +14,7 @@
 /* 显式写入 ide-light 时与默认令牌保持一致。skin.js 对默认值会移除属性，
  * 此块主要服务测试、预览和外部嵌入。 */
 html[data-skin="ide-light"] {
+  color-scheme: light;
   /* 冷调浅蓝灰画布 + 白卡片 */
   --bg: #f5f7fb;
   --surface: #ffffff;
@@ -58,7 +59,15 @@ html[data-skin="ide-light"] {
   --shadow-3: 0 14px 36px rgba(21, 28, 56, .16);
 
   /* IDE 组件变量（ide.css 引用） */
-  --rail-bg: #ffffff;
+  --chrome: #ffffff;
+  --chrome-soft: #f8fcfb;
+  --chrome-active: #eef0ff;
+  --panel-sheen: linear-gradient(145deg, rgba(255, 255, 255, .72), rgba(255, 255, 255, 0));
+  --workspace-texture:
+    linear-gradient(to right, rgba(85, 96, 230, .022) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(85, 96, 230, .018) 1px, transparent 1px);
+  --workspace-texture-size: 64px 64px;
+  --workspace-texture-opacity: .7;
 }
 
 /* ── IDE 深色玻璃 ────────────────────────────────────────────────────── */
@@ -67,22 +76,22 @@ html[data-skin="ide-dark"] {
 
   /* 深海蓝画布 + 深色玻璃卡片 */
   --bg: #0b0e14;
-  --surface: #12161f;
-  --surface-soft: #171d29;
-  --surface-hover: #1a2130;
-  --line: #262e3d;
-  --line-strong: #374154;
-  --ink: #e8ecf4;
-  --muted: #9aa4b8;
+  --surface: #141925;
+  --surface-soft: #191f2d;
+  --surface-hover: #20283a;
+  --line: #2a3346;
+  --line-strong: #3b4760;
+  --ink: #eef1f7;
+  --muted: #a6afc2;
 
   /* 侧栏：近黑玻璃 */
-  --sidebar: #0e121b;
-  --sidebar-ink: #e8ecf4;
-  --sidebar-muted: #9aa4b8;
-  --sidebar-hover: #171e2b;
-  --sidebar-line: #222a3a;
-  --sidebar-active-bg: #1e2640;
-  --sidebar-active-ink: #aab3ff;
+  --sidebar: #10151f;
+  --sidebar-ink: #eef1f7;
+  --sidebar-muted: #a6afc2;
+  --sidebar-hover: #1c2332;
+  --sidebar-line: #2a3346;
+  --sidebar-active-bg: #2a3145;
+  --sidebar-active-ink: #c1c7ff;
 
   /* 亮靛蓝主行动色（深色底上保证对比度） */
   --brand-accent: #8b96ff;
@@ -101,19 +110,31 @@ html[data-skin="ide-dark"] {
   --chip-green: #12302e;   --chip-green-ink: #7fe0d8;
   --chip-orange: #2e2712;  --chip-orange-ink: #f5c98a;
 
-  --radius-panel: 12px;
-  --radius-control: 8px;
+  --radius-panel: 8px;
+  --radius-control: 6px;
   --shadow-1: 0 1px 3px rgba(0, 0, 0, .4);
   --shadow-2: 0 8px 24px rgba(0, 0, 0, .5);
   --shadow-3: 0 14px 36px rgba(0, 0, 0, .6);
   --scrim: rgba(0, 0, 0, .6);
 
   /* IDE 组件变量（ide.css 引用） */
-  --rail-bg: #0e121b;
+  --chrome: #0d111b;
+  --chrome-soft: #151b27;
+  --chrome-active: #20283a;
+  --panel-sheen: linear-gradient(145deg, rgba(255, 255, 255, .055), rgba(255, 255, 255, 0) 52%);
+  --workspace-texture:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, .014) 0, rgba(255, 255, 255, .014) 1px, transparent 1px, transparent 4px),
+    linear-gradient(to right, rgba(139, 150, 255, .032) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(139, 150, 255, .026) 1px, transparent 1px),
+    linear-gradient(120deg, rgba(91, 207, 197, .09) 0%, transparent 34%),
+    linear-gradient(115deg, #090d16 0%, #101728 58%, #1a244b 100%);
+  --workspace-texture-size: 4px 4px, 64px 64px, 64px 64px, auto, auto;
+  --workspace-texture-opacity: 1;
 }
 
 /* ── 经典 Swiss（兼容旧界面偏好）──────────────────────────────────── */
 html[data-skin="swiss"] {
+  color-scheme: light;
   --bg: #f2f2ef;
   --surface: #ffffff;
   --surface-soft: #f7f7f4;
@@ -144,14 +165,21 @@ html[data-skin="swiss"] {
   --chip-orange: #fff3d6; --chip-orange-ink: #955d01;
   --radius-panel: 2px;
   --radius-control: 2px;
-  --rail-bg: #ffffff;
+  --chrome: #ffffff;
+  --chrome-soft: #f7f7f4;
+  --chrome-active: #111111;
+  --panel-sheen: none;
+  --workspace-texture:
+    linear-gradient(to right, rgba(17, 17, 17, .025) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(17, 17, 17, .02) 1px, transparent 1px);
+  --workspace-texture-size: 32px 32px;
+  --workspace-texture-opacity: .75;
   --scrim: rgba(17, 17, 17, .5);
 }
 
 /* 深色玻璃皮肤：侧栏与顶栏叠加背景模糊，营造玻璃拟态 */
-html[data-skin="ide-dark"] .sidebar,
-html[data-skin="ide-dark"] .activity-rail {
-  background: color-mix(in srgb, var(--sidebar) 82%, transparent);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+html[data-skin="ide-dark"] .sidebar {
+  background: color-mix(in srgb, var(--sidebar) 86%, transparent);
+  backdrop-filter: blur(22px) saturate(1.08);
+  -webkit-backdrop-filter: blur(22px) saturate(1.08);
 }

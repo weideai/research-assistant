@@ -69,6 +69,11 @@
   --icon-button-size: 40px;
   --hit-area-inset: 2px;     /* ::after expansion to reach 44x44 */
   --focus-ring: 0 0 0 3px color-mix(in srgb, var(--blue) 30%, transparent);
+
+  /* IDE shell */
+  --explorer-width: 216px;
+  --editor-bar-height: 36px;
+  --ai-sidecar-width: 264px;
 }
 
 /* R/LAB medical-instrument palette from Page 1.svg. The light palette is the
@@ -108,6 +113,25 @@
   --chip-green: #e4f7f3;  --chip-green-ink: #137667;
   --chip-orange: #fff2e2; --chip-orange-ink: #a85e13;
 
-  --rail-bg: #fff;
+  --chrome: #fff;
+  --chrome-soft: #f8fcfb;
+  --chrome-active: #eef0ff;
+  --panel-sheen: linear-gradient(145deg, rgba(255, 255, 255, .72), rgba(255, 255, 255, 0));
+  --workspace-texture:
+    linear-gradient(to right, rgba(85, 96, 230, .022) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(85, 96, 230, .018) 1px, transparent 1px);
+  --workspace-texture-size: 64px 64px;
+  --workspace-texture-opacity: .7;
+
+  /* Theme previews remain stable while the active skin changes. */
+  --preview-light-bg: #f5f7fb;
+  --preview-light-accent: #5560e6;
+  --preview-light-panel: #fff;
+  --preview-dark-bg: #0b0e14;
+  --preview-dark-accent: #8b96ff;
+  --preview-dark-panel: #20283a;
+  --preview-swiss-bg: #f2f2ef;
+  --preview-swiss-accent: #d71920;
+  --preview-swiss-panel: #111;
   --scrim: rgba(15, 31, 46, .48);
 }

@@ -60,6 +60,10 @@
     for (var j = 0; j < labels.length; j++) {
       labels[j].textContent = SKINS[skin].label;
     }
+    var currentDots = document.querySelectorAll("[data-skin-current-dot]");
+    for (var k = 0; k < currentDots.length; k++) {
+      currentDots[k].setAttribute("data-skin-current-dot", skin);
+    }
     var choices = document.querySelectorAll("[data-skin-choice]");
     for (var i = 0; i < choices.length; i++) {
       choices[i].setAttribute(

@@ -75,3 +75,17 @@ def test_desktop_shell_has_no_mobile_navigation_or_floating_ai_entry():
     for retired_hook in ("menu-toggle", "ai-fab", ".mobile-bar"):
         assert retired_hook not in javascript
         assert retired_hook not in styles
+
+
+def test_activity_rail_is_removed_and_resource_explorer_is_collapsible():
+    html = _template("base.html")
+    javascript = (STATIC / "js" / "app.js").read_text(encoding="utf-8")
+    styles = (STATIC / "css" / "ide.css").read_text(encoding="utf-8")
+
+    assert "activity-rail" not in html
+    assert "activity-rail" not in styles
+    assert 'id="workspace-sidebar"' in html
+    assert html.count("data-sidebar-toggle") == 2
+    assert 'aria-controls="workspace-sidebar"' in html
+    assert "rlab-workspace-sidebar-collapsed" in javascript
+    assert "sidebar-collapsed" in javascript and "sidebar-collapsed" in styles

@@ -20,6 +20,35 @@ $Migrations = Join-Path $ProjectRoot "migrations"
 $PresentationScript = Join-Path $ProjectRoot "scripts\build_weekly_presentation.mjs"
 $DesktopLauncher = Join-Path $ProjectRoot "desktop_launcher.py"
 $InstallerSource = Join-Path $ProjectRoot "packaging\windows\installer.py"
+$InstallerVerifier = Join-Path $ProjectRoot "scripts\verify_windows_installer.py"
+
+function Get-RelativeFileList {
+    param([string]$Root)
+    $ResolvedRoot = (Resolve-Path -LiteralPath $Root).Path.TrimEnd("\")
+    return @(
+        Get-ChildItem -LiteralPath $ResolvedRoot -Recurse -File |
+            ForEach-Object { $_.FullName.Substring($ResolvedRoot.Length + 1) } |
+            Sort-Object
+    )
+}
+
+function Assert-MirroredDirectory {
+    param(
+        [string]$Source,
+        [string]$Bundled,
+        [string]$Label
+    )
+    if (-not (Test-Path -LiteralPath $Bundled -PathType Container)) {
+        throw "Bundled $Label directory is missing: $Bundled"
+    }
+    $Difference = @(
+        Compare-Object (Get-RelativeFileList $Source) (Get-RelativeFileList $Bundled)
+    )
+    if ($Difference.Count -gt 0) {
+        $Summary = ($Difference | Select-Object -First 12 | ForEach-Object { "$($_.SideIndicator) $($_.InputObject)" }) -join "; "
+        throw "Bundled $Label files do not match the source directory: $Summary"
+    }
+}
 
 Push-Location $ProjectRoot
 try {
@@ -62,6 +91,29 @@ try {
     & $PythonPath -m PyInstaller @appArgs
     if ($LASTEXITCODE -ne 0) { throw "ResearchAssistant.exe build failed." }
 
+    $BundleInternal = Join-Path $AppBundle "_internal"
+    Assert-MirroredDirectory $Templates (Join-Path $BundleInternal "app\templates") "templates"
+    Assert-MirroredDirectory $StaticFiles (Join-Path $BundleInternal "app\static") "static assets"
+    Assert-MirroredDirectory $Migrations (Join-Path $BundleInternal "migrations") "migrations"
+    $RequiredBundleFiles = @(
+        (Join-Path $AppBundle "ResearchAssistant.exe"),
+        (Join-Path $BundleInternal "app\templates\base.html"),
+        (Join-Path $BundleInternal "app\static\css\ide.css"),
+        (Join-Path $BundleInternal "app\static\css\skins.css"),
+        (Join-Path $BundleInternal "app\static\js\skin.js"),
+        (Join-Path $BundleInternal "migrations\alembic.ini"),
+        (Join-Path $BundleInternal "scripts\build_weekly_presentation.mjs")
+    )
+    $MissingBundleFiles = @($RequiredBundleFiles | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) })
+    if ($MissingBundleFiles.Count -gt 0) {
+        throw "Required application files are missing from the bundle: $($MissingBundleFiles -join ', ')"
+    }
+    $BundledBase = Get-Content -LiteralPath (Join-Path $BundleInternal "app\templates\base.html") -Raw -Encoding UTF8
+    $BundledIde = Get-Content -LiteralPath (Join-Path $BundleInternal "app\static\css\ide.css") -Raw -Encoding UTF8
+    if ($BundledBase -notmatch 'activity-rail' -or $BundledBase -notmatch 'ai-sidecar' -or $BundledIde -notmatch 'workspace-texture') {
+        throw "The bundled UI does not contain the current IDE workspace assets."
+    }
+
     $installerArgs = @(
         "--noconfirm", "--clean", "--onefile", "--windowed",
         "--name", "ResearchAssistant-Setup",
@@ -77,7 +129,13 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "ResearchAssistant-Setup.exe build failed." }
 
     $SetupPath = Join-Path $DistRoot "ResearchAssistant-Setup.exe"
+    & $PythonPath $InstallerVerifier $SetupPath
+    if ($LASTEXITCODE -ne 0) { throw "ResearchAssistant-Setup.exe payload verification failed." }
+
+    $SetupHash = (Get-FileHash -LiteralPath $SetupPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    Set-Content -LiteralPath "$SetupPath.sha256" -Value "$SetupHash *ResearchAssistant-Setup.exe" -Encoding ASCII
     Write-Host "Installer created: $SetupPath"
+    Write-Host "SHA256: $SetupHash"
     Get-Item -LiteralPath $SetupPath | Select-Object FullName,Length,LastWriteTime
 }
 finally {
