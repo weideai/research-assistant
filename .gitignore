@@ -1,6 +1,7 @@
 .venv/
 __pycache__/
 .pytest_cache/
+.qa/
 *.pyc
 .env
 instance/
@@ -12,3 +13,28 @@ build/linux/
 dist/linux/
 build/linux-source/
 tmp/
+
+# Local project planning, AI handoff, and verification records.
+# Keep these artifacts on the workstation unless the owner explicitly approves publication.
+.project-kickoff/
+AGENTS.md
+CONTEXT.md
+TASK_BOARD.md
+CHANGELOG.md
+discovery.yaml
+project.yaml
+docs/ADVERSARIAL_REVIEW.md
+docs/DECISIONS.md
+docs/INDEX.md
+docs/OPERATIONS.md
+docs/PRD.md
+docs/RELEASE-CHECKLIST.md
+docs/TEST_PLAN.md
+docs/TRACEABILITY.md
+docs/product-plan/
+docs/marketing/
+evidence/
+provenance/
+tasks/
+tools/project_handoff.py
+scripts/generate_xiaohongshu_carousel.py

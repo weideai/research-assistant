@@ -60,7 +60,7 @@
             {% if batch_view['pagination'] %}{% set pagination = batch_view['pagination'] %}{% set page_param = 'batch_page' %}{% set pagination_label = experiment.title ~ '批次翻页' %}{% set page_item_label = '个批次' %}{% include '_pagination.html' %}{% endif %}
           </div>
           <form method="post" action="{{ url_for('workspace.batch_create', item_id=experiment.id) }}" class="batch-quick-create">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="operator" value="{{ current_user.name }}"><button class="icon-btn" title="新建实验批次" aria-label="新建实验批次"><i data-lucide="plus"></i></button>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-btn" title="新建实验批次" aria-label="新建实验批次"><i data-lucide="plus"></i></button>
           </form>
         </article>
         {% else %}<div class="empty compact-empty"><i data-lucide="flask-conical"></i><p>该项目还没有实验计划。</p></div>{% endfor %}
@@ -70,7 +70,7 @@
 
     <section class="panel">
       <div class="panel-head"><div><p class="eyebrow">PROJECT TASKS</p><h2>项目任务</h2></div><a href="{{ url_for('main.tasks', project_id=project.id) }}">管理全部 {{ task_total }} 个任务</a></div>
-      <div class="trace-list">{% for task in tasks %}<div class="trace-row"><span><b>{{ task.title }}</b><small>{{ task.category }} · {{ task.priority }}优先级 · {{ task.deadline or '无截止日期' }}</small></span><span class="badge">{{ task.status }}</span></div>{% else %}<div class="empty compact-empty"><p>尚无归入该项目的任务。</p></div>{% endfor %}</div>
+      <div class="trace-list">{% for task in tasks %}<div class="trace-row"><span><b>{{ task.title }}</b><small>{{ task.category | domain_label }} · {{ task.priority | domain_label }}优先级 · {{ task.deadline or '无截止日期' }}</small></span><span class="badge">{{ task.status | domain_label }}</span></div>{% else %}<div class="empty compact-empty"><p>尚无归入该项目的任务。</p></div>{% endfor %}</div>
       {% if task_total > tasks|length %}<div class="panel-foot-note">仅显示最紧急的 {{ tasks|length }} 个任务，<a href="{{ url_for('main.tasks', project_id=project.id) }}">进入任务管理查看全部</a></div>{% endif %}
     </section>
   </div>

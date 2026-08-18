@@ -7,8 +7,13 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import winreg
+from datetime import datetime, timezone
 from pathlib import Path
+
+try:
+    import winreg
+except ImportError:  # pragma: no cover - keeps pure installer helpers testable off Windows.
+    winreg = None
 
 from version_info import APP_VERSION
 
@@ -17,6 +22,7 @@ PRODUCT_NAME = "R/LAB Research Assistant"
 SHORTCUT_NAME = "R-LAB Research Assistant"
 APP_ID = "ResearchAssistant"
 VERSION = APP_VERSION
+INSTALL_INFO_NAME = "install-info.json"
 MB_ICONERROR = 0x10
 MB_ICONQUESTION = 0x20
 MB_ICONINFORMATION = 0x40
@@ -37,11 +43,31 @@ def install_dir():
 
 
 def data_dir():
+    configured = os.getenv("RESEARCH_ASSISTANT_INSTANCE_DIR", "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
     return local_app_data() / APP_ID / "data"
 
 
 def payload_dir():
     return Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)) / "payload" / APP_ID
+
+
+def install_info_path(directory=None):
+    return (Path(directory) if directory else install_dir()) / INSTALL_INFO_NAME
+
+
+def read_install_info(directory=None):
+    try:
+        payload = json.loads(install_info_path(directory).read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def existing_installation(directory=None):
+    directory = Path(directory) if directory else install_dir()
+    return (directory / "ResearchAssistant.exe").is_file()
 
 
 def known_folder(folder_id):
@@ -110,10 +136,13 @@ def create_shortcut(shortcut, target, working_dir, arguments=""):
     run_powershell(script)
 
 
-def find_source_instance(explicit_source=""):
+def find_source_instance(explicit_source="", legacy_install=None):
     candidates = []
     if explicit_source:
         candidates.append(Path(explicit_source))
+    if legacy_install:
+        legacy_install = Path(legacy_install)
+        candidates.extend([legacy_install / "instance", legacy_install / "data"])
     executable_dir = Path(sys.executable).resolve().parent
     candidates.extend([
         executable_dir.parent.parent / "instance",
@@ -126,11 +155,11 @@ def find_source_instance(explicit_source=""):
     return None
 
 
-def seed_existing_data(explicit_source=""):
+def seed_existing_data(explicit_source="", legacy_install=None):
     target = data_dir()
     if (target / "research.db").is_file():
         return False
-    source = find_source_instance(explicit_source)
+    source = find_source_instance(explicit_source, legacy_install=legacy_install)
     if not source:
         target.mkdir(parents=True, exist_ok=True)
         return False
@@ -154,35 +183,70 @@ def install_payload(explicit_source=""):
     destination = install_dir()
     staging = destination.with_name(f"{destination.name}.installing")
     previous = destination.with_name(f"{destination.name}.previous")
+    was_installed = existing_installation(destination)
+    previous_info = read_install_info(destination)
+    previous_version = str(previous_info.get("version") or "").strip()
+    data_path = data_dir()
+    data_was_present = data_path.exists()
     stop_installed_app()
     shutil.rmtree(staging, ignore_errors=True)
     shutil.rmtree(previous, ignore_errors=True)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(payload, staging)
-    if destination.exists():
-        destination.replace(previous)
-    staging.replace(destination)
-    shutil.rmtree(previous, ignore_errors=True)
+    swap_completed = False
+    imported = False
+    try:
+        # Seed legacy project data before replacing an old application directory.
+        # Normal upgrades keep the external data directory untouched.
+        imported = seed_existing_data(explicit_source, legacy_install=destination if was_installed else None)
+        shutil.copytree(payload, staging)
+        setup_copy = staging / "ResearchAssistant-Setup.exe"
+        if getattr(sys, "frozen", False):
+            shutil.copy2(sys.executable, setup_copy)
+        install_info = {
+            "version": VERSION,
+            "data_dir": str(data_path),
+            "install_mode": "upgrade" if was_installed else "fresh",
+            "previous_version": previous_version,
+            "data_preserved": data_was_present or (data_path / "research.db").is_file(),
+            "seeded_data": imported,
+            "installed_at": datetime.now(timezone.utc).isoformat(),
+        }
+        (staging / INSTALL_INFO_NAME).write_text(
+            json.dumps(install_info, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
-    imported = seed_existing_data(explicit_source)
-    setup_copy = destination / "ResearchAssistant-Setup.exe"
-    if getattr(sys, "frozen", False):
-        shutil.copy2(sys.executable, setup_copy)
+        if destination.exists():
+            destination.replace(previous)
+        staging.replace(destination)
+        swap_completed = True
 
-    remove_shortcuts()
-    desktop_link, start_link, uninstall_link = shortcut_paths()
-    create_shortcut(desktop_link, destination / "ResearchAssistant.exe", destination)
-    create_shortcut(start_link, destination / "ResearchAssistant.exe", destination)
-    create_shortcut(uninstall_link, setup_copy, destination, "--uninstall")
-    register_uninstaller(setup_copy)
-    (destination / "install-info.json").write_text(
-        json.dumps({"version": VERSION, "data_dir": str(data_dir())}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    return imported
+        setup_copy = destination / "ResearchAssistant-Setup.exe"
+        remove_shortcuts()
+        desktop_link, start_link, uninstall_link = shortcut_paths()
+        create_shortcut(desktop_link, destination / "ResearchAssistant.exe", destination)
+        create_shortcut(start_link, destination / "ResearchAssistant.exe", destination)
+        create_shortcut(uninstall_link, setup_copy, destination, "--uninstall")
+        register_uninstaller(setup_copy)
+        shutil.rmtree(previous, ignore_errors=True)
+        return {
+            "upgraded": was_installed,
+            "previous_version": previous_version,
+            "version": VERSION,
+            "data_preserved": install_info["data_preserved"],
+            "imported": imported,
+        }
+    except Exception:
+        if not swap_completed and previous.exists() and not destination.exists():
+            previous.replace(destination)
+        raise
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging, ignore_errors=True)
 
 
 def register_uninstaller(setup_path):
+    if winreg is None:
+        return
     key_path = rf"Software\Microsoft\Windows\CurrentVersion\Uninstall\{APP_ID}"
     with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path) as key:
         winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, PRODUCT_NAME)
@@ -195,6 +259,8 @@ def register_uninstaller(setup_path):
 
 
 def remove_registration():
+    if winreg is None:
+        return
     key_path = rf"Software\Microsoft\Windows\CurrentVersion\Uninstall\{APP_ID}"
     try:
         winreg.DeleteKey(winreg.HKEY_CURRENT_USER, key_path)
@@ -243,18 +309,23 @@ def main():
         if args.launch:
             subprocess.Popen([str(install_dir() / "ResearchAssistant.exe")], cwd=install_dir())
         return
+    action = "更新" if existing_installation() else "安装"
+    previous_info = read_install_info()
+    previous_version = str(previous_info.get("version") or "未知版本")
+    detail = f"\n检测到已安装版本：v{previous_version}，升级时会保留实验数据和附件。" if action == "更新" else ""
     if native_message(
-        f"是否快速安装 {PRODUCT_NAME}？\n\n程序：{install_dir()}\n数据：{data_dir()}",
+        f"是否快速{action} {PRODUCT_NAME}？\n\n程序：{install_dir()}\n数据：{data_dir()}{detail}",
         MB_YESNO | MB_ICONQUESTION,
     ) != IDYES:
         return
     try:
-        imported = install_payload(args.source_instance)
+        result = install_payload(args.source_instance)
     except Exception as exc:
         native_message(f"安装失败：\n{exc}", MB_ICONERROR)
         return
-    detail = "\n已导入当前项目中的账户、实验记录和附件。" if imported else ""
-    native_message(f"安装完成。桌面和开始菜单已创建快捷方式。{detail}")
+    detail = "\n已导入当前项目中的账户、实验记录和附件。" if result["imported"] else ""
+    action_detail = "更新完成" if result["upgraded"] else "安装完成"
+    native_message(f"{action_detail}。桌面和开始菜单已创建快捷方式。{detail}")
     subprocess.Popen([str(install_dir() / "ResearchAssistant.exe")], cwd=install_dir())
 
 

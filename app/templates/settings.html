@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}设置{% endblock %}
+{% block content %}
+<header class="page-head settings-page-head">
+  <div>
+    <p class="eyebrow">WORKSPACE SETTINGS</p>
+    <h1>设置</h1>
+    <p class="muted">集中管理 API 连接、实验执行保存行为和执行者候选项。这里的偏好只属于当前账号。</p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn secondary" href="{{ url_for('main.api_settings') }}"><i data-lucide="key-round"></i> API 设置</a>
+  </div>
+</header>
+
+<div class="settings-layout workspace-settings-layout">
+  <section class="panel settings-form-panel">
+    <div class="panel-head"><div><p class="eyebrow">EXPERIMENT EXECUTION</p><h2>实验执行保存</h2></div><span class="badge" data-state="info"><i data-lucide="save"></i> 工作流偏好</span></div>
+    <form method="post" class="api-settings-form workspace-preferences-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>保存后去向<select name="execution_save_mode">{% for value, label, description in execution_save_modes %}<option value="{{ value }}" {{ 'selected' if setting.execution_save_mode == value }}>{{ label }}</option>{% endfor %}</select><small>批次信息保存成功后，决定继续记录还是回到实验计划。</small></label>
+      <label class="toggle-line"><span><b>在浏览器中自动保存执行草稿</b><small>只保存未提交的表单草稿到本设备；正式数据仍需点击保存。</small></span><input type="checkbox" name="execution_autosave" value="1" {{ 'checked' if setting.execution_autosave }}></label>
+      <label>草稿保存间隔<select name="execution_autosave_interval">{% for value in execution_autosave_intervals %}<option value="{{ value }}" {{ 'selected' if setting.execution_autosave_interval == value }}>{{ value }} 秒</option>{% endfor %}</select><small>仅在开启自动保存草稿时生效。</small></label>
+      <div class="form-actions split-actions"><span class="muted small-text"><i data-lucide="shield-check"></i> 不会改动已有实验数据</span><button class="btn primary"><i data-lucide="save"></i> 保存设置</button></div>
+    </form>
+  </section>
+
+  <aside class="settings-side">
+    <section class="panel settings-executors-panel">
+      <div class="panel-head"><div><p class="eyebrow">EXECUTION TEAM</p><h2>添加执行者</h2></div><i data-lucide="users-round"></i></div>
+      <form method="post" action="{{ url_for('main.executor_create') }}" class="executor-add-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-grid">
+          <label>姓名或团队<input name="name" maxlength="120" required placeholder="例如：张研究员"></label>
+          <label>角色说明<input name="role" maxlength="120" placeholder="例如：样本管理员"></label>
+        </div>
+        <button class="btn primary"><i data-lucide="user-plus"></i> 添加执行者</button>
+      </form>
+      <div class="executor-list">
+        {% for executor in executors %}
+        <div class="executor-row {{ 'is-inactive' if not executor.is_active }}">
+          <span class="executor-row-main"><b>{{ executor.name }}</b>{% if executor.role %}<small>{{ executor.role }}</small>{% endif %}</span>
+          <span class="badge" data-state="{{ 'success' if executor.is_active else 'neutral' }}">{{ '启用' if executor.is_active else '停用' }}</span>
+          <form method="post" action="{{ url_for('main.executor_toggle', executor_id=executor.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="icon-btn" type="submit" title="{{ '停用执行者' if executor.is_active else '重新启用执行者' }}" aria-label="{{ '停用执行者 ' if executor.is_active else '重新启用执行者 ' }}{{ executor.name }}"><i data-lucide="{{ 'user-round-x' if executor.is_active else 'user-round-check' }}"></i></button>
+          </form>
+        </div>
+        {% else %}
+        <div class="empty compact-empty"><i data-lucide="users-round"></i><p>还没有执行者，请先添加一位。</p></div>
+        {% endfor %}
+      </div>
+      <p class="form-hint settings-executor-note"><i data-lucide="info"></i>项目可以从这里启用的执行者中自由选择；停用不会影响历史记录。</p>
+    </section>
+    <section class="panel settings-link-panel">
+      <div class="panel-head"><div><p class="eyebrow">CONNECTIONS</p><h2>API 设置</h2></div><i data-lucide="key-round"></i></div>
+      <div class="settings-link-body"><b>{{ current_preset.name if current_preset else '尚未选择连接' }}</b><small>{{ current_preset.text_model if current_preset else '配置 OpenAI-compatible API 后即可使用 AI 助手。' }}</small><a class="btn secondary" href="{{ url_for('main.api_settings') }}"><i data-lucide="arrow-up-right"></i> 管理 API 预设</a></div>
+    </section>
+    <section class="panel settings-info-panel">
+      <div class="panel-head"><div><p class="eyebrow">LOCAL WORKSPACE</p><h2>数据边界</h2></div><i data-lucide="hard-drive"></i></div>
+      <div class="info-list"><div><i data-lucide="database"></i><span><b>研究数据</b><small>实验、批次、记录和文件继续保存在本地工作区。</small></span></div><div><i data-lucide="lock-keyhole"></i><span><b>API 密钥</b><small>由 API 设置页加密保存，不会在页面回显。</small></span></div><div><i data-lucide="history"></i><span><b>可追溯</b><small>过程记录和定稿修订保留已有历史，不因偏好变更而删除。</small></span></div></div>
+    </section>
+  </aside>
+</div>
+{% endblock %}

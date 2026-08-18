@@ -15,7 +15,7 @@
 <header class="page-head dashboard-head">
   <div>
     <p class="eyebrow">科研工作台 · {{ today.strftime('%Y.%m.%d') }}</p>
-    <h1>你好，{{ current_user.name or '研究者' }}</h1>
+    <h1>你好，研究者</h1>
     <p class="muted">今天有 {{ stats.due_today }} 项任务到期，{{ stats.active_experiments }} 个实验计划正在推进。</p>
   </div>
   <a class="btn primary" href="{{ url_for('main.experiments', _anchor='create-experiment') }}"><i data-lucide="plus"></i> 新建实验计划</a>
@@ -34,7 +34,7 @@
     <span class="wb-stat-icon"><i data-lucide="flask-conical"></i></span>
     <span class="wb-stat-text"><small>进行中计划</small><b>{{ stats.active_experiments }}</b></span>
   </a>
-  <a class="wb-stat" href="{{ url_for('main.tasks', status='待办') }}">
+  <a class="wb-stat" href="{{ url_for('main.tasks', status='todo') }}">
     <span class="wb-stat-icon" data-tone="purple"><i data-lucide="square-check-big"></i></span>
     <span class="wb-stat-text"><small>今日待办</small><b>{{ stats.due_today }}</b></span>
   </a>
@@ -89,8 +89,8 @@
     {% if tasks %}<div class="task-list">
       {% for task in tasks[:4] %}<div class="task-row">
         <form method="post" action="{{ url_for('main.task_toggle', item_id=task.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="check-btn" aria-label="完成任务 {{ task.title }}"><i data-lucide="square"></i></button></form>
-        <span class="task-main"><b>{{ task.title }}</b><small>{{ task.project.title if task.project else task.category }} · {{ '逾期 ' if task.deadline < today else '' }}{{ task.deadline }}</small></span>
-        <span class="badge" data-state="{{ 'danger' if task.deadline < today else task.priority | state_tone }}">{{ '已逾期' if task.deadline < today else task.priority }}</span>
+        <span class="task-main"><b>{{ task.title }}</b><small>{{ task.project.title if task.project else task.category | domain_label }} · {{ '逾期 ' if task.deadline < today else '' }}{{ task.deadline }}</small></span>
+        <span class="badge" data-state="{{ 'danger' if task.deadline < today else task.priority | state_tone }}">{{ '已逾期' if task.deadline < today else task.priority | domain_label }}</span>
       </div>{% endfor %}
     </div>{% else %}<div class="empty compact-empty"><i data-lucide="circle-check-big"></i><p>今天没有到期或逾期任务</p></div>{% endif %}
   </section>

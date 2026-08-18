@@ -32,6 +32,47 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // Execution drafts stay in this browser until the user explicitly submits the form.
+  document.querySelectorAll("form[data-execution-form]").forEach((form, index) => {
+    if (form.dataset.executionAutosave !== "1") return;
+    const explicitKey = form.dataset.executionDraftKey;
+    const action = form.getAttribute("action") || window.location.pathname;
+    const draftKey = `research-assistant-execution-draft:${explicitKey || action}:${index}`;
+    const fields = () => Array.from(form.querySelectorAll("input[name], textarea[name], select[name]"))
+      .filter((field) => field.type !== "hidden" && field.type !== "file" && !field.disabled);
+    const saveDraft = () => {
+      const values = {};
+      fields().forEach((field) => {
+        if (field.type === "checkbox" || field.type === "radio") values[field.name] = field.checked;
+        else values[field.name] = field.value;
+      });
+      try { window.localStorage.setItem(draftKey, JSON.stringify({savedAt: Date.now(), values})); } catch (_error) {}
+    };
+    const restoreDraft = () => {
+      let draft = null;
+      try { draft = JSON.parse(window.localStorage.getItem(draftKey) || "null"); } catch (_error) {}
+      if (!draft || !draft.values || Date.now() - Number(draft.savedAt || 0) > 1000 * 60 * 60 * 24 * 14) return;
+      fields().forEach((field) => {
+        if (!(field.name in draft.values)) return;
+        if (field.type === "checkbox" || field.type === "radio") field.checked = Boolean(draft.values[field.name]);
+        else field.value = draft.values[field.name];
+      });
+    };
+    restoreDraft();
+    let saveTimer = null;
+    const queueSave = () => {
+      window.clearTimeout(saveTimer);
+      saveTimer = window.setTimeout(saveDraft, 350);
+    };
+    form.addEventListener("input", queueSave);
+    form.addEventListener("change", queueSave);
+    form.addEventListener("submit", () => {
+      try { window.localStorage.removeItem(draftKey); } catch (_error) {}
+    });
+    const interval = Math.max(15, Number.parseInt(form.dataset.executionAutosaveInterval || "30", 10) || 30);
+    window.setInterval(saveDraft, interval * 1000);
+  });
+
   const openHashDisclosure = () => {
     if (!window.location.hash) return;
     const target = document.querySelector(window.location.hash);

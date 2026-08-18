@@ -35,11 +35,13 @@ from .export_service import (
 )
 from .models import (
     AIAssistantPreference, AIChatAttachment, AIConversation, AIKnowledgeBase, AIKnowledgeDocument,
-    AIMessage, ApiPreset, ApiSetting, BatchParameter, BatchSample, BatchStep, Experiment, ExperimentBatch,
+    AIMessage, ApiPreset, ApiSetting, BatchParameter, BatchSample, BatchStep, Executor, Experiment, ExperimentBatch,
     ExperimentAttachment, ExperimentParameter, ExperimentRecord, ExperimentSample, ExperimentStep,
     ExperimentTemplate, ExperimentTemplateParameter, ExperimentTemplateStep, RecordParameter,
     PresentationSkill, RecordRevision, RecordTemplate, RecordTemplateParameter, ResearchProject, Sample, Task,
-    WeeklyReport, WeeklyReportUpdate, utcnow,
+    WeeklyReport, WeeklyReportUpdate, WorkspaceSetting, executor_options_for_project,
+    executor_options_for_user, executors_for_user, project_executor_ids_for_user,
+    sync_legacy_executor_options, workspace_setting_for_user, utcnow,
 )
 from .secrets import SecretDecryptionError
 
@@ -58,11 +60,21 @@ DETAIL_PAGE_SIZES = (8, 16, 32)
 REPEAT_KINDS = ("独立实验", "预实验", "生物学重复", "技术重复")
 EXPERIMENT_STATUSES = ("未开始", "进行中", "完成", "暂停")
 BATCH_STATUSES = ("未开始", "进行中", "已完成", "暂停")
-TASK_STATUSES = ("待办", "完成")
-TASK_CATEGORIES = ("实验", "学习", "会议", "行政")
-TASK_PRIORITIES = ("高", "中", "低")
+TASK_STATUSES = ("todo", "doing", "blocked", "done", "cancelled")
+TASK_CATEGORIES = ("research", "study", "meeting", "administrative")
+TASK_PRIORITIES = ("high", "medium", "low")
+TASK_LABELS = {"todo": "待办", "doing": "进行中", "blocked": "受阻", "done": "完成", "cancelled": "已取消", "research": "实验", "study": "学习", "meeting": "会议", "administrative": "行政", "high": "高", "medium": "中", "low": "低"}
+TASK_INPUTS = {**{value: value for value in (*TASK_STATUSES, *TASK_CATEGORIES, *TASK_PRIORITIES)}, "待办": "todo", "进行中": "doing", "受阻": "blocked", "完成": "done", "已完成": "done", "已取消": "cancelled", "实验": "research", "学习": "study", "会议": "meeting", "行政": "administrative", "高": "high", "中": "medium", "低": "low"}
+TASK_DB_ALIASES = {
+    "todo": ("todo", "待办"), "doing": ("doing", "进行中"), "blocked": ("blocked", "受阻"),
+    "done": ("done", "完成", "已完成"), "cancelled": ("cancelled", "已取消"),
+    "research": ("research", "实验"), "study": ("study", "学习"),
+    "meeting": ("meeting", "会议"), "administrative": ("administrative", "行政"),
+}
 SAMPLE_STATUSES = ("可用", "使用中", "耗尽", "异常")
-WEEKLY_REPORT_STATUSES = ("待反馈", "修改中", "已确认", "已归档")
+WEEKLY_REPORT_STATUSES = ("draft", "submitted", "reviewed", "archived")
+WEEKLY_REPORT_STATUS_LABELS = {"draft": "待反馈", "submitted": "修改中", "reviewed": "已确认", "archived": "已归档"}
+WEEKLY_REPORT_STATUS_INPUTS = {**{value: value for value in WEEKLY_REPORT_STATUSES}, "待反馈": "draft", "草稿": "draft", "修改中": "submitted", "已提交": "submitted", "已确认": "reviewed", "已批注": "reviewed", "已归档": "archived"}
 WEEKLY_REPORT_UPDATE_KINDS = ("反馈", "修改日常", "其他")
 WEEKLY_REPORT_UPDATE_STATUSES = ("待处理", "已完成", "仅记录")
 WEEKLY_REPORT_EXTENSIONS = {".ppt", ".pptx", ".pdf", ".odp", ".key"}
@@ -530,6 +542,7 @@ STATE_TONES = {
 STATE_TONE_BY_VALUE = {
     value: tone for tone, values in STATE_TONES.items() for value in values
 }
+STATE_TONE_BY_VALUE.update({"todo": "warning", "doing": "info", "blocked": "danger", "done": "success", "cancelled": "neutral", "draft": "warning", "submitted": "info", "reviewed": "success", "archived": "neutral", "high": "danger", "medium": "warning", "low": "neutral"})
 DEFAULT_STATE_TONE = "neutral"
 
 
@@ -548,6 +561,11 @@ def state_tone_filter(value):
         current_app.logger.warning("状态值 %r 没有配色映射，按 neutral 渲染", text)
         return DEFAULT_STATE_TONE
     return tone
+
+
+@bp.app_template_filter("domain_label")
+def domain_label_filter(value):
+    return TASK_LABELS.get(str(value), WEEKLY_REPORT_STATUS_LABELS.get(str(value), value))
 
 
 @bp.app_template_filter("edited_at")
@@ -2061,7 +2079,7 @@ def _generate_assistant_message(conversation, user_message, web_access=False, pa
 def dashboard():
     today = date.today()
     tasks = (Task.query.filter_by(user_id=current_user.id, is_deleted=False)
-             .filter(Task.status != "完成", Task.deadline.isnot(None), Task.deadline <= today)
+             .filter(Task.status != "done", Task.deadline.isnot(None), Task.deadline <= today)
              .order_by(Task.deadline, Task.priority, Task.created_at.desc()).limit(7).all())
     experiments = Experiment.query.filter_by(user_id=current_user.id, is_deleted=False).order_by(Experiment.updated_at.desc()).limit(5).all()
     records = (ExperimentRecord.query.join(Experiment).join(
@@ -2079,7 +2097,7 @@ def dashboard():
     if latest_batch is None:
         latest_batch = batch_query.order_by(ExperimentBatch.updated_at.desc()).first()
     task_total = Task.query.filter_by(user_id=current_user.id, is_deleted=False).count()
-    task_done = Task.query.filter_by(user_id=current_user.id, status="完成", is_deleted=False).count()
+    task_done = Task.query.filter_by(user_id=current_user.id, status="done", is_deleted=False).count()
     project_count = ResearchProject.query.filter_by(user_id=current_user.id, is_deleted=False).count()
     experiment_count = Experiment.query.filter_by(user_id=current_user.id, is_deleted=False).count()
     batch_count = (ExperimentBatch.query.join(Experiment).filter(
@@ -2093,9 +2111,9 @@ def dashboard():
         ExperimentRecord.is_deleted.is_(False),
     ).count())
     stats = {
-        "due_today": Task.query.filter_by(user_id=current_user.id, deadline=today, is_deleted=False).filter(Task.status != "完成").count(),
+        "due_today": Task.query.filter_by(user_id=current_user.id, deadline=today, is_deleted=False).filter(Task.status != "done").count(),
         "overdue": Task.query.filter_by(user_id=current_user.id, is_deleted=False).filter(
-            Task.status != "完成", Task.deadline.isnot(None), Task.deadline < today,
+            Task.status != "done", Task.deadline.isnot(None), Task.deadline < today,
         ).count(),
         "active_experiments": Experiment.query.filter_by(user_id=current_user.id, status="进行中", is_deleted=False).count(),
         "available_samples": Sample.query.filter_by(user_id=current_user.id, status="可用").count(),
@@ -2119,9 +2137,9 @@ def _task_index_query(search="", status="全部", category="全部", project_id=
         pattern = f"%{search}%"
         query = query.filter(or_(Task.title.ilike(pattern), Task.notes.ilike(pattern)))
     if status != "全部":
-        query = query.filter_by(status=status)
+        query = query.filter(Task.status.in_(TASK_DB_ALIASES.get(status, (status,))))
     if category != "全部":
-        query = query.filter_by(category=category)
+        query = query.filter(Task.category.in_(TASK_DB_ALIASES.get(category, (category,))))
     if project_id:
         query = query.filter(Task.project_id == project_id)
     return query
@@ -2139,13 +2157,13 @@ def tasks():
             project = db.session.get(ResearchProject, project_id) if project_id else None
             db.session.add(Task(user_id=current_user.id, title=title,
                 project_id=project.id if project and project.user_id == current_user.id and not project.is_deleted else None,
-                category=request.form.get("category", "实验"), priority=request.form.get("priority", "中"),
+                category=TASK_INPUTS.get(request.form.get("category", "research"), request.form.get("category", "research")), priority=TASK_INPUTS.get(request.form.get("priority", "medium"), request.form.get("priority", "medium")),
                 deadline=parse_date(request.form.get("deadline")), notes=request.form.get("notes", "").strip()))
             db.session.commit()
             flash("任务已添加。", "success")
             return redirect(url_for("main.tasks"))
-    status = request.args.get("status", "全部")
-    category = request.args.get("category", "全部")
+    raw_status = request.args.get("status", "全部"); status = "全部" if raw_status == "全部" else TASK_INPUTS.get(raw_status, raw_status)
+    raw_category = request.args.get("category", "全部"); category = "全部" if raw_category == "全部" else TASK_INPUTS.get(raw_category, raw_category)
     search = request.args.get("q", "").strip()[:120]
     selected_project_id = request.args.get("project_id", type=int)
     if status not in {"全部", *TASK_STATUSES}:
@@ -2163,7 +2181,7 @@ def tasks():
         "tasks.html", tasks=pagination.items, selected_status=status, selected_category=category,
         selected_project_id=selected_project_id, search=search, today=date.today(),
         pagination=pagination, page_size=page_size, page_sizes=LIST_PAGE_SIZES,
-        task_statuses=TASK_STATUSES, task_categories=TASK_CATEGORIES,
+        task_statuses=TASK_STATUSES, task_categories=TASK_CATEGORIES, task_labels=TASK_LABELS,
         task_priorities=TASK_PRIORITIES,
         projects=ResearchProject.query.filter_by(user_id=current_user.id, is_deleted=False).order_by(ResearchProject.title).all(),
     )
@@ -2172,8 +2190,8 @@ def tasks():
 @bp.post("/tasks/bulk")
 @login_required
 def task_bulk():
-    status_filter = request.form.get("return_status", "全部")
-    category_filter = request.form.get("return_category", "全部")
+    raw_status_filter = request.form.get("return_status", "全部"); status_filter = "全部" if raw_status_filter == "全部" else TASK_INPUTS.get(raw_status_filter, raw_status_filter)
+    raw_category_filter = request.form.get("return_category", "全部"); category_filter = "全部" if raw_category_filter == "全部" else TASK_INPUTS.get(raw_category_filter, raw_category_filter)
     project_id = request.form.get("return_project_id", type=int)
     if status_filter not in {"全部", *TASK_STATUSES} or category_filter not in {"全部", *TASK_CATEGORIES}:
         abort(400)
@@ -2196,9 +2214,9 @@ def task_bulk():
         db.session.commit()
         flash(f"已将 {len(items)} 个任务移入回收站。", "success")
     else:
-        status = request.form.get("bulk_status", "__keep__")
-        category = request.form.get("bulk_category", "__keep__")
-        priority = request.form.get("bulk_priority", "__keep__")
+        raw_status = request.form.get("bulk_status", "__keep__"); status = "__keep__" if raw_status == "__keep__" else TASK_INPUTS.get(raw_status, raw_status)
+        raw_category = request.form.get("bulk_category", "__keep__"); category = "__keep__" if raw_category == "__keep__" else TASK_INPUTS.get(raw_category, raw_category)
+        raw_priority = request.form.get("bulk_priority", "__keep__"); priority = "__keep__" if raw_priority == "__keep__" else TASK_INPUTS.get(raw_priority, raw_priority)
         project_mode = request.form.get("project_mode", "keep")
         if status not in {"__keep__", *TASK_STATUSES}:
             abort(400)
@@ -2242,8 +2260,8 @@ def task_edit(item_id):
         project = db.session.get(ResearchProject, project_id) if project_id else None
         item.project_id = project.id if project and project.user_id == current_user.id and not project.is_deleted else None
         item.title = request.form.get("title", "").strip()
-        item.category = request.form.get("category", "实验")
-        item.priority = request.form.get("priority", "中")
+        item.category = TASK_INPUTS.get(request.form.get("category", "research"), request.form.get("category", "research"))
+        item.priority = TASK_INPUTS.get(request.form.get("priority", "medium"), request.form.get("priority", "medium"))
         item.deadline = parse_date(request.form.get("deadline"))
         item.notes = request.form.get("notes", "").strip()
         if not item.title:
@@ -2254,6 +2272,7 @@ def task_edit(item_id):
             return redirect(url_for("main.tasks"))
     return render_template(
         "task_edit.html", task=item,
+        task_categories=TASK_CATEGORIES, task_priorities=TASK_PRIORITIES, task_labels=TASK_LABELS,
         projects=ResearchProject.query.filter_by(user_id=current_user.id, is_deleted=False).order_by(ResearchProject.title).all(),
     )
 
@@ -2262,7 +2281,7 @@ def task_edit(item_id):
 @login_required
 def task_toggle(item_id):
     item = owned_or_404(Task, item_id)
-    item.status = "待办" if item.status == "完成" else "完成"
+    item.status = "todo" if item.status == "done" else "done"
     db.session.commit()
     return redirect(request.referrer or url_for("main.tasks"))
 
@@ -2651,8 +2670,12 @@ def experiments():
         status = "全部"
     search = request.args.get("q", "").strip()[:120]
     requested_project_id = request.args.get("project_id", type=int)
+    requested_project = None
     if requested_project_id:
-        owned_or_404(ResearchProject, requested_project_id)
+        requested_project = owned_or_404(ResearchProject, requested_project_id)
+    setting = WorkspaceSetting.query.filter_by(user_id=current_user.id).first()
+    sync_legacy_executor_options(current_user.id, setting)
+    db.session.commit()
     query = _experiment_index_query(search, status, requested_project_id)
     pagination, page_size = _paginate(
         query.order_by(Experiment.updated_at.desc(), Experiment.id.desc()),
@@ -2665,6 +2688,9 @@ def experiments():
         templates=ExperimentTemplate.query.filter_by(user_id=current_user.id, is_deleted=False).order_by(ExperimentTemplate.name).all(),
         projects=ResearchProject.query.filter_by(user_id=current_user.id, is_deleted=False).order_by(ResearchProject.updated_at.desc()).all(),
         repeat_kinds=REPEAT_KINDS, today=date.today(), requested_project_id=requested_project_id,
+        requested_project=requested_project,
+        project_executors=executors_for_user(current_user.id),
+        project_executor_ids=project_executor_ids_for_user(current_user.id, requested_project_id),
     )
 
 
@@ -2743,7 +2769,7 @@ def experiment_from_template():
         title=request.form.get("title", "").strip() or template.name,
         code=request.form.get("code", "").strip(),
         objective=template.objective or "",
-        owner=request.form.get("owner", "").strip() or current_user.name,
+        owner=request.form.get("owner", "").strip(),
         status="未开始",
         start_date=start_date,
         sample_requirements_json=template.sample_requirements_json,
@@ -2979,6 +3005,8 @@ def experiment_detail(item_id):
         latest_step_done=latest_step_done,
         latest_activity_at=latest_activity_at,
         report_templates=report_template_choices(),
+        workspace_setting=workspace_setting_for_user(current_user.id),
+        executor_options=executor_options_for_project(current_user.id, item.project_id),
     )
 
 
@@ -4012,7 +4040,10 @@ def step_edit(step_id):
             db.session.commit()
             flash("方案阶段已更新。", "success")
             return redirect(url_for("main.experiment_detail", item_id=step.experiment_id, _anchor="experiment-steps"))
-    return render_template("step_edit.html", step=step)
+    return render_template(
+        "step_edit.html", step=step,
+        executor_options=executor_options_for_project(current_user.id, step.experiment.project_id),
+    )
 
 
 @bp.post("/steps/<int:step_id>/delete")
@@ -4263,6 +4294,7 @@ def record_detail(record_id):
         record_templates=template_pagination.items,
         template_search=template_search, template_pagination=template_pagination,
         template_page_size=template_page_size,
+        executor_options=executor_options_for_project(current_user.id, record.experiment.project_id),
     )
 
 
@@ -5849,7 +5881,8 @@ def presentation_report():
                         download_name=f"{title}.pptx",
                     )
     weekly_search = request.args.get("q", "").strip()[:120]
-    weekly_status = request.args.get("status", "全部").strip() or "全部"
+    raw_weekly_status = request.args.get("status", "全部").strip() or "全部"
+    weekly_status = "全部" if raw_weekly_status == "全部" else WEEKLY_REPORT_STATUS_INPUTS.get(raw_weekly_status, raw_weekly_status)
     if weekly_status not in ("全部", *WEEKLY_REPORT_STATUSES):
         weekly_status = "全部"
     weekly_page = _page_number(request.args.get("page"))
@@ -5923,7 +5956,7 @@ def presentation_report():
         weekly_total=weekly_pagination.total,
         weekly_latest_at=weekly_latest.updated_at if weekly_latest else None,
         selected_weekly_report=selected_weekly_report,
-        weekly_report_statuses=WEEKLY_REPORT_STATUSES,
+        weekly_report_statuses=WEEKLY_REPORT_STATUSES, weekly_status_labels=WEEKLY_REPORT_STATUS_LABELS,
         weekly_update_kinds=WEEKLY_REPORT_UPDATE_KINDS,
         weekly_update_statuses=WEEKLY_REPORT_UPDATE_STATUSES,
         weekly_updates=weekly_updates, weekly_update_total=weekly_update_total,
@@ -5959,9 +5992,9 @@ def weekly_report_upload():
         project = None
     original_name = _clean_upload_relative_path(uploaded_file.filename).rsplit("/", 1)[-1]
     title = request.form.get("title", "").strip()[:180] or Path(original_name).stem[:180]
-    status = request.form.get("status", "待反馈").strip()
+    status = WEEKLY_REPORT_STATUS_INPUTS.get(request.form.get("status", "draft").strip(), request.form.get("status", "draft").strip())
     if status not in WEEKLY_REPORT_STATUSES:
-        status = "待反馈"
+        status = "draft"
     report = WeeklyReport(
         user_id=current_user.id, project_id=project.id if project else None,
         title=title, original_name=original_name, report_date=report_date,
@@ -5985,7 +6018,8 @@ def weekly_report_upload():
 @login_required
 def weekly_report_bulk():
     selected_report_id = request.form.get("return_report_id", type=int)
-    status_filter = request.form.get("return_status", "全部")
+    raw_status_filter = request.form.get("return_status", "全部")
+    status_filter = "全部" if raw_status_filter == "全部" else WEEKLY_REPORT_STATUS_INPUTS.get(raw_status_filter, raw_status_filter)
     if status_filter not in {"全部", *WEEKLY_REPORT_STATUSES}:
         abort(400)
     query = _weekly_report_query(
@@ -6007,7 +6041,8 @@ def weekly_report_bulk():
             if selected_report_id in selected_ids:
                 selected_report_id = None
         elif action == "update":
-            status = request.form.get("bulk_status", "__keep__")
+            raw_status = request.form.get("bulk_status", "__keep__")
+            status = "__keep__" if raw_status == "__keep__" else WEEKLY_REPORT_STATUS_INPUTS.get(raw_status, raw_status)
             project_mode = request.form.get("project_mode", "keep")
             summary_mode = request.form.get("summary_mode", "keep")
             if status not in {"__keep__", *WEEKLY_REPORT_STATUSES}:
@@ -6061,7 +6096,8 @@ def weekly_report_update(report_id):
     report.period_start = parse_date(request.form.get("period_start"))
     report.period_end = parse_date(request.form.get("period_end"))
     report.summary = request.form.get("summary", "").strip()
-    status = request.form.get("status", report.status).strip()
+    raw_status = request.form.get("status", report.status).strip()
+    status = WEEKLY_REPORT_STATUS_INPUTS.get(raw_status, raw_status)
     if status in WEEKLY_REPORT_STATUSES:
         report.status = status
     project_id = request.form.get("project_id", type=int)
@@ -6094,8 +6130,8 @@ def weekly_report_update_add(report_id):
         report_id=report.id, user_id=current_user.id, entry_date=entry_date,
         kind=kind, status=status, content=content[:10000],
     ))
-    if kind == "反馈" and report.status == "已确认":
-        report.status = "修改中"
+    if kind == "反馈" and report.status == "reviewed":
+        report.status = "submitted"
     db.session.commit()
     flash("周报反馈已记录。", "success")
     return redirect(_local_return_url(
@@ -7810,7 +7846,7 @@ def assistant_apply_proposal(message_id):
                 experiment_id=experiment.id,
                 batch_code=_next_execution_code(experiment),
                 repeat_kind="独立实验", repeat_number=1,
-                operator=current_user.name, status="未开始",
+                operator="", status="未开始",
             )
             _set_ai_fields(
                 item, changes, {"start_date", "end_date"},
@@ -8007,6 +8043,103 @@ def ai_assistant():
     if request.method == "POST":
         flash("原独立 AI 页面已合并到悬浮助手，请在聊天框中继续。", "info")
     return redirect(url_for("main.dashboard", assistant="open"))
+
+
+EXECUTION_SAVE_MODES = (
+    ("stay", "保存后留在当前批次", "适合连续补充步骤、参数和过程记录。"),
+    ("return", "保存后返回实验计划", "适合集中更新后回到计划总览。"),
+)
+EXECUTION_AUTOSAVE_INTERVALS = (15, 30, 60, 120)
+
+
+@bp.route("/settings", methods=["GET", "POST"])
+@login_required
+def settings():
+    setting = workspace_setting_for_user(current_user.id)
+    if request.method == "POST":
+        save_mode = request.form.get("execution_save_mode", "stay")
+        if save_mode not in {value for value, _label, _description in EXECUTION_SAVE_MODES}:
+            abort(400)
+        try:
+            autosave_interval = int(request.form.get("execution_autosave_interval", "30"))
+        except (TypeError, ValueError):
+            autosave_interval = 30
+        if autosave_interval not in EXECUTION_AUTOSAVE_INTERVALS:
+            abort(400)
+        setting.execution_save_mode = save_mode
+        setting.execution_autosave = bool(request.form.get("execution_autosave"))
+        setting.execution_autosave_interval = autosave_interval
+        # Keep accepting the legacy textarea payload for older clients while the
+        # settings page now manages Executor rows individually.
+        if "executor_options" in request.form:
+            raw_options = request.form.get("executor_options", "")
+            options = []
+            for raw_value in raw_options.splitlines():
+                value = raw_value.strip()[:80]
+                if value and value not in options:
+                    options.append(value)
+            setting.executor_options_json = json.dumps(options[:80], ensure_ascii=False)
+            sync_legacy_executor_options(current_user.id, setting)
+        db.session.commit()
+        flash("工作区设置已保存。", "success")
+        return redirect(url_for("main.settings"))
+
+    sync_legacy_executor_options(current_user.id, setting)
+    db.session.commit()
+    current_preset = ApiPreset.query.filter_by(
+        user_id=current_user.id, is_default=True, is_enabled=True,
+    ).order_by(ApiPreset.updated_at.desc()).first()
+    try:
+        configured_executor_options = json.loads(setting.executor_options_json or "[]")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        configured_executor_options = []
+    if not isinstance(configured_executor_options, list):
+        configured_executor_options = []
+    return render_template(
+        "settings.html",
+        setting=setting,
+        executor_options=executor_options_for_user(current_user.id, setting),
+        configured_executor_options=configured_executor_options,
+        executors=executors_for_user(current_user.id, include_inactive=True),
+        execution_save_modes=EXECUTION_SAVE_MODES,
+        execution_autosave_intervals=EXECUTION_AUTOSAVE_INTERVALS,
+        current_preset=current_preset,
+    )
+
+
+@bp.post("/settings/executors")
+@login_required
+def executor_create():
+    name = request.form.get("name", "").strip()[:120]
+    role = request.form.get("role", "").strip()[:120]
+    if not name:
+        flash("请输入执行者姓名。", "danger")
+        return redirect(url_for("main.settings"))
+    executor = Executor.query.filter_by(user_id=current_user.id, name=name).first()
+    if executor is None:
+        executor = Executor(user_id=current_user.id, name=name, role=role)
+        db.session.add(executor)
+        message = "执行者已添加。"
+    else:
+        executor.role = role
+        if not executor.is_active:
+            executor.is_active = True
+            message = "执行者已重新启用。"
+        else:
+            message = "执行者信息已更新。"
+    db.session.commit()
+    flash(message, "success")
+    return redirect(url_for("main.settings"))
+
+
+@bp.post("/settings/executors/<int:executor_id>/toggle")
+@login_required
+def executor_toggle(executor_id):
+    executor = Executor.query.filter_by(id=executor_id, user_id=current_user.id).first_or_404()
+    executor.is_active = not executor.is_active
+    db.session.commit()
+    flash("执行者已{}。".format("启用" if executor.is_active else "停用"), "success")
+    return redirect(url_for("main.settings"))
 
 
 def _api_preset_query(search=""):
@@ -8274,13 +8407,13 @@ def seed_demo():
     db.session.add(project)
     db.session.flush()
     db.session.add_all([
-        Task(user_id=current_user.id, project_id=project.id, title="完成 WB 一抗孵育", category="实验", priority="高", deadline=today),
-        Task(user_id=current_user.id, project_id=project.id, title="整理本周实验数据", category="实验", priority="中", deadline=today + timedelta(days=2)),
+        Task(user_id=current_user.id, project_id=project.id, title="完成 WB 一抗孵育", category="research", priority="high", status="todo", deadline=today),
+        Task(user_id=current_user.id, project_id=project.id, title="整理本周实验数据", category="research", priority="medium", status="todo", deadline=today + timedelta(days=2)),
         Sample(user_id=current_user.id, sample_code="OS-001", sample_type="骨肉瘤类器官", source="Patient 01",
                location="液氮 A区 / 2层 / 3号盒 / A5", quantity="3 管"),
     ])
     experiment = Experiment(user_id=current_user.id, project_id=project.id, title="药物处理后蛋白表达验证", code="EXP-2026-001",
-                             objective="验证候选药物对目标蛋白表达的影响", owner=current_user.name,
+                             objective="验证候选药物对目标蛋白表达的影响", owner="",
                              status="进行中", start_date=today - timedelta(days=2), end_date=today + timedelta(days=2))
     db.session.add(experiment)
     db.session.flush()
@@ -8305,7 +8438,7 @@ def seed_demo():
     db.session.flush()
     batch = ExperimentBatch(
         experiment_id=experiment.id, batch_code="RUN-01", repeat_kind="独立实验",
-        repeat_number=1, operator=current_user.name, status="进行中",
+        repeat_number=1, operator="", status="进行中",
         start_date=today - timedelta(days=2), end_date=today + timedelta(days=2),
     )
     db.session.add(batch)
@@ -8313,32 +8446,32 @@ def seed_demo():
     execution_steps = [
         BatchStep(
             batch_id=batch.id, position=1, title="细胞铺板",
-            description="按 2×10^5 cells/孔接种。", operator=current_user.name,
+            description="按 2×10^5 cells/孔接种。", operator="",
             planned_date=today - timedelta(days=2), is_done=True,
             completed_date=today - timedelta(days=2),
         ),
         BatchStep(
             batch_id=batch.id, position=2, title="加入候选药物",
-            description="终浓度 5 μM。", operator=current_user.name,
+            description="终浓度 5 μM。", operator="",
             planned_date=today - timedelta(days=1), is_done=True,
             completed_date=today - timedelta(days=1),
         ),
         BatchStep(
             batch_id=batch.id, position=3, title="培养并观察 24h",
-            operator=current_user.name, planned_date=today,
+            operator="", planned_date=today,
         ),
         BatchStep(
             batch_id=batch.id, position=4, title="裂解并定量蛋白",
-            operator=current_user.name, planned_date=today,
+            operator="", planned_date=today,
         ),
         BatchStep(
             batch_id=batch.id, position=5, title="Western Blot 检测",
-            operator=current_user.name, planned_date=today + timedelta(days=1),
+            operator="", planned_date=today + timedelta(days=1),
         ),
     ]
     db.session.add_all([
         *execution_steps,
-        ExperimentRecord(experiment_id=experiment.id, batch_id=batch.id, record_date=today - timedelta(days=1), operator=current_user.name,
+        ExperimentRecord(experiment_id=experiment.id, batch_id=batch.id, record_date=today - timedelta(days=1), operator="",
                          conditions="药物 5 μM，处理 24h", content="完成药物处理并收集蛋白样本。", result="成功", remark="细胞状态正常。"),
     ])
     db.session.commit()

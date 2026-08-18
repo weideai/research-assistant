@@ -14,11 +14,12 @@ $BuildRoot = Join-Path $ProjectRoot "build\windows"
 $DistRoot = Join-Path $ProjectRoot "dist\windows"
 $AppDist = Join-Path $DistRoot "app"
 $AppBundle = Join-Path $AppDist "ResearchAssistant"
-$Templates = Join-Path $ProjectRoot "app\templates"
-$StaticFiles = Join-Path $ProjectRoot "app\static"
+$DesktopUi = Join-Path $ProjectRoot "app\desktop_ui"
+$DesktopTokens = Join-Path $ProjectRoot "app\static\css\tokens.css"
+$LucideIcons = Join-Path $ProjectRoot "app\static\vendor\lucide.min.js"
 $Migrations = Join-Path $ProjectRoot "migrations"
 $PresentationScript = Join-Path $ProjectRoot "scripts\build_weekly_presentation.mjs"
-$DesktopLauncher = Join-Path $ProjectRoot "desktop_launcher.py"
+$DesktopLauncher = Join-Path $ProjectRoot "desktop_main.py"
 $InstallerSource = Join-Path $ProjectRoot "packaging\windows\installer.py"
 $InstallerVerifier = Join-Path $ProjectRoot "scripts\verify_windows_installer.py"
 
@@ -57,6 +58,14 @@ try {
         throw "PyInstaller is missing. Run: .\.venv\Scripts\python.exe -m pip install -r requirements-build.txt"
     }
 
+    & $PythonPath -m py_compile $InstallerVerifier
+    if ($LASTEXITCODE -ne 0) { throw "Windows installer verifier has invalid Python syntax." }
+
+    $InstallerQaRoot = Join-Path $ProjectRoot (".qa\installer-build-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
+    New-Item -ItemType Directory -Path $InstallerQaRoot -Force | Out-Null
+    & $PythonPath -m pytest --basetemp $InstallerQaRoot -q tests/test_desktop_bridge.py tests/test_desktop_service.py tests/test_desktop_runtime.py tests/test_desktop_complete_mvp.py tests/test_windows_installer_upgrade.py
+    if ($LASTEXITCODE -ne 0) { throw "Windows installer upgrade checks failed." }
+
     Remove-Item -LiteralPath $BuildRoot -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $DistRoot -Recurse -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Path $BuildRoot,$AppDist -Force | Out-Null
@@ -67,8 +76,9 @@ try {
         "--distpath", $AppDist,
         "--workpath", (Join-Path $BuildRoot "app"),
         "--specpath", (Join-Path $BuildRoot "spec"),
-        "--add-data", "$Templates;app\templates",
-        "--add-data", "$StaticFiles;app\static",
+        "--add-data", "$DesktopTokens;app\static\css",
+        "--add-data", "$LucideIcons;app\static\vendor",
+        "--add-data", "$DesktopUi;app\desktop_ui",
         "--add-data", "$Migrations;migrations",
         "--add-data", "$PresentationScript;scripts",
         "--hidden-import", "app.admin",
@@ -83,6 +93,13 @@ try {
         "--hidden-import", "app.update_service",
         "--hidden-import", "app.version",
         "--hidden-import", "app.workspace",
+        "--hidden-import", "app.desktop.bridge",
+        "--hidden-import", "app.desktop.native",
+        "--hidden-import", "app.desktop.runtime",
+        "--hidden-import", "app.desktop.single_instance",
+        "--hidden-import", "app.services.desktop_modules",
+        "--hidden-import", "app.services.desktop_workspace",
+        "--collect-all", "webview",
         "--collect-all", "reportlab",
         "--hidden-import", "version_info",
         "--hidden-import", "logging.config",
@@ -92,15 +109,19 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "ResearchAssistant.exe build failed." }
 
     $BundleInternal = Join-Path $AppBundle "_internal"
-    Assert-MirroredDirectory $Templates (Join-Path $BundleInternal "app\templates") "templates"
-    Assert-MirroredDirectory $StaticFiles (Join-Path $BundleInternal "app\static") "static assets"
+    Assert-MirroredDirectory $DesktopUi (Join-Path $BundleInternal "app\desktop_ui") "desktop UI"
     Assert-MirroredDirectory $Migrations (Join-Path $BundleInternal "migrations") "migrations"
     $RequiredBundleFiles = @(
         (Join-Path $AppBundle "ResearchAssistant.exe"),
-        (Join-Path $BundleInternal "app\templates\base.html"),
-        (Join-Path $BundleInternal "app\static\css\ide.css"),
-        (Join-Path $BundleInternal "app\static\css\skins.css"),
-        (Join-Path $BundleInternal "app\static\js\skin.js"),
+        (Join-Path $BundleInternal "app\static\css\tokens.css"),
+        (Join-Path $BundleInternal "app\static\vendor\lucide.min.js"),
+        (Join-Path $BundleInternal "app\desktop_ui\index.html"),
+        (Join-Path $BundleInternal "app\desktop_ui\desktop.css"),
+        (Join-Path $BundleInternal "app\desktop_ui\desktop.js"),
+        (Join-Path $BundleInternal "app\desktop_ui\desktop_research.js"),
+        (Join-Path $BundleInternal "app\desktop_ui\desktop_resources.js"),
+        (Join-Path $BundleInternal "app\desktop_ui\desktop_planning.js"),
+        (Join-Path $BundleInternal "app\desktop_ui\desktop_system.js"),
         (Join-Path $BundleInternal "migrations\alembic.ini"),
         (Join-Path $BundleInternal "scripts\build_weekly_presentation.mjs")
     )
@@ -108,10 +129,9 @@ try {
     if ($MissingBundleFiles.Count -gt 0) {
         throw "Required application files are missing from the bundle: $($MissingBundleFiles -join ', ')"
     }
-    $BundledBase = Get-Content -LiteralPath (Join-Path $BundleInternal "app\templates\base.html") -Raw -Encoding UTF8
-    $BundledIde = Get-Content -LiteralPath (Join-Path $BundleInternal "app\static\css\ide.css") -Raw -Encoding UTF8
-    if ($BundledBase -notmatch 'activity-rail' -or $BundledBase -notmatch 'ai-sidecar' -or $BundledIde -notmatch 'workspace-texture') {
-        throw "The bundled UI does not contain the current IDE workspace assets."
+    $BundledDesktop = Get-Content -LiteralPath (Join-Path $BundleInternal "app\desktop_ui\index.html") -Raw -Encoding UTF8
+    if ($BundledDesktop -notmatch 'assistant-window' -or $BundledDesktop -notmatch 'project-workbench') {
+        throw "The bundled desktop UI does not contain the current workspace assets."
     }
 
     $installerArgs = @(

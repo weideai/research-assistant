@@ -12,6 +12,7 @@
   </div>
   <a class="btn primary" href="#new-record" data-batch-tab-link="records"><i data-lucide="notebook-pen"></i> 添加过程记录</a>
 </div>
+<datalist id="executor-options">{% for option in executor_options %}<option value="{{ option }}">{% endfor %}</datalist>
 
 <div class="batch-signal-strip">
   <span><small>批次状态</small><b>{{ batch.status }}</b></span><span><small>实验人员</small><b>{{ batch.operator or '未指定' }}</b></span><span><small>实际时间</small><b>{{ batch.start_date or '未设置' }} - {{ batch.end_date or '进行中' }}</b></span><span><small>步骤进度</small><b>{{ completed_step_count }}/{{ step_total }}</b></span><span><small>过程记录</small><b>{{ record_total }} 条</b></span>{% if batch.requires_repeat %}<span class="needs-repeat"><small>质量标记</small><b>建议重复</b></span>{% endif %}
@@ -36,7 +37,7 @@
           <form method="post" action="{{ url_for('workspace.batch_step_create', item_id=batch.id) }}" class="batch-step-add-form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <label class="step-title">步骤标题<input name="title" required maxlength="160" placeholder="例如：离心 10 min"></label>
-            <label>实验人员<input name="operator" value="{{ batch.operator or current_user.name }}" maxlength="80"></label>
+            <label>实验人员<input name="operator" value="" list="executor-options" maxlength="80" placeholder="可选：实验执行者"></label>
             <label>安排日期<input type="date" name="planned_date"></label>
             <label class="step-description">操作要求与备注<textarea name="description" rows="2" placeholder="记录本批次的参数、操作要点或注意事项"></textarea></label>
             <button class="btn primary"><i data-lucide="plus"></i> 添加实验步骤</button>
@@ -99,7 +100,7 @@
               <form method="post" action="{{ url_for('workspace.batch_step_edit', item_id=step.id) }}" class="stack-form compact-form">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <label>步骤标题<input name="title" value="{{ step.title }}" required maxlength="160"></label>
-                <div class="form-grid"><label>实验人员<input name="operator" value="{{ step.operator or '' }}" maxlength="80"></label><label>安排日期<input type="date" name="planned_date" value="{{ step.planned_date or '' }}"></label></div>
+                <div class="form-grid"><label>实验人员<input name="operator" value="{{ step.operator or '' }}" list="executor-options" maxlength="80" placeholder="可选：实验执行者"></label><label>安排日期<input type="date" name="planned_date" value="{{ step.planned_date or '' }}"></label></div>
                 {% if step.is_done %}<label>完成日期<input type="date" name="completed_date" value="{{ step.completed_date or today }}"></label>{% endif %}
                 <label>操作要求与备注<textarea name="description" rows="3">{{ step.description or '' }}</textarea></label>
                 <button class="btn secondary"><i data-lucide="save"></i> 保存实验步骤</button>
@@ -128,10 +129,10 @@
           {% if selected_record_template %}<div class="template-applied-note"><i data-lucide="circle-check"></i><span>已填入记录模板 <b>{{ selected_record_template.name }}</b>，检查后保存到当前批次。</span></div>{% endif %}
         </div>
 
-        <form method="post" action="{{ url_for('workspace.batch_record_create', item_id=batch.id) }}" enctype="multipart/form-data" class="stack-form record-form">
+        <form method="post" action="{{ url_for('workspace.batch_record_create', item_id=batch.id) }}" enctype="multipart/form-data" class="stack-form record-form" data-execution-form data-execution-autosave="{{ '1' if workspace_setting.execution_autosave else '0' }}" data-execution-autosave-interval="{{ workspace_setting.execution_autosave_interval }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="hidden" name="batch_id" value="{{ batch.id }}">
-          <div class="form-grid three"><label>所属批次<input value="{{ batch.batch_code or '未编号批次' }}" disabled></label><label>日期<input type="date" name="record_date" value="{{ today }}" {% if batch.status != '未开始' and batch.start_date %}min="{{ batch.start_date }}"{% endif %} {% if batch.end_date %}max="{{ batch.end_date }}"{% endif %}><small>{{ '保存首条记录后将自动开始批次' if batch.status == '未开始' else '日期必须处于本批次区间内' }}</small></label><label>实验人员<input name="operator" value="{{ batch.operator or current_user.name }}"></label><label>本条结果<select name="result"><option>待确认</option><option>成功</option><option>失败</option></select></label></div>
+          <div class="form-grid three"><label>所属批次<input value="{{ batch.batch_code or '未编号批次' }}" disabled></label><label>日期<input type="date" name="record_date" {% if batch.status != '未开始' and batch.start_date %}min="{{ batch.start_date }}"{% endif %} {% if batch.end_date %}max="{{ batch.end_date }}"{% endif %}><small>{{ '留空则使用今天；保存首条记录后将自动开始批次' if batch.status == '未开始' else '留空则使用今天，日期必须处于本批次区间内' }}</small></label><label>实验人员<input name="operator" value="" list="executor-options" placeholder="可选：实验执行者"></label><label>本条结果<select name="result"><option>待确认</option><option>成功</option><option>失败</option></select></label></div>
           <label>局部条件<textarea name="conditions" rows="3" placeholder="只填写这条记录特有的浓度、时间或温度">{{ (selected_record_template.conditions if selected_record_template else batch.experiment.record_conditions_template) or '' }}</textarea></label>
           <label>操作与观察<textarea name="content" rows="6" required placeholder="记录本次操作、观察和发生的异常">{{ (selected_record_template.content if selected_record_template else batch.experiment.record_content_template) or '' }}</textarea></label>
           <label>结论与下次注意<textarea name="remark" rows="3" placeholder="本条记录的判断、异常原因或后续计划">{{ (selected_record_template.remark if selected_record_template else batch.experiment.record_remark_template) or '' }}</textarea></label>
@@ -239,7 +240,7 @@
   <aside class="detail-side">
     <section class="panel sticky-panel" id="batch-profile">
       <div class="panel-head"><div><p class="eyebrow">BATCH PROFILE</p><h2>批次信息</h2></div></div>
-      <form method="post" class="stack-form compact-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>批次编号<input name="batch_code" value="{{ batch.batch_code or '' }}"></label><div class="form-grid"><label>重复类型<select name="repeat_kind">{% for value in repeat_kinds %}<option {{ 'selected' if batch.repeat_kind == value }}>{{ value }}</option>{% endfor %}</select></label><label>重复序号<input type="number" min="1" name="repeat_number" value="{{ batch.repeat_number }}"></label></div><label>分组<input name="group_name" value="{{ batch.group_name or '' }}"></label><label>实验人员<input name="operator" value="{{ batch.operator or '' }}"></label><label>批次状态<select name="status">{% for value in statuses %}<option {{ 'selected' if batch.status == value }}>{{ value }}</option>{% endfor %}</select></label><div class="form-grid"><label>实际开始<input type="date" name="start_date" value="{{ batch.start_date or '' }}"></label><label>实际结束<input type="date" name="end_date" value="{{ batch.end_date or '' }}"></label></div><label>批次摘要<textarea name="summary" rows="4">{{ batch.summary or '' }}</textarea></label><label>整体结论<textarea name="conclusion" rows="5">{{ batch.conclusion or '' }}</textarea></label><label class="check-row"><input type="checkbox" name="requires_repeat" value="1" {{ 'checked' if batch.requires_repeat }}><span><b>建议重复实验</b><small>仅作提醒，不替代研究者判断</small></span></label><button class="btn primary full"><i data-lucide="save"></i> 保存批次</button></form>
+      <form method="post" class="stack-form compact-form" data-execution-form data-execution-autosave="{{ '1' if workspace_setting.execution_autosave else '0' }}" data-execution-autosave-interval="{{ workspace_setting.execution_autosave_interval }}" data-execution-draft-key="batch-profile-{{ batch.id }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>批次编号<input name="batch_code" value="{{ batch.batch_code or '' }}" placeholder="可选：便于追踪的批次编号"></label><div class="form-grid"><label>重复类型<select name="repeat_kind">{% for value in repeat_kinds %}<option {{ 'selected' if batch.repeat_kind == value }}>{{ value }}</option>{% endfor %}</select></label><label>重复序号<input type="number" min="1" name="repeat_number" value="{{ batch.repeat_number }}"></label></div><label>分组<input name="group_name" value="{{ batch.group_name or '' }}" placeholder="可选：实验分组"></label><label>实验人员<input name="operator" value="{{ batch.operator or '' }}" list="executor-options" placeholder="可选：实验执行者"></label><label>批次状态<select name="status">{% for value in statuses %}<option {{ 'selected' if batch.status == value }}>{{ value }}</option>{% endfor %}</select></label><div class="form-grid"><label>实际开始<input type="date" name="start_date" value="{{ batch.start_date or '' }}"></label><label>实际结束<input type="date" name="end_date" value="{{ batch.end_date or '' }}"></label></div><label>批次摘要<textarea name="summary" rows="4" placeholder="可选：概括本批次的操作与观察">{{ batch.summary or '' }}</textarea></label><label>整体结论<textarea name="conclusion" rows="5" placeholder="可选：记录证据支持的结论">{{ batch.conclusion or '' }}</textarea></label><label class="check-row"><input type="checkbox" name="requires_repeat" value="1" {{ 'checked' if batch.requires_repeat }}><span><b>建议重复实验</b><small>仅作提醒，不替代研究者判断</small></span></label><button class="btn primary full"><i data-lucide="save"></i> 保存批次</button></form>
     </section>
   </aside>
 </div>

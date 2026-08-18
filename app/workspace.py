@@ -9,9 +9,9 @@ from sqlalchemy import and_, func, or_
 
 from . import db
 from .models import (
-    BatchParameter, BatchSample, BatchStep, Experiment, ExperimentAttachment, ExperimentBatch,
+    BatchParameter, BatchSample, BatchStep, Executor, Experiment, ExperimentAttachment, ExperimentBatch,
     ExperimentRecord, ExperimentTemplate, RecordTemplate, ResearchProject, Sample,
-    PresentationSkill, Task, WeeklyReport, utcnow,
+    PresentationSkill, Task, WeeklyReport, WorkspaceSetting, executor_options_for_project, utcnow,
 )
 from .project_package import ProjectPackageError, build_project_package, import_project_package
 
@@ -227,6 +227,24 @@ def project_detail(item_id):
     return redirect(url_for("main.experiments", project_id=item.id), 301)
 
 
+@bp.post("/projects/<int:item_id>/executors")
+@login_required
+def project_executors_update(item_id):
+    project = _project_or_404(item_id)
+    requested_ids = {value for value in request.form.getlist("executor_ids", type=int) if value}
+    selected = Executor.query.filter(
+        Executor.user_id == current_user.id,
+        Executor.is_active.is_(True),
+        Executor.id.in_(requested_ids),
+    ).order_by(Executor.name, Executor.id).all() if requested_ids else []
+    if {executor.id for executor in selected} != requested_ids:
+        abort(400)
+    project.executors = selected
+    db.session.commit()
+    flash("项目执行者已保存。", "success")
+    return redirect(url_for("main.experiments", project_id=project.id))
+
+
 @bp.post("/projects/<int:item_id>/resources/bulk")
 @login_required
 def project_resource_bulk(item_id):
@@ -366,7 +384,7 @@ def batch_create(item_id):
         repeat_kind=request.form.get("repeat_kind") if request.form.get("repeat_kind") in REPEAT_KINDS else "独立实验",
         repeat_number=_positive_int(request.form.get("repeat_number"), len(experiment.batches) + 1),
         group_name=request.form.get("group_name", "").strip()[:80],
-        operator=request.form.get("operator", "").strip()[:80] or current_user.name,
+        operator=request.form.get("operator", "").strip()[:80],
         status="未开始",
         start_date=_parse_date(request.form.get("start_date")) or date.today(),
     )
@@ -476,6 +494,9 @@ def batch_detail(item_id):
         batch.requires_repeat = request.form.get("requires_repeat") == "1"
         db.session.commit()
         flash("实验批次信息已保存。", "success")
+        setting = WorkspaceSetting.query.filter_by(user_id=current_user.id).first()
+        if setting and setting.execution_save_mode == "return":
+            return redirect(url_for("main.experiment_detail", item_id=batch.experiment_id, _anchor="batches"))
         return redirect(url_for("workspace.batch_detail", item_id=batch.id))
     selected_record_template = None
     record_template_id = request.args.get("record_template_id", type=int)
@@ -511,6 +532,9 @@ def batch_detail(item_id):
         per_page_key="sample_per_page", page_sizes=DETAIL_PAGE_SIZES,
     )
     samples = Sample.query.filter_by(user_id=current_user.id).order_by(Sample.sample_code).all()
+    workspace_setting = WorkspaceSetting.query.filter_by(user_id=current_user.id).first()
+    if workspace_setting is None:
+        workspace_setting = WorkspaceSetting(user_id=current_user.id)
     return render_template(
         "batch_detail.html", batch=batch, records=record_pagination.items, samples=samples,
         batch_steps=step_pagination.items, actual_parameters=parameter_pagination.items,
@@ -537,6 +561,10 @@ def batch_detail(item_id):
             user_id=current_user.id, is_deleted=False
         ).order_by(RecordTemplate.name).all(),
         selected_record_template=selected_record_template,
+        workspace_setting=workspace_setting,
+        executor_options=executor_options_for_project(
+            current_user.id, batch.experiment.project_id, workspace_setting,
+        ),
     )
 
 

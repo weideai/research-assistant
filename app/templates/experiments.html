@@ -23,9 +23,9 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="form-grid three">
           <label class="field-span-2">实验计划名称<input name="title" required placeholder="例如：药物处理后 WB 验证"></label>
-          <label>所属项目<select name="project_id" data-filterable-select data-select-search-placeholder="查找项目名称或编号">{% for project in projects %}<option value="{{ project.id }}" {{ 'selected' if requested_project_id == project.id else '' }}>{{ project.code or '未编号' }} · {{ project.title }}</option>{% else %}<option value="">创建后再归类</option>{% endfor %}</select></label>
-          <label>实验计划编号<input name="code" placeholder="EXP-2026-001"></label>
-          <label>负责人<input name="owner" value="{{ current_user.name }}"></label>
+          {% if requested_project_id %}<input type="hidden" name="project_id" value="{{ requested_project_id }}">{% endif %}
+          <label>实验计划编号<input name="code" placeholder="可选：便于检索的计划编号"></label>
+          <label>负责人<input name="owner" placeholder="可选：填写负责人姓名"></label>
           <label>状态<select name="status">{% for value in ['未开始','进行中','完成','暂停'] %}<option>{{ value }}</option>{% endfor %}</select></label>
           <label>开始日期<input type="date" name="start_date"></label>
           <label>结束日期<input type="date" name="end_date"></label>
@@ -40,10 +40,10 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="form-grid three">
           <label class="field-span-2">方案模板<select name="template_id" required data-filterable-select data-select-search-placeholder="查找方案模板">{% for template in templates %}<option value="{{ template.id }}">{{ template.name }} · {{ template.steps|length }} 个阶段</option>{% else %}<option value="">暂无方案模板</option>{% endfor %}</select></label>
-          <label>所属项目<select name="project_id" data-filterable-select data-select-search-placeholder="查找项目名称或编号">{% for project in projects %}<option value="{{ project.id }}" {{ 'selected' if requested_project_id == project.id else '' }}>{{ project.code or '未编号' }} · {{ project.title }}</option>{% endfor %}</select></label>
+          {% if requested_project_id %}<input type="hidden" name="project_id" value="{{ requested_project_id }}">{% endif %}
           <label>实验计划名称<input name="title" placeholder="留空则使用模板名称"></label>
-          <label>开始日期<input type="date" name="start_date" value="{{ today }}"></label>
-          <label>负责人<input name="owner" value="{{ current_user.name }}"></label>
+          <label>开始日期<input type="date" name="start_date"></label>
+          <label>负责人<input name="owner" placeholder="可选：填写负责人姓名"></label>
         </div>
         <p class="form-hint"><i data-lucide="info"></i> 模板只负责方案阶段；实验批次和过程记录单独维护。<a href="{{ url_for('main.template_center', kind='steps') }}">查看全部模板</a></p>
         <div class="form-actions"><button class="btn secondary" {% if not templates %}disabled{% endif %}><i data-lucide="copy-plus"></i> 使用模板创建</button></div>
@@ -53,10 +53,29 @@
   </div>
 </dialog>
 
+{% if requested_project %}
+<section class="panel project-executor-panel">
+  <div class="panel-head"><div><p class="eyebrow">PROJECT EXECUTION TEAM</p><h2>{{ requested_project.title }} 的执行者</h2><small class="muted">为这个项目选择可用的实验执行者，后续批次、步骤和过程记录会优先提示他们。</small></div><i data-lucide="users-round"></i></div>
+  <form method="post" action="{{ url_for('workspace.project_executors_update', item_id=requested_project.id) }}" class="project-executor-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% if project_executors %}
+    <div class="project-executor-options">
+      {% for executor in project_executors %}
+      <label class="project-executor-option"><input type="checkbox" name="executor_ids" value="{{ executor.id }}" {{ 'checked' if executor.id in project_executor_ids }}><span><b>{{ executor.name }}</b>{% if executor.role %}<small>{{ executor.role }}</small>{% endif %}</span></label>
+      {% endfor %}
+    </div>
+    <div class="form-actions"><span class="muted small-text"><i data-lucide="info"></i>取消勾选即可移出项目，历史记录不会改变</span><button class="btn primary"><i data-lucide="save"></i> 保存项目执行者</button></div>
+    {% else %}
+    <div class="empty compact-empty"><i data-lucide="user-plus"></i><p>还没有可选执行者，先去设置页添加。</p><a class="btn secondary" href="{{ url_for('main.settings') }}"><i data-lucide="settings-2"></i> 添加执行者</a></div>
+    {% endif %}
+  </form>
+</section>
+{% endif %}
+
 <div class="file-center-toolbar list-index-toolbar">
   <form method="get" class="index-filter-form">
     <label class="grow"><span>查找计划或批次</span><input name="q" value="{{ search }}" placeholder="计划名称、编号、负责人或批次信息"></label>
-    <label><span>所属项目</span><select name="project_id" data-filterable-select data-select-search-placeholder="查找项目名称或编号"><option value="">全部项目</option>{% for project in projects %}<option value="{{ project.id }}" {{ 'selected' if requested_project_id == project.id }}>{{ project.code or '未编号' }} · {{ project.title }}</option>{% endfor %}</select></label>
+    {% if requested_project_id %}<input type="hidden" name="project_id" value="{{ requested_project_id }}">{% endif %}
     <label><span>计划状态</span><select name="status"><option>全部</option>{% for value in experiment_statuses %}<option {{ 'selected' if selected_status == value }}>{{ value }}</option>{% endfor %}</select></label>
     <label><span>每页数量</span><select name="per_page">{% for value in page_sizes %}<option value="{{ value }}" {{ 'selected' if page_size == value }}>{{ value }} 个</option>{% endfor %}</select></label>
     <button class="btn primary"><i data-lucide="search"></i> 筛选</button>
@@ -69,7 +88,7 @@
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="q" value="{{ search }}"><input type="hidden" name="return_status" value="{{ selected_status }}"><input type="hidden" name="return_project_id" value="{{ requested_project_id or '' }}"><input type="hidden" name="page" value="{{ pagination.page }}"><input type="hidden" name="per_page" value="{{ page_size }}"><input type="hidden" name="selection_scope" value="page" data-bulk-selection-scope>
   <details class="resource-bulk-panel"><summary><span><i data-lucide="list-checks"></i><b>批量管理实验计划</b></span><span data-bulk-selected>已选择 0 个</span></summary><div class="resource-bulk-body">
     <div class="bulk-head"><label class="bulk-select-all"><input type="checkbox" data-bulk-select-all> 全选本页</label><button class="btn ghost select-all-matches" type="button" data-bulk-select-all-matches aria-pressed="false"><i data-lucide="list-checks"></i> 选择当前筛选全部 {{ pagination.total }} 个</button><small>只修改勾选的实验计划</small></div>
-    <div class="bulk-fields bulk-fields-wide"><label>计划状态<select name="bulk_status"><option value="__keep__">保持不变</option>{% for value in experiment_statuses %}<option>{{ value }}</option>{% endfor %}</select></label><label>负责人操作<select name="owner_mode"><option value="keep">保持不变</option><option value="replace">统一替换</option><option value="clear">清空</option></select></label><label>负责人<input name="owner" maxlength="80" placeholder="新的负责人"></label><label>项目操作<select name="project_mode"><option value="keep">保持不变</option><option value="replace">统一归入</option><option value="clear">取消归类</option></select></label><label class="bulk-grow">目标项目<select name="bulk_project_id" data-filterable-select data-select-search-placeholder="查找目标项目"><option value="">选择项目</option>{% for project in projects %}<option value="{{ project.id }}">{{ project.code or '未编号' }} · {{ project.title }}</option>{% endfor %}</select></label></div>
+    <div class="bulk-fields bulk-fields-wide"><label>计划状态<select name="bulk_status"><option value="__keep__">保持不变</option>{% for value in experiment_statuses %}<option>{{ value }}</option>{% endfor %}</select></label><label>负责人操作<select name="owner_mode"><option value="keep">保持不变</option><option value="replace">统一替换</option><option value="clear">清空</option></select></label><label>负责人<input name="owner" maxlength="80" placeholder="可选：新的负责人"></label></div>
     <div class="bulk-actions"><button class="btn secondary" name="action" value="update" disabled><i data-lucide="save"></i> 批量保存</button><button class="btn danger" name="action" value="delete" disabled><i data-lucide="trash-2"></i> 批量移入回收站</button></div>
   </div></details>
 </form>

@@ -1272,10 +1272,16 @@ def test_assistant_ui_exposes_chat_history_and_cherry_style_shortcuts(client, au
     assert b'event.key.toLowerCase() === "l"' in script
 
 
-def test_project_credit_exposes_author_and_repository(client, auth):
-    auth.register()
+def test_project_credit_keeps_author_name_without_user_avatar(client, auth):
+    hidden_identity = "不应显示的姓名"
+    auth.register(name=hidden_identity)
     page = client.get("/").data
-    assert "作者：面壁者".encode() in page
+    assert "<b>作者：面壁者</b>".encode() in page
+    assert page.count("面壁者".encode()) == 1
+    assert hidden_identity.encode() not in page
+    assert "<h1>你好，研究者</h1>".encode() in page
+    assert b'class="workspace-user"' not in page
+    assert 'aria-label="打开工作区设置"'.encode() not in page
     assert b'https://github.com/weideai/research-assistant' in page
     assert 'aria-label="打开项目 GitHub 仓库"'.encode() in page
 

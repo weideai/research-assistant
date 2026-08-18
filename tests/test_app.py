@@ -38,11 +38,11 @@ def test_task_crud_and_toggle(client, auth, app):
     with app.app_context():
         task = Task.query.one()
         task_id = task.id
-        assert task.status == "待办"
+        assert task.status == "todo"
 
     client.post(f"/tasks/{task_id}/toggle")
     with app.app_context():
-        assert db.session.get(Task, task_id).status == "完成"
+        assert db.session.get(Task, task_id).status == "done"
 
     client.post(f"/tasks/{task_id}/delete")
     with app.app_context():

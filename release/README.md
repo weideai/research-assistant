@@ -1,46 +1,27 @@
-# R/LAB Research Assistant V2.5.2 Installers
+# R/LAB Research Assistant V2.5.2 Windows 安装包
 
-当前 Windows 安装包已重新构建，包含 IDE 工作区、科研浅色 / Research OS 深色 / Swiss 三套皮肤，以及深色纹理背景和首页 AI 边栏。V2.5.2 同时保留导航层级扁平化改造：工作流程统一为实验计划 → 实验批次 → 过程记录，项目管理功能集中到实验计划页内。
+当前安装包提供独立 WebView2 桌面应用，使用进程内 JavaScript Bridge，不启动浏览器，也不监听 HTTP/TCP 端口。产品核心层级为“项目 -> 实验记录”，并包含文献与 Zotero 本地同步、资料库、笔记、任务、日历、周报文件管理、PPTX、悬浮 AI 助手、全文搜索、导出、回收站和设置。实验记录在独立记录编辑页中编辑；导出中心支持查询、分页、跨页选择以及 Word/PDF/Markdown/JSON 批量导出。项目、文献、任务与周报支持筛选、分页、跨页选择和批量操作。首页会直接显示本周日程，点击日期可进入对应日历。
+
+AI 助手可写入项目、实验记录、任务、日历事件、笔记、周报正文和周报批注。选中字段后直接应用，不设置风险确认层；每次应用均保留变更记录并可撤销。
+
+界面内置 `ide-light`、`ide-dark`、`swiss` 和 `soft-lab` 四套皮肤。
 
 ## Windows
 
 File: `ResearchAssistant-Windows-Setup.exe`
 
-Double-click the installer. It installs the application for the current Windows user, creates Desktop and Start Menu shortcuts, and keeps research data under `%LOCALAPPDATA%\ResearchAssistant\data`.
+双击安装包即可为当前 Windows 用户安装，并创建桌面和开始菜单快捷方式。研究数据保存在 `%LOCALAPPDATA%\ResearchAssistant\data`。
 
-The release installer contains application code only. It does not include the developer's accounts, database, attachments, knowledge-base files, `.env`, API keys, or local credential key. Each installation creates and keeps its own local data directory. The Windows installer opens `http://127.0.0.1:5001`; it does not expose the application to the public internet.
+发布包只包含应用程序，不包含开发者账号、数据库、附件、知识库文件、`.env`、API Key 或本地凭据密钥。每次安装都会创建并使用自己的本地数据目录。
 
-## Linux
+升级已有版本时直接运行新的安装包，不要先卸载。安装器会停止本机应用进程、暂存新程序文件、只替换程序目录、保留数据目录并重建快捷方式。`install-info.json` 会记录本次是新安装还是升级，以及升级前版本。
 
-File: `ResearchAssistant-Linux-Installer.run`
-
-Linux does not use Windows `.exe` files. Install with:
-
-```bash
-chmod +x ResearchAssistant-Linux-Installer.run
-./ResearchAssistant-Linux-Installer.run
-```
-
-This installer requires Python 3, `python3-venv`, and network access for Python dependencies. Research data is stored under `~/.local/share/research-assistant/data`.
-
-The Linux source payload also excludes `instance/`, `.env`, build output, release output, and local virtual environments.
-
-## macOS
-
-File: `ResearchAssistant-2.5.2.dmg`
-
-macOS 首次提供安装包。双击 `.dmg` 文件，将 `ResearchAssistant.app` 拖入 `Applications` 文件夹。首次启动时，macOS 可能提示"未验证的开发者"——在系统设置 > 隐私与安全性中允许即可。研究数据存储在 `~/Library/Application Support/ResearchAssistant/data`。
-
-Both installers preserve data during upgrades. The application backs up its SQLite database before a pending schema migration and writes a migration report; managed attachments and external linked originals are not moved or deleted by the migration.
+升级流程保留研究数据。应用会在待执行的 SQLite Schema 迁移前备份数据库并生成迁移报告；托管附件和外部链接原件不会被迁移过程移动或删除。
 
 ## Integrity
 
-Verify downloads against `SHA256SUMS.txt` before installation.
+安装前请使用 `SHA256SUMS.txt` 校验文件：
 
 ```powershell
 Get-FileHash .\ResearchAssistant-Windows-Setup.exe -Algorithm SHA256
-```
-
-```bash
-sha256sum -c SHA256SUMS.txt
 ```

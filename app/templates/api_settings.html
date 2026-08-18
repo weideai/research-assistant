@@ -16,6 +16,7 @@
 {% block content %}
 <header class="page-head api-page-head">
   <div><p class="eyebrow">AI CONNECTIONS</p><h1>API 预设</h1><p class="muted">保存多个 OpenAI-compatible 连接，拉取模型后直接选择当前模型。</p></div>
+  <div class="page-head-actions"><a class="btn ghost" href="{{ url_for('main.settings') }}"><i data-lucide="arrow-left"></i> 返回设置</a></div>
   <span class="badge large {{ 'api-on' if current_preset else '' }}"><i data-lucide="{{ 'wifi' if current_preset else 'wifi-off' }}"></i>{{ current_preset.name if current_preset else '尚未选择预设' }}</span>
 </header>
 

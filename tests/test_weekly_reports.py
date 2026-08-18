@@ -183,10 +183,10 @@ def test_weekly_report_bulk_update_and_delete_preserve_files(client, auth, app):
     with app.app_context():
         selected = [db.session.get(WeeklyReport, item_id) for item_id in selected_ids]
         untouched = db.session.get(WeeklyReport, untouched_id)
-        assert {item.status for item in selected} == {"已归档"}
+        assert {item.status for item in selected} == {"archived"}
         assert {item.project_id for item in selected} == {project_id}
         assert all(item.summary == "原摘要\n批量补充" for item in selected)
-        assert untouched.status == "待反馈"
+        assert untouched.status == "draft"
         assert untouched.project_id is None
         assert untouched.summary == "原摘要"
 

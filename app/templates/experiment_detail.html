@@ -27,6 +27,7 @@
     <span class="badge large" data-state="{{ experiment.status | state_tone }}">{{ experiment.status }}</span>
   </div>
 </header>
+<datalist id="executor-options">{% for option in executor_options %}<option value="{{ option }}">{% endfor %}</datalist>
 <nav class="experiment-workspace-tabs" data-experiment-tabs role="tablist" aria-orientation="horizontal" aria-label="实验工作区">
   <a id="experiment-tab-overview" href="#overview" data-experiment-tab="overview" role="tab" aria-selected="true" aria-controls="experiment-overview experiment-profile" tabindex="0"><i data-lucide="chart-no-axes-combined"></i><span><b>概览</b><small>目标与基本信息</small></span></a>
   <a id="experiment-tab-protocol" href="#protocol" data-experiment-tab="protocol" role="tab" aria-selected="false" aria-controls="experiment-steps experiment-protocol-resources" tabindex="-1"><i data-lucide="clipboard-list"></i><span><b>实验方案</b><small>方案阶段、参数与样本</small></span></a>
@@ -58,7 +59,7 @@
         <div class="experiment-batch-list">{% for batch in batches %}<a href="{{ url_for('workspace.batch_detail', item_id=batch.id, record_template_id=selected_record_template.id) }}#new-record"><span class="batch-sequence">{{ '%02d'|format(loop.index) }}</span><span><b>{{ batch.batch_code or ('批次 ' ~ loop.index) }}</b><small>在这个批次中调用模板</small></span><span class="badge">{{ batch.status }}</span><span></span><i data-lucide="chevron-right"></i></a>{% else %}<div class="empty compact-empty"><p>请先新建实验批次，再调用过程记录模板。</p></div>{% endfor %}</div>
         {% endif %}
         {% set pagination = batch_pagination %}{% set page_param = 'batch_page' %}{% set pagination_label = '实验批次翻页' %}{% set page_item_label = '个批次' %}{% include '_pagination.html' %}
-        <form method="post" action="{{ url_for('workspace.batch_create', item_id=experiment.id) }}" class="batch-create-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input name="batch_code" placeholder="批次编号，如 RUN-02"><select name="repeat_kind">{% for kind in repeat_kinds %}<option>{{ kind }}</option>{% endfor %}</select><input type="number" name="repeat_number" min="1" value="{{ batch_total + 1 }}"><input name="group_name" placeholder="实验分组"><input name="operator" value="{{ experiment.owner or current_user.name }}" placeholder="实验人员"><input type="date" name="start_date" value="{{ today }}"><button class="btn secondary"><i data-lucide="play"></i> 新建实验批次</button></form>
+          <form method="post" action="{{ url_for('workspace.batch_create', item_id=experiment.id) }}" class="batch-create-form" data-execution-form data-execution-autosave="{{ '1' if workspace_setting.execution_autosave else '0' }}" data-execution-autosave-interval="{{ workspace_setting.execution_autosave_interval }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input name="batch_code" placeholder="可选：批次编号，如 RUN-02"><select name="repeat_kind">{% for kind in repeat_kinds %}<option>{{ kind }}</option>{% endfor %}</select><input type="number" name="repeat_number" min="1" value="{{ batch_total + 1 }}"><input name="group_name" placeholder="可选：实验分组"><input name="operator" value="" list="executor-options" placeholder="可选：实验执行者"><input type="date" name="start_date"><button class="btn secondary"><i data-lucide="play"></i> 新建实验批次</button></form>
         {% if record_total %}
         <details class="resource-bulk-panel" id="experiment-record-index">
           <summary><span><i data-lucide="notebook-tabs"></i><b>跨批次过程记录索引</b></span><span>{{ record_pagination.total }} 条匹配</span></summary>
@@ -122,7 +123,7 @@
         <form method="post" action="{{ url_for('main.step_add', item_id=experiment.id) }}" class="plan-stage-add-form">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <label class="step-title">阶段名称<input name="title" required placeholder="例如：样本准备与基线确认"></label>
-          <label>阶段负责人<input name="operator" value="{{ experiment.owner or current_user.name }}"></label>
+          <label>阶段负责人<input name="operator" value="" list="executor-options" placeholder="可选：阶段执行者"></label>
           <label>目标日期<input type="date" name="planned_date"></label>
           <label class="step-description">阶段目标与验收要求<textarea name="description" rows="3" placeholder="定义本阶段要完成的目标、关键约束和验收标准"></textarea></label>
           <button class="btn primary"><i data-lucide="plus"></i> 添加阶段</button>
@@ -284,7 +285,6 @@
       <div class="feature-body">
       <form method="post" class="stack-form compact-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <label>所属项目<select name="project_id" data-filterable-select data-select-search-placeholder="查找项目名称或编号">{% for project in projects %}<option value="{{ project.id }}" {{ 'selected' if experiment.project_id == project.id }}>{{ project.code or '未编号' }} · {{ project.title }}</option>{% endfor %}</select></label>
         <label>计划名称<input name="title" value="{{ experiment.title }}" required></label>
         <label>计划编号<input name="code" value="{{ experiment.code }}"></label>
         <label>负责人<input name="owner" value="{{ experiment.owner }}"></label>

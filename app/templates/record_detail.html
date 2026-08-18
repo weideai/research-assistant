@@ -14,6 +14,7 @@
   </div>
   <div class="page-head-actions"><a class="btn secondary" href="{{ url_for('main.experiment_reports', item_id=record.experiment_id, record_id=record.id) }}"><i data-lucide="notebook-tabs"></i> 报告视图</a><a class="btn primary" href="#record-edit" data-record-tab-link="edit"><i data-lucide="pencil"></i> 编辑记录</a><span class="badge large" data-state="{{ record.lifecycle_status | state_tone }}">{{ record.lifecycle_status }}</span><span class="badge large" data-state="{{ record.result | state_tone }}">{{ record.result }}</span></div>
 </header>
+<datalist id="executor-options">{% for option in executor_options %}<option value="{{ option }}">{% endfor %}</datalist>
 <nav class="record-workspace-tabs" data-record-tabs role="tablist" aria-orientation="horizontal" aria-label="记录工作区">
   <a id="record-tab-view" href="#record-view" data-record-tab="view" role="tab" aria-selected="true" aria-controls="record-view" tabindex="0"><i data-lucide="book-open-text"></i><span><b>阅读</b><small>查看已记录内容</small></span></a>
   <a id="record-tab-files" href="#record-files" data-record-tab="files" role="tab" aria-selected="false" aria-controls="record-files" tabindex="-1"><i data-lucide="folder-search"></i><span><b>文件与数据</b><small>{{ record.attachments|rejectattr('is_deleted')|list|length }} 个文件</small></span></a>
@@ -179,7 +180,7 @@
       <div class="panel-head"><div><p class="eyebrow">EDIT</p><h2>编辑记录</h2></div></div>
       <form method="post" class="stack-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <div class="form-grid"><label>日期<input type="date" name="record_date" value="{{ record.record_date }}" {% if record.batch and record.batch.start_date %}min="{{ record.batch.start_date }}"{% endif %} {% if record.batch and record.batch.end_date %}max="{{ record.batch.end_date }}"{% endif %}><small>日期必须处于所属实验批次区间内</small></label><label>实验人员<input name="operator" value="{{ record.operator }}"></label></div>
+        <div class="form-grid"><label>日期<input type="date" name="record_date" value="{{ record.record_date }}" {% if record.batch and record.batch.start_date %}min="{{ record.batch.start_date }}"{% endif %} {% if record.batch and record.batch.end_date %}max="{{ record.batch.end_date }}"{% endif %}><small>日期必须处于所属实验批次区间内</small></label><label>实验人员<input name="operator" value="{{ record.operator }}" list="executor-options" placeholder="可选：实验执行者"></label></div>
         <label>结果<select name="result">{% for value in ['待确认','成功','失败'] %}<option {{ 'selected' if record.result == value }}>{{ value }}</option>{% endfor %}</select></label>
         <label>实验条件<textarea name="conditions" rows="4">{{ record.conditions or '' }}</textarea></label>
         <label>实验过程<textarea name="content" rows="8" required>{{ record.content }}</textarea></label>

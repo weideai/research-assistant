@@ -9,11 +9,12 @@
   </div>
   <span class="badge large">方案层</span>
 </header>
+<datalist id="executor-options">{% for option in executor_options %}<option value="{{ option }}">{% endfor %}</datalist>
 <section class="panel narrow-panel step-edit-panel">
   <form method="post" class="stack-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label>阶段名称<input name="title" value="{{ step.title }}" required></label>
-    <div class="form-grid"><label>阶段负责人<input name="operator" value="{{ step.operator }}"></label><label>目标日期<input type="date" name="planned_date" value="{{ step.planned_date or '' }}"></label></div>
+    <div class="form-grid"><label>阶段负责人<input name="operator" value="{{ step.operator }}" list="executor-options" placeholder="可选：阶段执行者"></label><label>目标日期<input type="date" name="planned_date" value="{{ step.planned_date or '' }}"></label></div>
     <label>阶段目标与验收要求<textarea name="description" rows="7" placeholder="定义本阶段要完成的目标、关键约束和验收标准">{{ step.description }}</textarea></label>
     <div class="form-actions"><button class="btn primary"><i data-lucide="save"></i> 保存方案阶段</button></div>
   </form>

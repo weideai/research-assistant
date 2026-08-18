@@ -915,12 +915,17 @@ def build_docx_export(item, attachment_path_resolver=None, template_key="researc
 
 
 PDF_FONT_CANDIDATES = (
+    r"C:\Windows\Fonts\SourceHanSerifSC-Regular.otf",
+    r"C:\Windows\Fonts\SourceHanSerifSC-Regular.ttf",
+    r"C:\Windows\Fonts\NotoSerifCJKsc-Regular.otf",
     r"C:\Windows\Fonts\msyh.ttc",
     r"C:\Windows\Fonts\simhei.ttf",
     r"C:\Windows\Fonts\Deng.ttf",
     r"C:\Windows\Fonts\NotoSansSC-VF.ttf",
     r"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
     r"/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    r"/usr/share/fonts/opentype/adobe-source-han-serif/SourceHanSerifSC-Regular.otf",
+    r"/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
     r"/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
     r"/usr/share/fonts/truetype/arphic/uming.ttc",
     r"/System/Library/Fonts/PingFang.ttc",
