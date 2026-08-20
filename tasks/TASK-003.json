@@ -1,0 +1,1351 @@
+{
+  "schema_version": 1,
+  "task": {
+    "id": "TASK-003",
+    "title": "Remove web compatibility surface soft (Option A) keep desktop-only",
+    "status": "IN_PROGRESS",
+    "owner": "executor",
+    "module_id": "MOD-001",
+    "depends_on": [
+      "TASK-002"
+    ]
+  },
+  "requirements": [
+    "FR-PROJ-01",
+    "FR-REC-01",
+    "FR-ACT-01",
+    "FR-FILE-01"
+  ],
+  "contracts": [
+    "dashboard.get"
+  ],
+  "scope": {
+    "allowed_paths": [
+      "app/__init__.py",
+      "requirements-prod.txt",
+      "README.md",
+      "DEPLOYMENT.md",
+      "PROJECT_ARCHITECTURE.md",
+      "run.py",
+      "Dockerfile",
+      "docker-compose.yml",
+      "Caddyfile",
+      "docker-entrypoint.sh",
+      "app/main.py",
+      "app/workspace.py",
+      "app/admin.py",
+      "app/auth.py",
+      "app/templates/",
+      "app/static/",
+      "CHANGELOG.md"
+    ],
+    "control_paths": [
+      "tasks/TASK-003.json"
+    ],
+    "evidence_paths": [],
+    "forbidden_paths": [
+      "migrations/*",
+      "app/models.py",
+      "app/desktop/*",
+      "app/desktop_ui/*",
+      "app/services/*",
+      "app/desktop/*"
+    ]
+  },
+  "outputs": [
+    "Web compatibility surface archived under app/legacy_web, desktop-only entry preserved, production deployment docs removed"
+  ],
+  "verification": {
+    "test_ids": [],
+    "acceptance_ids": [],
+    "methods": [
+      "desktop service test",
+      "JS syntax check",
+      "file:// load",
+      "project_handoff manifest"
+    ]
+  },
+  "evidence": {
+    "state": "designed",
+    "expected_paths": [],
+    "actual_paths": [],
+    "runs": []
+  },
+  "rollback": {
+    "code": "git revert the soft-remove commit or restore archived files from app/legacy_web",
+    "docs": "Restore DEPLOYMENT.md and README web chapters from git history",
+    "schema": "not_applicable: no schema or migration change",
+    "data": "not_applicable: no user data migration",
+    "config": "Re-add gunicorn/psycopg/redis to requirements-prod.txt if web deploy needed",
+    "release": "not_applicable: no release artifact rebuild"
+  },
+  "execution_context": {
+    "base_commit": "04324c7748a70bae6590fc02c5ac05877342b3c0",
+    "branch_or_worktree": "main",
+    "lease_id": null,
+    "lease_expires_at": null,
+    "integration_owner": "human-owner",
+    "contract": "dashboard.get"
+  },
+  "review": {
+    "required": true,
+    "reviewer": "independent-reviewer",
+    "disposition": "pending"
+  },
+  "handoff": {
+    "changed_paths": [
+      "CHANGELOG.md",
+      "Caddyfile",
+      "DEPLOYMENT.md",
+      "Dockerfile",
+      "PROJECT_ARCHITECTURE.md",
+      "README.md",
+      "app/__init__.py",
+      "app/admin.py",
+      "app/auth.py",
+      "app/main.py",
+      "app/static/css/app.css",
+      "app/static/css/assistant.css",
+      "app/static/css/ide.css",
+      "app/static/css/skins.css",
+      "app/static/css/tokens.css",
+      "app/static/js/app.js",
+      "app/static/js/skin.js",
+      "app/static/vendor/LUCIDE-LICENSE.txt",
+      "app/static/vendor/lucide.min.js",
+      "app/templates/404.html",
+      "app/templates/_evidence_directory.html",
+      "app/templates/_pagination.html",
+      "app/templates/admin.html",
+      "app/templates/api_settings.html",
+      "app/templates/auth.html",
+      "app/templates/base.html",
+      "app/templates/batch_detail.html",
+      "app/templates/change_password.html",
+      "app/templates/dashboard.html",
+      "app/templates/error.html",
+      "app/templates/experiment_detail.html",
+      "app/templates/experiment_files.html",
+      "app/templates/experiment_report_export_preview.html",
+      "app/templates/experiment_report_index.html",
+      "app/templates/experiment_reports.html",
+      "app/templates/experiments.html",
+      "app/templates/file_center.html",
+      "app/templates/forgot_password.html",
+      "app/templates/project_detail.html",
+      "app/templates/projects.html",
+      "app/templates/record_detail.html",
+      "app/templates/record_template_detail.html",
+      "app/templates/recycle_bin.html",
+      "app/templates/reset_password.html",
+      "app/templates/sample_edit.html",
+      "app/templates/samples.html",
+      "app/templates/settings.html",
+      "app/templates/step_edit.html",
+      "app/templates/task_edit.html",
+      "app/templates/tasks.html",
+      "app/templates/template_center.html",
+      "app/templates/template_detail.html",
+      "app/templates/weekly_reports.html",
+      "app/workspace.py",
+      "docker-compose.yml",
+      "docker-entrypoint.sh",
+      "requirements-prod.txt",
+      "run.py",
+      "tasks/TASK-003.json"
+    ],
+    "change_manifest": [
+      {
+        "path": "CHANGELOG.md",
+        "sha256": "14c208be560b4848a3a1bad9d490e82ada3ac89bd89446e3f64319722627f11c",
+        "state": "present"
+      },
+      {
+        "path": "Caddyfile",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "DEPLOYMENT.md",
+        "sha256": "d48328d9239dcf24bf743638a36f658d38764860ef5c8435436e7b4f79a4a8e8",
+        "state": "present"
+      },
+      {
+        "path": "Dockerfile",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "PROJECT_ARCHITECTURE.md",
+        "sha256": "acbe048ca669cb960caf2164d3eb5b5fd5b3fa745cc0ccd7e8d8525c90142ece",
+        "state": "present"
+      },
+      {
+        "path": "README.md",
+        "sha256": "fe12b353dffa8fd9b73c9a2a678c106d01a5004899e04a7ae984b81d408622f6",
+        "state": "present"
+      },
+      {
+        "path": "app/__init__.py",
+        "sha256": "c9d13aaa359dd3f44926539a48c091f7a36dc3e5afb693ab9daf64c3b42dc190",
+        "state": "present"
+      },
+      {
+        "path": "app/admin.py",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/auth.py",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/main.py",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/static/css/app.css",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/static/css/assistant.css",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/static/css/ide.css",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/static/css/skins.css",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/static/css/tokens.css",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/static/js/app.js",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/static/js/skin.js",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/static/vendor/LUCIDE-LICENSE.txt",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/static/vendor/lucide.min.js",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/404.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/_evidence_directory.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/_pagination.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/admin.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/api_settings.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/auth.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/base.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/batch_detail.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/change_password.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/dashboard.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/error.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/experiment_detail.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/experiment_files.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/experiment_report_export_preview.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/experiment_report_index.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/experiment_reports.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/experiments.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/file_center.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/forgot_password.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/project_detail.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/projects.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/record_detail.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/record_template_detail.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/recycle_bin.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/reset_password.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/sample_edit.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/samples.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/settings.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/step_edit.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/task_edit.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/tasks.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/template_center.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/template_detail.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/templates/weekly_reports.html",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "app/workspace.py",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "docker-compose.yml",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "docker-entrypoint.sh",
+        "sha256": null,
+        "state": "deleted"
+      },
+      {
+        "path": "requirements-prod.txt",
+        "sha256": "0be763f580995b21b8b506ffb51e75f26f4d53e4fd3d74edfd899d8e7d65e684",
+        "state": "present"
+      },
+      {
+        "path": "run.py",
+        "sha256": null,
+        "state": "deleted"
+      }
+    ],
+    "change_summary": [
+      {
+        "path": "CHANGELOG.md",
+        "change": "Updated CHANGELOG.md for desktop-only product.",
+        "approach": "Replaced DEPLOYMENT.md; rewrote PROJECT_ARCHITECTURE 1-4; fixed README vendor path; appended CHANGELOG Removed bullet.",
+        "reason": "Keep docs consistent with soft-archived web surface and preserve desktop 100 percent.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "Docs diff vs staged; py_compile and node --check unaffected.",
+        "rollback": "Restore CHANGELOG.md from git history."
+      },
+      {
+        "path": "Caddyfile",
+        "change": "Removed web deploy entry Caddyfile staged D.",
+        "approach": "git rm staged deletion.",
+        "reason": "Eliminate port-based web entry per port-free invariant.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached shows D; desktop_main launches without HTTP.",
+        "rollback": "git checkout HEAD -- Caddyfile or revert."
+      },
+      {
+        "path": "DEPLOYMENT.md",
+        "change": "Updated DEPLOYMENT.md for desktop-only product.",
+        "approach": "Replaced DEPLOYMENT.md; rewrote PROJECT_ARCHITECTURE 1-4; fixed README vendor path; appended CHANGELOG Removed bullet.",
+        "reason": "Keep docs consistent with soft-archived web surface and preserve desktop 100 percent.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "Docs diff vs staged; py_compile and node --check unaffected.",
+        "rollback": "Restore DEPLOYMENT.md from git history."
+      },
+      {
+        "path": "Dockerfile",
+        "change": "Removed web deploy entry Dockerfile staged D.",
+        "approach": "git rm staged deletion.",
+        "reason": "Eliminate port-based web entry per port-free invariant.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached shows D; desktop_main launches without HTTP.",
+        "rollback": "git checkout HEAD -- Dockerfile or revert."
+      },
+      {
+        "path": "PROJECT_ARCHITECTURE.md",
+        "change": "Updated PROJECT_ARCHITECTURE.md for desktop-only product.",
+        "approach": "Replaced DEPLOYMENT.md; rewrote PROJECT_ARCHITECTURE 1-4; fixed README vendor path; appended CHANGELOG Removed bullet.",
+        "reason": "Keep docs consistent with soft-archived web surface and preserve desktop 100 percent.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "Docs diff vs staged; py_compile and node --check unaffected.",
+        "rollback": "Restore PROJECT_ARCHITECTURE.md from git history."
+      },
+      {
+        "path": "README.md",
+        "change": "Updated README.md for desktop-only product.",
+        "approach": "Replaced DEPLOYMENT.md; rewrote PROJECT_ARCHITECTURE 1-4; fixed README vendor path; appended CHANGELOG Removed bullet.",
+        "reason": "Keep docs consistent with soft-archived web surface and preserve desktop 100 percent.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "Docs diff vs staged; py_compile and node --check unaffected.",
+        "rollback": "Restore README.md from git history."
+      },
+      {
+        "path": "app/__init__.py",
+        "change": "Slimmed Flask factory to desktop-only core 154L.",
+        "approach": "Restored from .bak then applied slim script to strip web-only extensions.",
+        "reason": "Enforce architecture boundary: desktop_main+bridge+services primary.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "py_compile ok; pytest 3 passed.",
+        "rollback": "Restore app/__init__.py from HEAD."
+      },
+      {
+        "path": "app/admin.py",
+        "change": "Archived app/admin.py to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv original to app/legacy_web mirror.",
+        "reason": "Soft-remove web surface while preserving history.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached shows R100; desktop tests pass.",
+        "rollback": "git mv back app/legacy_web/admin.py app/admin.py or revert."
+      },
+      {
+        "path": "app/auth.py",
+        "change": "Archived app/auth.py to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv original to app/legacy_web mirror.",
+        "reason": "Soft-remove web surface while preserving history.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached shows R100; desktop tests pass.",
+        "rollback": "git mv back app/legacy_web/auth.py app/auth.py or revert."
+      },
+      {
+        "path": "app/main.py",
+        "change": "Archived app/main.py to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv original to app/legacy_web mirror.",
+        "reason": "Soft-remove web surface while preserving history.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached shows R100; desktop tests pass.",
+        "rollback": "git mv back app/legacy_web/main.py app/main.py or revert."
+      },
+      {
+        "path": "app/static/css/app.css",
+        "change": "Archived app/static/css/app.css to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/static/css/assistant.css",
+        "change": "Archived app/static/css/assistant.css to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/static/css/ide.css",
+        "change": "Archived app/static/css/ide.css to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/static/css/skins.css",
+        "change": "Archived app/static/css/skins.css to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/static/css/tokens.css",
+        "change": "Archived app/static/css/tokens.css to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/static/js/app.js",
+        "change": "Archived app/static/js/app.js to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/static/js/skin.js",
+        "change": "Archived app/static/js/skin.js to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/static/vendor/LUCIDE-LICENSE.txt",
+        "change": "Archived app/static/vendor/LUCIDE-LICENSE.txt to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/static/vendor/lucide.min.js",
+        "change": "Archived app/static/vendor/lucide.min.js to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/404.html",
+        "change": "Archived app/templates/404.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/_evidence_directory.html",
+        "change": "Archived app/templates/_evidence_directory.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/_pagination.html",
+        "change": "Archived app/templates/_pagination.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/admin.html",
+        "change": "Archived app/templates/admin.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/api_settings.html",
+        "change": "Archived app/templates/api_settings.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/auth.html",
+        "change": "Archived app/templates/auth.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/base.html",
+        "change": "Archived app/templates/base.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/batch_detail.html",
+        "change": "Archived app/templates/batch_detail.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/change_password.html",
+        "change": "Archived app/templates/change_password.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/dashboard.html",
+        "change": "Archived app/templates/dashboard.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/error.html",
+        "change": "Archived app/templates/error.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/experiment_detail.html",
+        "change": "Archived app/templates/experiment_detail.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/experiment_files.html",
+        "change": "Archived app/templates/experiment_files.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/experiment_report_export_preview.html",
+        "change": "Archived app/templates/experiment_report_export_preview.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/experiment_report_index.html",
+        "change": "Archived app/templates/experiment_report_index.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/experiment_reports.html",
+        "change": "Archived app/templates/experiment_reports.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/experiments.html",
+        "change": "Archived app/templates/experiments.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/file_center.html",
+        "change": "Archived app/templates/file_center.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/forgot_password.html",
+        "change": "Archived app/templates/forgot_password.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/project_detail.html",
+        "change": "Archived app/templates/project_detail.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/projects.html",
+        "change": "Archived app/templates/projects.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/record_detail.html",
+        "change": "Archived app/templates/record_detail.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/record_template_detail.html",
+        "change": "Archived app/templates/record_template_detail.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/recycle_bin.html",
+        "change": "Archived app/templates/recycle_bin.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/reset_password.html",
+        "change": "Archived app/templates/reset_password.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/sample_edit.html",
+        "change": "Archived app/templates/sample_edit.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/samples.html",
+        "change": "Archived app/templates/samples.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/settings.html",
+        "change": "Archived app/templates/settings.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/step_edit.html",
+        "change": "Archived app/templates/step_edit.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/task_edit.html",
+        "change": "Archived app/templates/task_edit.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/tasks.html",
+        "change": "Archived app/templates/tasks.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/template_center.html",
+        "change": "Archived app/templates/template_center.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/template_detail.html",
+        "change": "Archived app/templates/template_detail.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/templates/weekly_reports.html",
+        "change": "Archived app/templates/weekly_reports.html to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv template/static asset to app/legacy_web mirror.",
+        "reason": "Remove Jinja/web UI from active product; desktop_ui sole UI.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached R100; desktop_ui unchanged.",
+        "rollback": "git mv back or revert."
+      },
+      {
+        "path": "app/workspace.py",
+        "change": "Archived app/workspace.py to app/legacy_web mirror via git mv R100.",
+        "approach": "git mv original to app/legacy_web mirror.",
+        "reason": "Soft-remove web surface while preserving history.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached shows R100; desktop tests pass.",
+        "rollback": "git mv back app/legacy_web/workspace.py app/workspace.py or revert."
+      },
+      {
+        "path": "docker-compose.yml",
+        "change": "Removed web deploy entry docker-compose.yml staged D.",
+        "approach": "git rm staged deletion.",
+        "reason": "Eliminate port-based web entry per port-free invariant.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached shows D; desktop_main launches without HTTP.",
+        "rollback": "git checkout HEAD -- docker-compose.yml or revert."
+      },
+      {
+        "path": "docker-entrypoint.sh",
+        "change": "Removed web deploy entry docker-entrypoint.sh staged D.",
+        "approach": "git rm staged deletion.",
+        "reason": "Eliminate port-based web entry per port-free invariant.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached shows D; desktop_main launches without HTTP.",
+        "rollback": "git checkout HEAD -- docker-entrypoint.sh or revert."
+      },
+      {
+        "path": "requirements-prod.txt",
+        "change": "Slimmed requirements-prod.txt to '-r requirements.txt'.",
+        "approach": "Replaced file content with '-r requirements.txt' only.",
+        "reason": "Desktop-only distribution does not need container stack.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "File content is '-r requirements.txt'.",
+        "rollback": "Restore previous requirements-prod.txt from history."
+      },
+      {
+        "path": "run.py",
+        "change": "Removed web deploy entry run.py staged D.",
+        "approach": "git rm staged deletion.",
+        "reason": "Eliminate port-based web entry per port-free invariant.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "git diff --cached shows D; desktop_main launches without HTTP.",
+        "rollback": "git checkout HEAD -- run.py or revert."
+      },
+      {
+        "path": "tasks/TASK-003.json",
+        "change": "Recorded bounded scope, evidence, summaries, rollback and manifest for TASK-003 soft-remove.",
+        "approach": "Populated changed_paths/change_summary/evidence/documentation_updates to make staged soft-remove auditable via tools/project_handoff.py.",
+        "reason": "Make TASK-003 verifiable and allow independent review under AGENTS.md post-change protocol.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "verification": "tools/project_handoff.py --write and --check both pass; git diff --cached --stat shows 59 staged items.",
+        "rollback": "Restore previous TASK-003 record from git history if superseded."
+      }
+    ],
+    "documentation_updates": [
+      "PROJECT_ARCHITECTURE.md: 1-4 replaced to list app/legacy_web and desktop-only tree",
+      "DEPLOYMENT.md: replaced with 17-line desktop-only doc",
+      "README.md: fixed vendor path to app/legacy_web",
+      "CHANGELOG.md: appended Removed (TASK-003) bullet"
+    ],
+    "revision_checkpoint": "pending",
+    "diff_sha256": "6a88df7edcfc363132c38ac47c518fa855b8f7eff03021191038624ed67ab3a5",
+    "open_questions": [],
+    "known_limitations": [
+      "Independent review pending.",
+      "Full app/migration suite not run; bounded verification is py_compile + node --check + desktop_service tests.",
+      "Web surface soft-archived under app/legacy_web, not hard-deleted."
+    ]
+  }
+}

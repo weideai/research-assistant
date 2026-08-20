@@ -18,7 +18,7 @@ flowchart LR
     S --> EXT["可选外部服务"]
 ```
 
-仓库仍保留 Flask/Jinja 页面和 `run.py`，用于兼容既有工作流、测试和可选 Web 部署。新增桌面产品能力应进入共享服务层，不能在 Flask 路由中复制一套业务规则。
+Web 兼容层已归档至 `app/legacy_web/`（含原 Flask/Jinja 页面、`run.py`、模板与静态资源），仅作历史参考，不参与桌面构建与发布。新增桌面产品能力应进入共享服务层。
 
 ## 2. 运行入口
 
@@ -42,16 +42,7 @@ desktop_main.py
 - `app/desktop/bridge.py`：命令白名单和统一响应封装。
 - `app/desktop/native.py`：文件选择、目录打开、保存和窗口能力。
 
-### Web 兼容入口
-
-```text
-run.py
-  -> app.create_app()
-  -> 数据库迁移
-  -> Flask Server
-```
-
-`app/__init__.py` 负责 SQLAlchemy、Flask-Migrate、登录、CSRF、限流、安全响应头、蓝图和 CLI 配置。Web 入口属于兼容层，不能成为桌面功能的第二套实现。
+`app/__init__.py` 负责 SQLAlchemy、Flask-Migrate 与 CLI 配置的桌面精简初始化（不再注册 Flask 蓝图、登录、CSRF、限流与安全响应头）。历史 Web 兼容入口（`run.py` / 蓝图 / `app/legacy_web`）已归档，仅保留作回滚参考。
 
 ## 3. 目录职责
 
@@ -61,11 +52,9 @@ research_assistant/
 │   ├── desktop/                 # 桌面运行时、Bridge 和原生能力
 │   ├── desktop_ui/              # 正式桌面前端
 │   ├── services/                # 与界面和请求无关的业务服务
-│   ├── static/                  # Web 静态资源和第三方前端资源
-│   ├── templates/               # Flask/Jinja 兼容页面
+│   ├── legacy_web/              # 已归档 Web 兼容层（main.py/workspace.py/auth.py/admin.py/templates/static/run.py）
 │   ├── models.py                # SQLAlchemy 数据模型
-│   ├── main.py                  # 主要 Flask 兼容路由
-│   └── workspace.py             # 工作区相关兼容路由
+│   └── __init__.py              # 桌面精简初始化（SQLAlchemy/Migrate/配置）
 ├── migrations/                  # Alembic 数据库迁移
 ├── tests/                       # 单元、集成、迁移和桌面契约测试
 ├── packaging/                   # 平台打包与安装逻辑
@@ -73,8 +62,7 @@ research_assistant/
 ├── release/                     # 正式发布产物及校验值
 ├── workspace-template/          # 可复制的科研工作区模板
 ├── desktop_main.py              # 正式桌面入口
-├── run.py                       # Web 兼容入口
-└── requirements*.txt            # 运行、生产和构建依赖
+└── requirements*.txt            # 运行、生产和构建依赖（requirements-prod.txt 仅透传 requirements.txt）
 ```
 
 `instance/`、`tmp/`、`build/` 和 `dist/` 是本地数据或可再生成目录，不属于源码，也不应提交用户数据。
@@ -87,7 +75,7 @@ research_assistant/
 | 桌面适配层 | `app/desktop/bridge.py` | 命令白名单、协议版本、参数和统一错误 |
 | 原生适配层 | `app/desktop/native.py` | 受控访问操作系统文件和窗口能力 |
 | 应用服务层 | `app/services/` | 输入校验、事务、工作区隔离、并发控制和 DTO |
-| Web 兼容层 | `app/main.py`、`app/workspace.py`、模板和静态资源 | 既有 Flask/Jinja 工作流 |
+| Web 兼容层（已归档） | `app/legacy_web/`（原 `app/main.py`/`workspace.py`/templates/static） | 历史 Flask/Jinja 兼容工作流，仅归档 |
 | 持久化层 | `app/models.py` | 领域实体、关系、软删除、时间戳和行版本 |
 | 基础设施层 | `migrations/`、各专项 service | 迁移、备份、导出、AI、邮件、更新和外部集成 |
 
@@ -97,7 +85,7 @@ research_assistant/
 desktop_ui -> DesktopBridge -> app/services -> app/models
                          \-> NativeCapabilities
 
-Flask routes -> shared services/models
+legacy_web (archived) -> shared services/models  # 仅历史兼容，不新增行为
 ```
 
 Bridge 只做协议适配，不承载领域规则；UI 不直接访问数据库；业务校验和事务必须位于服务层。
