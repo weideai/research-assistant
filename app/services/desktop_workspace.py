@@ -8,7 +8,7 @@ from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.orm.exc import StaleDataError
 
 from app import db
-from app.models import LabRecord, LabRecordRevision, LabRecordStep, ResearchProject, User, Workspace, utcnow
+from app.models import LabRecord, LabRecordRevision, LabRecordStep, LibraryItem, ResearchProject, Task, User, Workspace, utcnow
 from .desktop_modules import DesktopModuleServiceMixin, _page_result, _sorted
 from .errors import ConflictError, NotFoundError, ServiceError, ValidationError
 
@@ -173,11 +173,33 @@ class DesktopApplicationService(DesktopModuleServiceMixin):
                 .filter_by(workspace_id=workspace.id, is_deleted=False)
                 .group_by(LabRecord.status).all()
             )
+            project_count = (
+                db.session.query(func.count(ResearchProject.id))
+                .filter_by(workspace_id=workspace.id, is_deleted=False)
+                .scalar() or 0
+            )
+            open_task_count = (
+                db.session.query(func.count(Task.id))
+                .filter_by(workspace_id=workspace.id, is_deleted=False)
+                .filter(Task.status != "done")
+                .scalar() or 0
+            )
+            file_count = (
+                db.session.query(func.count(LibraryItem.id))
+                .filter_by(workspace_id=workspace.id, is_deleted=False)
+                .scalar() or 0
+            )
             return {
                 "workspace": {"name": workspace.name, "schema_generation": workspace.schema_generation},
                 "projects": [self._project_dto(item) for item in projects],
                 "recent_records": [self._record_dto(item) for item in records],
-                "counts": {"projects": len(projects), "records": sum(counts.values()), **counts},
+                "counts": {
+                    "projects": project_count,
+                    "records": sum(counts.values()),
+                    "open_tasks": open_task_count,
+                    "files": file_count,
+                    **counts,
+                },
             }
         return self._run(query)
 

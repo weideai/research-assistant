@@ -1,0 +1,251 @@
+{
+  "schema_version": 1,
+  "task": {
+    "id": "TASK-002",
+    "title": "Integrate the approved research workspace UI into the desktop app",
+    "status": "IN_PROGRESS",
+    "owner": "executor",
+    "module_id": "MOD-001",
+    "depends_on": []
+  },
+  "requirements": [
+    "FR-PROJ-01",
+    "FR-REC-01",
+    "FR-ACT-01",
+    "FR-FILE-01"
+  ],
+  "contracts": [
+    "dashboard.get"
+  ],
+  "scope": {
+    "allowed_paths": [
+      "app/desktop_ui/index.html",
+      "app/desktop_ui/desktop.css",
+      "app/desktop_ui/desktop.js",
+      "app/desktop_ui/desktop_research.js",
+      "app/services/desktop_workspace.py",
+      "tests/test_desktop_service.py",
+      "docs/product-plan/16-DESKTOP-BRIDGE-API.md"
+    ],
+    "control_paths": [
+      "tasks/TASK-002.json"
+    ],
+    "evidence_paths": [],
+    "forbidden_paths": [
+      "database schema or migrations",
+      "Flask compatibility routes",
+      "release artifacts",
+      "unrelated user changes"
+    ]
+  },
+  "outputs": [
+    "Approved sidebar and dashboard visual system in the production desktop UI",
+    "Accurate dashboard summary fields for projects, records, open tasks, and files",
+    "Updated dashboard Bridge contract documentation"
+  ],
+  "verification": {
+    "test_ids": [],
+    "acceptance_ids": [],
+    "methods": [
+      "Desktop JavaScript syntax checks",
+      "Targeted desktop service test",
+      "Bounded static HTML structure check"
+    ]
+  },
+  "evidence": {
+    "state": "verified",
+    "expected_paths": [],
+    "actual_paths": [],
+    "runs": []
+  },
+  "rollback": {
+    "code": "Revert the bounded desktop UI, dashboard service, and contract-test edits together.",
+    "docs": "Restore the previous dashboard.get response description.",
+    "schema": "not_applicable: this task changes no database schema or migration.",
+    "data": "not_applicable: this task does not migrate or delete user data.",
+    "config": "not_applicable: this task changes no runtime configuration.",
+    "release": "not_applicable: this task does not rebuild or publish artifacts."
+  },
+  "execution_context": {
+    "base_commit": "fced23510840aa5e5ece569bf2348c83dc891e9a",
+    "branch_or_worktree": "main",
+    "lease_id": null,
+    "lease_expires_at": null,
+    "integration_owner": "human-owner",
+    "contract": "dashboard.get"
+  },
+  "review": {
+    "required": true,
+    "reviewer": "independent-reviewer",
+    "disposition": "pending"
+  },
+  "handoff": {
+    "changed_paths": [
+      "app/desktop_ui/index.html",
+      "app/desktop_ui/desktop.css",
+      "app/desktop_ui/desktop.js",
+      "app/desktop_ui/desktop_research.js",
+      "app/services/desktop_workspace.py",
+      "tests/test_desktop_service.py",
+      "tasks/TASK-002.json"
+    ],
+    "change_manifest": [
+      {
+        "path": "app/desktop_ui/desktop.css",
+        "sha256": "fef3cf85650d63847943dd9bdee27085f8301f48b69f752de0a927374b661a6f",
+        "state": "present"
+      },
+      {
+        "path": "app/desktop_ui/desktop.js",
+        "sha256": "e72673032a6db1cef6a12a3e154a909ae4ed9ec42e7d876099cc040455d1ec2f",
+        "state": "present"
+      },
+      {
+        "path": "app/desktop_ui/desktop_research.js",
+        "sha256": "ac61bec02a59c0884e4b19640a5d97a6b1b8f2cfb5b7685642b4e1043fc3f070",
+        "state": "present"
+      },
+      {
+        "path": "app/desktop_ui/index.html",
+        "sha256": "1c1e34af924d5042a06339a8fb1da620437a748edf3c5634d56b88a9e4c98060",
+        "state": "present"
+      },
+      {
+        "path": "app/services/desktop_workspace.py",
+        "sha256": "271ee7b494eef5666b9950e55f3b2f7043b832d09bd505c29d1de4f1e8ef0b8a",
+        "state": "present"
+      },
+      {
+        "path": "tests/test_desktop_service.py",
+        "sha256": "221f023f579f95fb425bd90052846f3a08031dcfaaebce4f766ea9f10b5b218c",
+        "state": "present"
+      }
+    ],
+    "change_summary": [
+      {
+        "path": "app/desktop_ui/index.html",
+        "change": "Rebuilt sidebar per approved preview (brand + workspace-switcher + WORKSPACE/RESOURCES/SYSTEM grouping) and added dashboard-metrics 4-card overview bound to dashboard.get counts.",
+        "approach": "Reconstructed sidebar markup with workspace-switcher button (#sidebar-workspace-name, LOCAL WORKSPACE), nav sections for workspace/resources/system, sidebar-footer with hard-drive/settings meta and #sidebar-version, and dashboard-metrics grid using id=dashboard-*-count and data-view navigation (home/projects/records/tasks/files/literature etc).",
+        "reason": "Bring production desktop UI in line with approved research workspace visual system (docs/design-preview/rlab-ui-preview.html) without introducing new product surfaces; expose accurate counts via existing dashboard.get contract.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "test_ids": [],
+        "verification": "Bounded static HTML structure check (dashboard-metrics 4 cards, data-view/ids, sidebar-* markers) + node --check for 5 desktop JS files passed.",
+        "rollback": "Revert index.html to pre-TASK-002 navigation/sidebar layout and remove dashboard-metrics block."
+      },
+      {
+        "path": "app/desktop_ui/desktop.css",
+        "change": "Restored design tokens to approved values and restored workspace-switcher/dashboard-metric/sidebar-footer styles with corrected layout.",
+        "approach": "Set --canvas #f6f8fb, --ink #172438, --accent #5969e8, --sidebar-width 212px, Segoe UI stack, corrected app-shell/sidebar/topbar layout, and added .workspace-switcher/.dashboard-metric/.sidebar-footer token-driven styles.",
+        "reason": "Match approved preview tokens and layout so the rebuilt sidebar and dashboard cards render with correct density, contrast and hierarchy.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "test_ids": [],
+        "verification": "Visual token check via CSS diff + node --check passed; bounded HTML check confirms 4-card metrics render with new classes.",
+        "rollback": "Restore previous token values and remove .workspace-switcher/.dashboard-metric/.sidebar-footer rules."
+      },
+      {
+        "path": "app/desktop_ui/desktop.js",
+        "change": "Extended dashboard.get mock/default to include open_tasks/files and wired loadWorkspace() to populate sidebar workspace name and version.",
+        "approach": "Supplemented fallback mock counts with open_tasks/files fields and updated loadWorkspace() to set #sidebar-workspace-name and #sidebar-version from workspace/app_info after dashboard.get.",
+        "reason": "Keep frontend resilient when testing without backend and surface workspace identity/version per approved header/sidebar design while honoring the 4-field stable counts contract.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "test_ids": [],
+        "verification": "node --check app/desktop_ui/desktop.js passed; bounded check confirms sidebar-* ids are populated.",
+        "rollback": "Remove mock open_tasks/files supplement and restore previous loadWorkspace without sidebar backfill."
+      },
+      {
+        "path": "app/desktop_ui/desktop_research.js",
+        "change": "Bound home() dashboard counts rendering to counts.projects/records/open_tasks/files.",
+        "approach": "Updated home() to read all four stable counts from dashboard.get response and render into #dashboard-*-count elements (projects/records/open_tasks/files).",
+        "reason": "Surface the corrected dashboard contract in the overview view so totals reflect true workspace state rather than truncated lists.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "test_ids": [],
+        "verification": "node --check desktop_research.js passed; manual bounded check verifies 4-card binding.",
+        "rollback": "Restore previous home() binding that only covered projects/records/statusBreakdown."
+      },
+      {
+        "path": "app/services/desktop_workspace.py",
+        "change": "Fixed dashboard() to return accurate workspace-scoped counts for projects/records/open_tasks/files and corrected project total that previously used len(projects) capped at 5.",
+        "approach": "Imported LibraryItem and Task, added three workspace-scoped COUNT queries: ResearchProject where is_deleted=False, Task where is_deleted=False and status!='done', LibraryItem where is_deleted=False; replaced len(projects) with project_count scalar; returned counts={projects, records, open_tasks, files, ...statusBreakdown} alongside workspace/projects/recent_records.",
+        "reason": "Enforce dashboard.get stable 4-field contract defined in docs/product-plan/16-DESKTOP-BRIDGE-API.md section 4.1 and fix miscount caused by recent-project limit.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "test_ids": [],
+        "verification": "tests/test_desktop_service.py (3 passed, incl. new test_dashboard_returns_complete_workspace_counts with 7 projects/1 task/1 file) with --basetemp workaround; counts validated workspace_id=1 scoping and is_deleted filtering.",
+        "rollback": "Revert imports and COUNT queries, restore counts={projects: len(projects), records: sum(...), **counts}."
+      },
+      {
+        "path": "tests/test_desktop_service.py",
+        "change": "Added test_dashboard_returns_complete_workspace_counts covering the 4-field contract and fixed LibraryItem construction to use workspace_id.",
+        "approach": "Inserted test creating 7 projects + 1 open task + 1 LibraryItem(workspace_id=1, display_name/original_name) and asserting counts.projects==7, records==0, open_tasks==1, files==1; corrected prior LibraryItem(user_id=...) which mismatched models.py:717 (LibraryItem has workspace_id, no user_id).",
+        "reason": "Guard the dashboard.get contract against truncation and scoping regressions; align test fixture with actual model schema (app/models.py:717, app/services/desktop_modules.py:2446).",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "test_ids": [],
+        "verification": ".venv Scripts python -m pytest tests/test_desktop_service.py -v --basetemp=./tmp_pytest => 3 passed.",
+        "rollback": "Remove test_dashboard_returns_complete_workspace_counts and restore previous LibraryItem fixture if re-added elsewhere."
+      },
+      {
+        "path": "tasks/TASK-002.json",
+        "change": "Recorded bounded scope, evidence, summaries, review and rollback for TASK-002 integration.",
+        "approach": "Populated changed_paths/change_summary/evidence/known_limitations to make the dirty-worktree change bounded and handoff-ready under AGENTS.md post-change protocol.",
+        "reason": "Make TASK-002 auditable and verifiable via tools/project_handoff.py manifest and independent review.",
+        "requirement_ids": [
+          "FR-PROJ-01",
+          "FR-REC-01",
+          "FR-ACT-01",
+          "FR-FILE-01"
+        ],
+        "module_id": "MOD-001",
+        "test_ids": [],
+        "verification": "tools/project_handoff.py --write then check must both pass with no stale manifest.",
+        "rollback": "Remove TASK-002 record only if this integration is superseded and TRACEABILITY/ARCHITECTURE are updated."
+      }
+    ],
+    "documentation_updates": [
+      "docs/product-plan/16-DESKTOP-BRIDGE-API.md: already documents dashboard.get stable 4-field counts (projects/records/open_tasks/files) at section 4.1; no diff required in this task - listed as stable contract documentation.",
+      "docs/DESIGN-REVIEW-2026-08.md and docs/design-preview/: preview artifacts are gitignored per PROJECT_ARCHITECTURE section 8.6 and TASK-002 allowed_paths; intentionally not added to changed_paths."
+    ],
+    "revision_checkpoint": "pending",
+    "diff_sha256": "ba4aef0ef28583b1cc954d175485178b0b225288331a892e45fd8c9de267c2b5",
+    "open_questions": [],
+    "known_limitations": [
+      "Independent review by independent-reviewer is still pending.",
+      "Windows WebView2 packaged-build mismatch behavior not exercised for this UI scope.",
+      "Full application and migration suites not run; verification is bounded to JS syntax + targeted desktop service test + static HTML check.",
+      "docs/DESIGN-REVIEW-2026-08.md and docs/design-preview/ are gitignored preview artifacts, not part of delivered diff."
+    ]
+  }
+}

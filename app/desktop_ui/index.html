@@ -17,29 +17,36 @@
 <body>
   <div class="app-shell">
     <aside class="sidebar" aria-label="主导航">
-      <div class="brand"><span class="brand-mark" aria-hidden="true">R</span><strong>R/LAB</strong></div>
+      <div class="brand"><span class="brand-mark" aria-hidden="true">R</span><span><strong>R/LAB</strong><small>科研工作台</small></span></div>
+      <button class="workspace-switcher" data-view="home" type="button">
+        <span class="workspace-switcher-mark"><i data-lucide="microscope"></i></span>
+        <span><strong id="sidebar-workspace-name">科研工作区</strong><small>LOCAL WORKSPACE</small></span>
+        <i data-lucide="chevrons-up-down"></i>
+      </button>
       <nav id="primary-nav">
-        <section><p>研究</p>
-          <button class="nav-item active" data-view="home" type="button"><i data-lucide="house"></i><span>首页</span></button>
+        <section><p><span>工作</span><small>WORKSPACE</small></p>
+          <button class="nav-item active" data-view="home" type="button"><i data-lucide="layout-dashboard"></i><span>总览</span></button>
           <button class="nav-item" data-view="projects" type="button"><i data-lucide="folder-kanban"></i><span>项目</span></button>
           <button class="nav-item" data-view="records" type="button"><i data-lucide="flask-conical"></i><span>实验记录</span></button>
           <button class="nav-item" data-view="record-export" type="button"><i data-lucide="download"></i><span>导出中心</span></button>
+          <button class="nav-item" data-view="tasks" type="button"><i data-lucide="list-checks"></i><span>任务</span></button>
+          <button class="nav-item" data-view="calendar" type="button"><i data-lucide="calendar-days"></i><span>日历</span></button>
         </section>
-        <section><p>资料</p>
+        <section><p><span>资料</span><small>RESOURCES</small></p>
           <button class="nav-item" data-view="literature" type="button"><i data-lucide="library-big"></i><span>文献库</span></button>
           <button class="nav-item" data-view="notes" type="button"><i data-lucide="notebook-pen"></i><span>笔记</span></button>
           <button class="nav-item" data-view="files" type="button"><i data-lucide="folder-open"></i><span>文件库</span></button>
+          <button class="nav-item" data-view="weekly" type="button"><i data-lucide="notebook-tabs"></i><span>周报</span></button>
         </section>
-        <section><p>安排与总结</p>
-          <button class="nav-item" data-view="tasks" type="button"><i data-lucide="list-checks"></i><span>任务</span></button>
-          <button class="nav-item" data-view="calendar" type="button"><i data-lucide="calendar-days"></i><span>日历</span></button>
-          <button class="nav-item" data-view="weekly" type="button"><i data-lucide="presentation"></i><span>周报</span></button>
-        </section>
-        <section><p>系统</p>
+        <section><p><span>系统</span><small>SYSTEM</small></p>
           <button class="nav-item" data-view="recycle" type="button"><i data-lucide="trash-2"></i><span>回收站</span></button>
-          <button class="nav-item" data-view="settings" type="button"><i data-lucide="settings-2"></i><span>设置</span></button>
         </section>
       </nav>
+      <footer class="sidebar-footer">
+        <button class="sidebar-meta" data-view="files" type="button"><span><i data-lucide="hard-drive"></i></span><span><strong>本地工作区</strong><small>数据保存在此设备</small></span></button>
+        <button class="sidebar-meta" data-view="settings" type="button"><span><i data-lucide="settings-2"></i></span><span><strong>设置</strong><small>工作区与执行偏好</small></span></button>
+        <div class="sidebar-version"><span>R/LAB</span><small id="sidebar-version">本地桌面版</small></div>
+      </footer>
     </aside>
 
     <header class="topbar">
@@ -57,7 +64,13 @@
 
     <main class="workspace" id="workspace" tabindex="-1">
       <section class="view active" data-view-panel="home">
-        <header class="page-head"><div><h1>今天 · <span id="today-label"></span></h1><p>继续工作</p></div><div class="page-actions"><button class="button primary" data-open="record-dialog" type="button"><i data-lucide="plus"></i>新建实验记录</button><button class="button" data-open="project-dialog" type="button"><i data-lucide="folder-plus"></i>新建项目</button></div></header>
+        <header class="page-head"><div><h1>总览</h1><p><span id="today-label"></span> · 继续推进今天的科研工作</p></div><div class="page-actions"><button class="button" data-open="project-dialog" type="button"><i data-lucide="folder-plus"></i>新建项目</button><button class="button primary" data-open="record-dialog" type="button"><i data-lucide="plus"></i>新建实验记录</button></div></header>
+        <div class="dashboard-metrics" aria-label="工作区概览">
+          <button class="dashboard-metric" data-view="projects" type="button"><span><i data-lucide="folder-kanban"></i></span><span><small>项目</small><strong id="dashboard-project-count">0</strong><em>全部研究项目</em></span></button>
+          <button class="dashboard-metric" data-view="records" type="button"><span><i data-lucide="flask-conical"></i></span><span><small>实验记录</small><strong id="dashboard-record-count">0</strong><em>持续积累的实验依据</em></span></button>
+          <button class="dashboard-metric" data-view="tasks" type="button"><span><i data-lucide="circle-check-big"></i></span><span><small>待办任务</small><strong id="dashboard-task-count">0</strong><em>需要继续处理</em></span></button>
+          <button class="dashboard-metric" data-view="files" type="button"><span><i data-lucide="folder-open"></i></span><span><small>报告与文件</small><strong id="dashboard-file-count">0</strong><em>本地可追溯资料</em></span></button>
+        </div>
         <button class="resume-strip" id="resume-strip" type="button" hidden><span class="object-icon"><i data-lucide="flask-conical"></i></span><span><b id="resume-title"></b><small id="resume-project"></small></span><em><i data-lucide="circle-check"></i>已保存</em><time id="resume-time"></time><span class="button compact">继续编辑</span></button>
         <div class="dashboard-grid">
           <section class="panel focus-panel"><header><h2>今日焦点</h2></header><div id="focus-list" class="focus-list"></div></section>

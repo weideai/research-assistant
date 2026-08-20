@@ -1,7 +1,7 @@
 import pytest
 
 from app import db
-from app.models import LabRecordRevision, User
+from app.models import LabRecordRevision, LibraryItem, Task, User
 from app.services.desktop_workspace import ConflictError, DesktopApplicationService
 
 
@@ -35,6 +35,27 @@ def test_record_centric_desktop_workflow(app):
     assert service.dashboard()["counts"]["in_progress"] == 1
     with app.app_context():
         assert LabRecordRevision.query.count() == 1
+
+
+def test_dashboard_returns_complete_workspace_counts(app):
+    service = service_with_user(app)
+    for index in range(7):
+        service.create_project({"title": f"项目 {index + 1}"})
+    service.save_task({"title": "待处理任务"})
+
+    with app.app_context():
+        db.session.add(LibraryItem(
+            workspace_id=1,
+            display_name="结果图.png",
+            original_name="结果图.png",
+        ))
+        db.session.commit()
+
+    counts = service.dashboard()["counts"]
+    assert counts["projects"] == 7
+    assert counts["records"] == 0
+    assert counts["open_tasks"] == 1
+    assert counts["files"] == 1
 
 
 def test_record_update_rejects_stale_row_version(app):

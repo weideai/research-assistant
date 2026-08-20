@@ -66,7 +66,7 @@
     switch (request.command) {
       case "system.ping": data={status:"ok"}; break;
       case "system.app_info": data={version:"desktop-preview",transport:"in-process-js-bridge",http_listener:false,protocol_version:1,protocol_compatibility:{minimum:1,maximum:1},capabilities:["ai.changesets","records.batch_export","zotero.jobs"],commands:[],deprecated_commands:{"record.export_batch":{replacement:"record.export.batch",remove_in_protocol:2}}}; break;
-      case "dashboard.get": data={workspace:{name:"R/LAB 工作区"},projects:demo.projects,recent_records:demo.records,counts:{projects:3,records:4,in_progress:1,awaiting_analysis:1,completed:2}}; break;
+      case "dashboard.get": data={workspace:{name:"R/LAB 工作区"},projects:demo.projects,recent_records:demo.records,counts:{projects:3,records:4,open_tasks:demo.tasks.filter(x=>x.status!=="done").length,files:demo.files.length,in_progress:1,awaiting_analysis:1,completed:2}}; break;
       case "project.list": data=demo.projects.filter(x=>!p.search||`${x.title} ${x.code}`.includes(p.search)); break;
        case "project.create": data={id:Date.now(),title:p.title,code:p.code||"",objective:p.objective||"",status:"active",status_label:"进行中",record_count:0,row_version:1,updated_at:new Date().toISOString()},demo.projects.unshift(data); break;
        case "project.update": {const item=demo.projects.find(x=>x.id===Number(p.id));if(!item)throw new Error("项目不存在");Object.assign(item,{title:p.title,code:p.code||"",objective:p.objective||"",status:p.status||item.status,status_label:statusLabels[p.status||item.status],row_version:item.row_version+1,updated_at:new Date().toISOString()});data=item;break;}
@@ -244,6 +244,9 @@
     const [dashboard,projects,records,info]=await Promise.all([invoke("dashboard.get"),invoke("project.list"),invoke("record.list"),invoke("system.app_info")]);
     state.dashboard=dashboard;state.projects=projects;state.records=records;fillProjectOptions();
     state.appInfo=validateProtocol(info);
+    const workspaceName=dashboard?.workspace?.name||"科研工作区";
+    if($("#sidebar-workspace-name"))$("#sidebar-workspace-name").textContent=workspaceName;
+    if($("#sidebar-version"))$("#sidebar-version").textContent=info?.version?`v${info.version}`:"本地桌面版";
   }
   function openDialog(id){const dialog=document.getElementById(id);if(!dialog||dialog.open)return;const trigger=document.activeElement;dialog.addEventListener("close",()=>trigger?.focus?.(),{once:true});dialog.showModal();}
   async function nativeDialog(command,payload){try{return await invoke(command,payload)||[];}catch(error){toast(error.message);return [];}}
