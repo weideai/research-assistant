@@ -10,16 +10,18 @@ from app.version import APP_VERSION
 from .bridge import DesktopBridge
 from .native import NativeCapabilities
 from .single_instance import SingleInstance
+from .workspace_location import WorkspaceLocationError, local_app_root, saved_workspace_directory
 
 
 APP_TITLE = "R/LAB Research Assistant"
 
 
-def local_app_root():
-    return Path(os.getenv("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "ResearchAssistant"
-
-
 def instance_dir():
+    saved = saved_workspace_directory()
+    if saved is not None:
+        if not saved.is_dir():
+            raise WorkspaceLocationError("上次选择的工作区不可用，请重新连接存有数据的磁盘或文件夹。")
+        return saved.resolve()
     configured = os.getenv("RESEARCH_ASSISTANT_INSTANCE_DIR", "").strip()
     return Path(configured).expanduser().resolve() if configured else local_app_root() / "data"
 
@@ -60,14 +62,32 @@ def native_message(message, flags=0x10):
 def initialize_application():
     from app import create_app, db
     from app.migration_service import run_migrations_with_backup
+    from sqlalchemy.engine import URL
 
-    flask_app = create_app()
+    desktop_config = {"ALLOW_PRIVATE_API_URLS": True}
+    selected = saved_workspace_directory()
+    if selected is not None:
+        data = instance_dir()
+        desktop_config.update(
+            SQLALCHEMY_DATABASE_URI=URL.create("sqlite", database=str(data / "research.db")),
+            APPEARANCE_UPLOAD_DIR=str(data / "uploads" / "backgrounds"),
+            ATTACHMENT_UPLOAD_DIR=str(data / "uploads" / "experiments"),
+            AI_UPLOAD_DIR=str(data / "uploads" / "assistant"),
+            KNOWLEDGE_UPLOAD_DIR=str(data / "uploads" / "knowledge"),
+            WEEKLY_REPORT_UPLOAD_DIR=str(data / "uploads" / "weekly-reports"),
+            BACKUP_DIR=str(data / "backups"),
+        )
+    flask_app = create_app(desktop_config)
     run_migrations_with_backup(flask_app, db, resource_root() / "migrations")
     return flask_app
 
 
 def run_desktop(debug=False):
-    data_dir = configure_environment()
+    try:
+        data_dir = configure_environment()
+    except (OSError, WorkspaceLocationError) as exc:
+        native_message(f"无法打开工作区。\n\n{exc}")
+        return 2
     page = desktop_page()
     if not page.is_file():
         native_message(f"桌面界面资源缺失：\n{page}")

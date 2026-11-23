@@ -23,6 +23,34 @@
   async function purgeTrash(items){if(!items.length||!await R.confirmAction("永久删除",`确认永久删除 ${items.length} 项吗？此操作不可恢复。`))return;for(const item of items)await invoke("trash.purge",{entity_type:item.entity_type,id:Number(item.id)});items.forEach(item=>trashSelection.delete(trashKey(item)));toast(`已永久删除 ${items.length} 项`);await trash();}
 
   async function settings(){settingsData=await invoke("settings.get",{});showSettings("workspace");}
+  let pendingWorkspacePath = "";
+
+  async function chooseWorkspaceDirectory(button) {
+    button.disabled = true;
+    try {
+      const choice = await invoke("workspace.directory.choose");
+      if (!choice || !button.isConnected) return;
+      const current = settingsData.workspace.data_path;
+      if (choice.path === current && !pendingWorkspacePath) {
+        toast("当前已使用此文件夹");
+        return;
+      }
+      const action = choice.has_workspace ? "下次启动会打开所选工作区。" : "下次启动会在所选文件夹创建工作区。";
+      if (!await R.confirmAction("选择工作区文件夹", `${action}\n${choice.path}`)) return;
+      const saved = await invoke("workspace.directory.save", {path:choice.path});
+      pendingWorkspacePath = saved.path === current ? "" : saved.path;
+      if (button.isConnected) {
+        $("#workspace-directory-status").textContent = pendingWorkspacePath
+          ? `重启后使用 ${pendingWorkspacePath}`
+          : "将继续使用当前工作区。";
+      }
+    } catch (error) {
+      if (button.isConnected) $("#workspace-directory-status").textContent = error.message;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   let apiPresetChoice;
   let apiPresetTemplate = "";
   const deepSeekApi = "https://api.deepseek.com";
@@ -151,22 +179,134 @@
   }
 
   function showSettings(section){$$('[data-settings-section]').forEach(x=>{const active=x.dataset.settingsSection===section;x.classList.toggle("active",active);x.setAttribute("aria-selected",String(active));x.tabIndex=active?0:-1;});const node=$("#settings-content"),d=settingsData;const templates={
-    workspace:`<header><h2>工作区</h2><p>本机单工作区数据与时区</p></header><form data-settings-form="workspace"><label>工作区名称<input name="name" value="${escapeHtml(d.workspace.name)}" required></label><label>时区<input name="timezone" value="${escapeHtml(d.workspace.timezone)}" required></label><label>数据目录<input value="${escapeHtml(d.workspace.data_path)}" readonly></label><button class="button primary" type="submit"><i data-lucide="save"></i>保存</button></form>`,
+    workspace:`<header><h2>工作区</h2><p>本机工作区数据与时区</p></header>
+      <form data-settings-form="workspace">
+        <label>工作区名称<input name="name" value="${escapeHtml(d.workspace.name)}" required></label>
+        <label>时区<input name="timezone" value="${escapeHtml(d.workspace.timezone)}" required></label>
+        <div class="workspace-directory-row">
+          <label>当前数据目录<input value="${escapeHtml(d.workspace.data_path)}" readonly></label>
+          <button class="button" type="button" id="workspace-choose-directory"><i data-lucide="folder-open"></i>选择文件夹</button>
+        </div>
+        <p class="api-feedback" id="workspace-directory-status" role="status">${pendingWorkspacePath ? `重启后使用 ${escapeHtml(pendingWorkspacePath)}` : "可打开已有工作区，也可为新工作区选择文件夹。"}</p>
+        <button class="button primary" type="submit"><i data-lucide="save"></i>保存</button>
+      </form>`,
     executors:`<header><h2>执行者</h2><p>统一管理可分配到项目和实验记录的人员</p></header><div class="settings-list">${d.executors.map(x=>`<div><i data-lucide="user-round"></i><span><b>${escapeHtml(x.name)}</b><small>${escapeHtml(x.role||"未设置角色")}</small></span>${statusBadge(x.is_active?"active":"disabled")}</div>`).join("")||`<p class="muted">尚无执行者</p>`}</div><form class="inline-settings-form" data-settings-form="executor"><input name="name" placeholder="执行者姓名" required><input name="role" placeholder="角色"><button class="button primary" type="submit"><i data-lucide="plus"></i>添加</button></form>`,
     save:`<header><h2>保存</h2><p>自动保存与恢复策略</p></header><form data-settings-form="save"><label class="toggle-row"><span><b>自动保存</b><small>编辑实验记录时定时保存</small></span><input name="autosave" type="checkbox" ${d.save.autosave?"checked":""}></label><label>保存间隔（秒）<input name="interval" type="number" min="5" max="600" value="${d.save.interval}"></label><button class="button primary" type="submit"><i data-lucide="save"></i>保存</button></form>`,
     zotero:`<header><h2>Zotero</h2><p>只读连接 Zotero Local API</p></header><div class="status-banner ${d.zotero.state}"><i data-lucide="library"></i><span><b>${d.zotero.state==="connected"?"已连接":"未连接"}</b><small>不会读写 zotero.sqlite</small></span></div><form data-settings-form="zotero"><label>Local API 地址<input name="base_url" value="${escapeHtml(d.zotero.base_url)}" required></label><button class="button primary" type="submit"><i data-lucide="save"></i>保存</button></form>`,
     api: section === "api" ? renderApiSettings(d) : "",
     appearance:`<header><h2>主题与背景</h2><p>四套皮肤共享相同的信息结构</p></header><label>界面皮肤<select id="settings-skin"><option value="soft-lab">柔雾实验室</option><option value="ide-light">Indigo Lab</option><option value="ide-dark">Research OS</option><option value="swiss">经典 Swiss</option></select></label><div class="skin-preview-row"><button data-set-skin="soft-lab">Soft Lab</button><button data-set-skin="ide-light">Indigo</button><button data-set-skin="ide-dark">Research OS</button><button data-set-skin="swiss">Swiss</button></div>`,
-    backup:`<header><h2>备份</h2><p>保存数据库快照或完整工作区归档</p></header><div class="action-block"><i data-lucide="database-backup"></i><span><b>创建备份</b><small>保存到本地 backups 目录</small></span><label>范围<select id="backup-scope"><option value="workspace">完整工作区</option><option value="database">仅数据库</option></select></label><button class="button primary" id="create-backup"><i data-lucide="archive"></i>立即备份</button></div><p>完整工作区包含数据库及 library、uploads 中的托管文件。外部链接原文件不包含；换机恢复后需重新配置 API 凭据。</p><p id="backup-result" class="muted"></p>`,
+    backup:`<header><h2>备份</h2><p>保存数据库快照或完整工作区归档</p></header>
+      <div class="action-block backup-action">
+        <div class="backup-description"><i data-lucide="database-backup"></i><div><b>创建备份</b><small>保存到本地 backups 目录</small></div></div>
+        <div class="backup-controls">
+          <label>范围<select id="backup-scope"><option value="workspace">完整工作区</option><option value="database">仅数据库</option></select></label>
+          <button class="button primary" id="create-backup" type="button"><i data-lucide="archive"></i>立即备份</button>
+        </div>
+      </div>
+      <p>完整工作区包含数据库及 library、uploads 中的托管文件。外部链接原文件不包含；换机恢复后需重新配置 API 凭据。</p>
+      <p id="backup-result" class="muted" role="status"></p>`,
     updates:`<header><h2>更新</h2><p>原位升级保留本地数据和附件</p></header><div class="status-banner connected"><i data-lucide="badge-check"></i><span><b>当前版本已就绪</b><small>更新前会创建备份并执行迁移预检</small></span></div><button class="button"><i data-lucide="refresh-cw"></i>检查更新</button>`,
-    about:`<header><h2>关于</h2><p>独立桌面科研记录与资料管理工具</p></header><div class="about-product"><span class="brand-mark">R</span><div><h3>${escapeHtml(d.about.product)}</h3><p>作者：${escapeHtml(d.about.author)}</p><small>正式进程不监听 HTTP/TCP 端口</small></div></div>`,
+    about:`<header><h2>关于</h2><p>独立桌面科研记录与资料管理工具</p></header><div class="about-product"><span class="brand-mark">R</span><div><h3>${escapeHtml(d.about.product)}</h3><p>作者：${escapeHtml(d.about.author)}</p><small>正式进程不监听 HTTP/TCP 端口</small>
+      ${d.about.repository_url ? `<a class="github-link" href="${escapeHtml(d.about.repository_url)}" data-open-url="${escapeHtml(d.about.repository_url)}"><i data-lucide="github"></i>${escapeHtml(d.about.repository_url.replace(/^https:\/\//, ""))}</a>` : ""}</div></div>`,
   };node.innerHTML=templates[section]||templates.workspace;if(section==="appearance")$("#settings-skin").value=document.documentElement.dataset.skin;icons();}
   async function saveSettings(form){const payload=Object.fromEntries(new FormData(form));payload.section=form.dataset.settingsForm;for(const checkbox of $$('input[type="checkbox"]',form))payload[checkbox.name]=checkbox.checked;try{await invoke("settings.save",payload);settingsData=await invoke("settings.get",{});showSettings(payload.section==="executor"?"executors":payload.section);toast("设置已保存");}catch(error){toast(error.message);}}
 
-  function currentAiTarget(){const projectId=Number($("#ai-project").value),target=state.projects.find(item=>item.id===projectId);return {type:"project",target};}
   function aiValue(value){if(value===null||value===undefined||value==="")return "清空";if(typeof value==="object")return JSON.stringify(value);return String(value);}
-  function renderAiConversation(){const node=$("#ai-output");if(!aiMessages.length){node.innerHTML=`<div class="assistant-welcome"><i data-lucide="sparkles"></i><b>从一个项目开始</b><p>可选择相关实验记录，也可仅使用项目信息。</p></div>`;icons();return;}node.innerHTML=`<div class="assistant-chat-thread">${aiMessages.map((message,index)=>`<article class="assistant-message ${message.role}"><span>${message.role==="user"?"你":"AI"}</span><div><p>${escapeHtml(message.content||"")}</p>${message.references?.length?`<div class="assistant-references">${message.references.map(reference=>`<a href="${escapeHtml(reference.url)}" data-open-url="${escapeHtml(reference.url)}">${escapeHtml(reference.title||reference.url)}</a>`).join("")}</div>`:""}${message.proposal&&Object.keys(message.proposal).length?`<div class="diff-list">${Object.entries(message.proposal).map(([field,value])=>`<label><input type="checkbox" data-ai-field="${field}" checked><span><b>${escapeHtml(message.schema?.[field]?.label||field)}</b><small>${escapeHtml(aiValue(value))}</small></span></label>`).join("")}</div>${message.changeStatus==="proposed"||!message.changeStatus?`<button class="button compact primary" id="apply-ai-change"><i data-lucide="check"></i>应用已选字段</button>`:""}`:""}<footer class="assistant-message-actions"><button class="text-button" data-ai-message-copy="${index}" type="button"><i data-lucide="copy"></i>复制</button>${message.role==="assistant"&&index===aiMessages.length-1?`<button class="text-button" data-ai-message-regenerate="${index}" type="button"><i data-lucide="refresh-cw"></i>重新生成</button>`:""}</footer></div></article>`).join("")}</div>`;node.scrollTop=node.scrollHeight;icons();}
-  async function aiGenerate(promptOverride=null){const {type,target}=currentAiTarget(),prompt=typeof promptOverride==="string"?promptOverride:$("#ai-prompt").value.trim();if(!target?.id)return toast("请先选择项目历史");if(!prompt)return toast("请输入消息");if(aiRecordProjectId!==target.id){aiRecordProjectId=target.id;aiRecordSelection.clear();syncAiRecordCount();}const button=$("#ai-generate");button.disabled=true;try{const recordIds=[...aiRecordSelection];const preview=await invoke("ai.preview",{target_type:type,target_id:target.id,source_ids:recordIds,records_explicit:true});const result=await invoke("ai.propose",{target_type:type,target_id:target.id,prompt,conversation_id:currentConversationId,record_ids:recordIds,web_access:$("#ai-web-access").checked,source_snapshot:preview.source_snapshot});currentConversationId=result.conversation_id;aiChange=result;lastAiPrompt=prompt;lastAiReply=result.reply;aiMessages.forEach(message=>message.proposal={});aiMessages.push({role:"user",content:prompt},{role:"assistant",content:result.reply,proposal:result.proposal||{},schema:result.field_schema||{},changeId:result.id,changeStatus:result.status,references:result.references||[]});$("#ai-prompt").value="";renderAiConversation();}catch(error){toast(error.message);}finally{button.disabled=false;}}
+  function renderAiDraft(draft, index) {
+    if (!draft) return "";
+    const label = draft.kind === "project" ? "项目" : "实验记录";
+    return `<div class="assistant-create-draft">
+      <b>${label}草稿</b><span>${escapeHtml(draft.title)}</span>
+      <button type="button" class="button compact primary" data-ai-create-draft="${index}">核对并新建${label}</button>
+    </div>`;
+  }
+
+  async function openAiDraft(draft) {
+    if (draft.kind === "project") {
+      $('[data-view-panel="home"] [data-open="project-dialog"]').click();
+      const form = $("#project-form");
+      form.elements.title.value = draft.title;
+      form.elements.objective.value = draft.objective || "";
+      return;
+    }
+    if (draft.kind === "lab_record") {
+      state.projects = await invoke("project.list");
+      R.fillProjectOptions();
+      if (!state.projects.length) {
+        toast("先建立项目，再为它新建实验记录。");
+        $('[data-view-panel="home"] [data-open="project-dialog"]').click();
+        return;
+      }
+      const form = $("#create-record-form");
+      form.reset();
+      form.elements.title.value = draft.title;
+      form.elements.project_id.value = draft.project_id || "";
+      form.elements.experiment_date.value = draft.experiment_date || "";
+      $(".form-error", form).textContent = "";
+      R.openDialog("record-dialog");
+    }
+  }
+
+  function renderAiConversation() {
+    const node = $("#ai-output");
+    if (!aiMessages.length) {
+      node.innerHTML = '<div class="assistant-welcome"><i data-lucide="sparkles"></i><b>开始对话</b><p>直接提问，或告诉助手你要新建什么。</p></div>';
+      icons();
+      return;
+    }
+    node.innerHTML = `<div class="assistant-chat-thread">${aiMessages.map((message,index)=>`<article class="assistant-message ${message.role}"><span>${message.role==="user"?"你":"AI"}</span><div><p>${escapeHtml(message.content||"")}</p>${message.references?.length?`<div class="assistant-references">${message.references.map(reference=>`<a href="${escapeHtml(reference.url)}" data-open-url="${escapeHtml(reference.url)}">${escapeHtml(reference.title||reference.url)}</a>`).join("")}</div>`:""}${renderAiDraft(message.createDraft, index)}${message.proposal&&Object.keys(message.proposal).length?`<div class="diff-list">${Object.entries(message.proposal).map(([field,value])=>`<label><input type="checkbox" data-ai-field="${field}" checked><span><b>${escapeHtml(message.schema?.[field]?.label||field)}</b><small>${escapeHtml(aiValue(value))}</small></span></label>`).join("")}</div>${message.changeStatus==="proposed"||!message.changeStatus?`<button class="button compact primary" id="apply-ai-change"><i data-lucide="check"></i>应用已选字段</button>`:""}`:""}<footer class="assistant-message-actions"><button class="text-button" data-ai-message-copy="${index}" type="button"><i data-lucide="copy"></i>复制</button>${message.role==="assistant"&&index===aiMessages.length-1?`<button class="text-button" data-ai-message-regenerate="${index}" type="button"><i data-lucide="refresh-cw"></i>重新生成</button>`:""}</footer></div></article>`).join("")}</div>`;
+    node.scrollTop = node.scrollHeight;
+    icons();
+  }
+
+  async function aiGenerate(promptOverride = null) {
+    const composer = $("#ai-prompt");
+    const prompt = typeof promptOverride === "string" ? promptOverride : composer.value.trim();
+    const button = $("#ai-generate");
+    if (button.disabled) return;
+    if (!prompt) return toast("请输入消息");
+    const projectId = Number($("#ai-project").value) || null;
+    if (aiRecordProjectId !== projectId) {
+      aiRecordProjectId = projectId;
+      aiRecordSelection.clear();
+      syncAiRecordCount();
+    }
+    const recordIds = projectId ? [...aiRecordSelection] : [];
+    const thread = aiMessages;
+    const payload = {
+      target_type: projectId ? "project" : "general",
+      target_id: projectId, prompt, conversation_id: currentConversationId,
+      record_ids: recordIds, web_access: $("#ai-web-access").checked,
+    };
+    button.disabled = true;
+    try {
+      if (projectId) {
+        const preview = await invoke("ai.preview", {
+          target_type: "project", target_id: projectId, source_ids: recordIds, records_explicit: true,
+        });
+        payload.source_snapshot = preview.source_snapshot;
+      }
+      const result = await invoke("ai.propose", payload);
+      if (thread !== aiMessages) return;
+      currentConversationId = result.conversation_id;
+      aiChange = result.id ? result : null;
+      lastAiPrompt = prompt;
+      lastAiReply = result.reply;
+      aiMessages.forEach(message => message.proposal = {});
+      aiMessages.push({role:"user",content:prompt}, {
+        role:"assistant", content:result.reply, createDraft:result.create_draft,
+        proposal:result.proposal || {}, schema:result.field_schema || {},
+        changeId:result.id, changeStatus:result.status, references:result.references || [],
+      });
+      if (composer.value.trim() === prompt) composer.value = "";
+      renderAiConversation();
+      await loadAiHistory(1);
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      button.disabled = false;
+    }
+  }
   async function reloadAfterAi(){if(state.view==="record-edit" && state.dirty){R.setAssistantContext();return;}const loader=R.modules?.get?.(state.view);if(loader?.load)await loader.load(state.params||{});else await R.loadInitial();R.setAssistantContext();}
   async function applyAi(){if(!aiChange)return;const accepted=$$('[data-ai-field]:checked').map(x=>x.dataset.aiField);if(!accepted.length)return toast("请至少选择一个字段");try{const applied=await invoke("ai.apply",{id:aiChange.id,accepted_fields:accepted});localStorage.setItem("rlab-last-ai-change",String(aiChange.id));const message=[...aiMessages].reverse().find(item=>item.changeId===aiChange.id);if(message){message.changeStatus=applied.status;message.proposal={};}await reloadAfterAi();renderAiConversation();toast("AI 内容已写入，可随时回退");}catch(error){toast(error.message);}}
   async function revertAi(){const changeId=aiChange?.id||Number(localStorage.getItem("rlab-last-ai-change"));if(!changeId)return toast("还没有可回退的 AI 写入");try{await invoke("ai.revert",{id:Number(changeId)});localStorage.removeItem("rlab-last-ai-change");const message=[...aiMessages].reverse().find(item=>item.changeId===Number(changeId));if(message)message.changeStatus="reverted";aiChange=null;await reloadAfterAi();renderAiConversation();toast("已回退上次 AI 写入");}catch(error){toast(error.message);}}
@@ -181,8 +321,8 @@
       renderAiConversation();
       toast("记录范围已更改，下条消息将开始新对话");
     }syncAiRecordCount();dialog._trigger?.focus?.();});}dialog._trigger=trigger;dialog.returnValue="cancel";renderAiRecordPicker();dialog.showModal();}
-  async function newAiChat(){const projectId=Number($("#ai-project").value)||null;const conversation=await invoke("ai.conversation.create",{project_id:projectId,record_ids:[...aiRecordSelection],title:"新对话"});currentConversationId=conversation.id;aiMessages=[];aiChange=null;lastAiPrompt=lastAiReply="";renderAiConversation();await loadAiHistory(1);$("#ai-prompt").focus();}
-  async function loadAiConversation(id){const data=await invoke("ai.conversation.get",{id});currentConversationId=data.id;if(data.project_id)$("#ai-project").value=String(data.project_id);aiRecordProjectId=data.project_id||null;aiRecordSelection.clear();(data.selected_record_ids||[]).forEach(value=>aiRecordSelection.add(Number(value)));syncAiRecordCount();R.setAssistantContext();aiMessages=(data.messages||[]).map(message=>({role:message.role,content:message.content,proposal:message.proposal||{},changeId:message.change_id,changeStatus:message.change_status}));const lastAssistant=[...aiMessages].reverse().find(message=>message.role==="assistant"),lastUser=[...aiMessages].reverse().find(message=>message.role==="user");lastAiReply=lastAssistant?.content||"";lastAiPrompt=lastUser?.content||"";if(lastAssistant?.changeId){aiChange={id:lastAssistant.changeId};aiMessages.forEach(message=>{if(message!==lastAssistant)message.proposal={};});}renderAiConversation();}
+  async function newAiChat(){const projectId=Number($("#ai-project").value)||null;const conversation=await invoke("ai.conversation.create",{project_id:projectId,record_ids:projectId?[...aiRecordSelection]:[],title:"新对话"});currentConversationId=conversation.id;aiMessages=[];aiChange=null;lastAiPrompt=lastAiReply="";renderAiConversation();await loadAiHistory(1);$("#ai-prompt").focus();}
+  async function loadAiConversation(id){const data=await invoke("ai.conversation.get",{id});currentConversationId=data.id;$("#ai-project").value=data.project_id?String(data.project_id):"";aiRecordProjectId=data.project_id||null;aiRecordSelection.clear();(data.selected_record_ids||[]).forEach(value=>aiRecordSelection.add(Number(value)));syncAiRecordCount();R.setAssistantContext();aiMessages=(data.messages||[]).map(message=>({role:message.role,content:message.content,proposal:message.proposal||{},createDraft:message.create_draft,changeId:message.change_id,changeStatus:message.change_status}));const lastAssistant=[...aiMessages].reverse().find(message=>message.role==="assistant"),lastUser=[...aiMessages].reverse().find(message=>message.role==="user");lastAiReply=lastAssistant?.content||"";lastAiPrompt=lastUser?.content||"";aiChange=lastAssistant?.changeId?{id:lastAssistant.changeId}:null;aiMessages.forEach(message=>{if(message!==lastAssistant)message.proposal={};});renderAiConversation();}
   function setAiHistoryCollapsed(collapsed){const panel=$("#assistant-history-panel"),windowNode=$("#assistant-window"),toggle=$("#ai-history-toggle");if(!panel||!windowNode||!toggle)return;panel.classList.toggle("collapsed",collapsed);windowNode.classList.toggle("history-collapsed",collapsed);toggle.setAttribute("aria-expanded",String(!collapsed));toggle.setAttribute("aria-label",collapsed?"展开对话":"折叠对话");toggle.title=collapsed?"展开对话":"折叠对话";const icon=$("i",toggle);if(icon)icon.setAttribute("data-lucide",collapsed?"chevron-right":"chevron-left");if(collapsed&&panel.classList.contains("managing")){panel.classList.remove("managing");$("#ai-history-manage")?.setAttribute("aria-pressed","false");aiHistorySelection.clear();syncAiHistoryBulk();}icons();}
   function syncAiHistoryBulk(){const bar=$("#ai-history-bulk");bar.hidden=!aiHistorySelection.size;if(!bar.hidden)$("[data-ai-history-selected]",bar).textContent=aiHistorySelection.size;}
   async function loadAiHistory(page=aiHistoryPage){try{const data=await invoke("ai.conversations",{page,per_page:10,query:$("#ai-history-query").value.trim(),project_id:$("#ai-project").value||null,date_start:$("#ai-history-start").value,date_end:$("#ai-history-end").value});aiHistoryItems=data.items||[];aiHistoryPage=data.pagination.page;aiHistoryPages=data.pagination.pages;$("#ai-history-list").innerHTML=aiHistoryItems.length?aiHistoryItems.map(item=>`<article class="assistant-history-item ${Number(item.id)===Number(currentConversationId)?"active":""}"><input type="checkbox" data-ai-history-select="${item.id}" ${aiHistorySelection.has(item.id)?"checked":""} aria-label="选择 ${escapeHtml(item.title)}"><button type="button" data-ai-conversation-id="${item.id}" title="打开聊天"><b>${escapeHtml(item.title)}</b><span>${item.message_count} 条消息<time>${dateLabel(item.updated_at,true)}</time></span></button></article>`).join(""):`<div class="empty-state compact"><p>没有匹配的聊天记录</p></div>`;$("#ai-history-page").textContent=`${aiHistoryPage} / ${aiHistoryPages}`;$("#ai-history-prev").disabled=aiHistoryPage<=1;$("#ai-history-next").disabled=aiHistoryPage>=aiHistoryPages;syncAiHistoryBulk();icons();}catch(error){toast(error.message);}}
@@ -197,7 +337,20 @@
     const purge=event.target.closest("[data-trash-purge-id]");if(purge)await purgeTrash([{entity_type:purge.dataset.trashPurgeType,id:Number(purge.dataset.trashPurgeId)}]);
     const copy=event.target.closest("[data-ai-message-copy]");if(copy)await copyAiMessage(copy.dataset.aiMessageCopy);
     const regenerate=event.target.closest("[data-ai-message-regenerate]");if(regenerate)lastAiPrompt?await aiGenerate(lastAiPrompt):toast("还没有可重新生成的消息");
+    const draft = event.target.closest("[data-ai-create-draft]");
+    if (draft) {
+      const message = aiMessages[Number(draft.dataset.aiCreateDraft)];
+      if (message?.createDraft) {
+        try { await openAiDraft(message.createDraft); }
+        catch (error) { toast(error.message); }
+      }
+      return;
+    }
     const section=event.target.closest("[data-settings-section]");if(section)showSettings(section.dataset.settingsSection);
+    if (event.target.closest("#workspace-choose-directory")) {
+      await chooseWorkspaceDirectory($("#workspace-choose-directory"));
+      return;
+    }
     const apiAction = event.target.closest("[data-api-action]");
     if (apiAction) {
       const action = apiAction.dataset.apiAction;

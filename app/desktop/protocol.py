@@ -14,6 +14,7 @@ CAPABILITIES = (
     "ai.changesets",
     "api.presets",
     "records.batch_export",
+    "workspace.directory",
     "zotero.jobs",
 )
 

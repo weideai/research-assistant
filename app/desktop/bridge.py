@@ -10,6 +10,7 @@ import uuid
 from app.services.desktop_workspace import ServiceError
 from .native import NativeCapabilityError
 from .protocol import build_app_info
+from .workspace_location import WorkspaceLocationError, inspect_workspace_directory, save_workspace_directory
 
 
 MAX_BRIDGE_BYTES = 256 * 1024
@@ -40,6 +41,7 @@ class DesktopBridge:
         self._zotero_job_lock = threading.Lock()
         self._zotero_jobs = {}
         self._latest_zotero_job_id = ""
+        self._workspace_directory_candidate = None
         self._commands = {
             "system.ping": lambda payload, version: {"status": "ok"},
             "system.app_info": lambda payload, version: self._app_info,
@@ -116,6 +118,8 @@ class DesktopBridge:
             "trash.purge": lambda payload, version: self._service.trash_purge(payload),
             "settings.get": lambda payload, version: self._service.settings_get(payload),
             "settings.save": lambda payload, version: self._service.settings_save(payload),
+            "workspace.directory.choose": lambda payload, version: self._choose_workspace_directory(),
+            "workspace.directory.save": lambda payload, version: self._save_workspace_directory(payload),
             "api.presets.save": lambda payload, version: self._service.api_presets_save(payload),
             "api.presets.activate": lambda payload, version: self._service.api_presets_activate(payload),
             "api.models.discover": lambda payload, version: self._service.api_models_discover(payload),
@@ -131,6 +135,23 @@ class DesktopBridge:
             "window.close": lambda payload, version: self._native.window_command("window.close"),
         }
         self._app_info = build_app_info(self._app_info, self._commands)
+
+    def _choose_workspace_directory(self):
+        self._workspace_directory_candidate = None
+        paths = self._native.select_directory_dialog({"initial_directory": str(self._native.instance_dir)})
+        if not paths:
+            return None
+        choice = inspect_workspace_directory(paths[0])
+        self._workspace_directory_candidate = choice["path"]
+        return choice
+
+    def _save_workspace_directory(self, payload):
+        path = payload.get("path")
+        if not path or path != self._workspace_directory_candidate:
+            raise NativeCapabilityError("请先通过文件夹选择器选取此工作区。")
+        result = save_workspace_directory(path)
+        self._workspace_directory_candidate = None
+        return result
 
     def _start_zotero_sync(self, payload):
         with self._zotero_job_lock:
@@ -312,7 +333,7 @@ class DesktopBridge:
             }
         except ServiceError as exc:
             return self._error(request_id, exc.code, exc.message, exc.field_errors)
-        except NativeCapabilityError as exc:
+        except (NativeCapabilityError, WorkspaceLocationError) as exc:
             return self._error(request_id, "invalid_native_request", str(exc), {})
         except Exception:
             logging.exception("Unhandled desktop bridge failure")

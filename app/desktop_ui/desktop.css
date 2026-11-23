@@ -714,7 +714,8 @@ body { font-size: 14px; font-variant-numeric: tabular-nums; }
 }
 
 .api-profile-bar,
-.api-model-row {
+.api-model-row,
+.workspace-directory-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
@@ -753,8 +754,60 @@ body { font-size: 14px; font-variant-numeric: tabular-nums; }
   margin: 0;
   font-size: 12px;
   color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .api-feedback.error {
   color: var(--danger);
+}
+
+.backup-action,
+.backup-description,
+.backup-controls {
+  display: flex;
+  gap: 12px;
+}
+
+.backup-action {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.backup-description {
+  align-items: center;
+}
+
+.backup-description small {
+  display: block;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.backup-controls {
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+#create-backup {
+  flex: none;
+  white-space: nowrap;
+}
+
+.github-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  color: var(--accent-strong);
+  overflow-wrap: anywhere;
+}
+
+.assistant-create-draft {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  padding: 10px;
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
 }

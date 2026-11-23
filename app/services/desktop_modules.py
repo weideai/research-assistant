@@ -27,6 +27,7 @@ from app.models import (
     project_literature, project_zotero_collection, utcnow, zotero_collection_literature,
     weekly_report_library_item,
 )
+from app.version import GITHUB_REPOSITORY
 from .errors import ConflictError, NotFoundError, ValidationError
 
 
@@ -92,6 +93,7 @@ AI_FIELD_MAX_LENGTH = {
 }
 
 AI_TARGET_INSTRUCTIONS = {
+    "general": "回答用户的问题。当前对话没有项目或实验记录上下文，不能修改任何已有对象。",
     "project": (
         "整理当前研究项目的名称、编号、研究目标、状态、起止日期和说明。"
         "研究目标应具体且可执行；没有明确日期或编号时不要补造。"
@@ -129,11 +131,15 @@ def build_desktop_ai_system_prompt(target_type, field_schema, *, today, timezone
     """Build the strict, record-centric prompt shared by every desktop AI provider."""
     if target_type not in AI_TARGET_INSTRUCTIONS:
         raise ValidationError("AI 目标类型无效。")
-    allowed = sorted(AI_TARGET_FIELDS[target_type])
+    allowed = sorted(AI_TARGET_FIELDS.get(target_type, ()))
     return "\n".join((
-        "你是 R/LAB 独立桌面研究助手，负责把用户请求转换成当前对象可直接写入的字段建议。",
+        "你是 R/LAB 桌面研究助手，可以回答问题、准备新建草稿或提出当前对象的字段建议。",
         "只输出合法 JSON，不要输出 Markdown 或代码围栏。固定格式："
         '{"reply":"简短说明","proposal":{"字段":"新值"}}。',
+        "普通问答使用空 proposal。用户明确要新建项目或实验记录且给出了标题时，"
+        '只返回 proposal.create_draft，字段 kind 必须是 project 或 lab_record，title 是用户给出的标题。'
+        "项目草稿可附 objective，实验记录草稿可附用户明确给出的 experiment_date（YYYY-MM-DD）。"
+        "新建草稿由用户核对后在表单中确认，不能声称已创建，不能把新建请求转成修改现有对象。",
         "proposal 只包含确实需要修改且有依据的字段；不要输出空占位，不要重复未变化字段。"
         "除非用户明确要求清空，否则不要用空字符串覆盖已有内容。",
         "不得编造用户未提供的测量数据、日期、人员、编号或完成状态。"
@@ -3539,18 +3545,24 @@ class DesktopModuleServiceMixin:
             changes = {change.message_id: change for change in AIChangeSet.query.filter(
                 AIChangeSet.message_id.in_(message_ids) if message_ids else False
             ).all()} if message_ids else {}
+            messages = []
+            for message in conversation.messages:
+                change = changes.get(message.id)
+                proposal = _load_json(message.proposal_json, {})
+                if not isinstance(proposal, dict):
+                    proposal = {}
+                draft = proposal.pop("create_draft", None)
+                messages.append({
+                    "id": message.id, "role": message.role, "content": message.content,
+                    "prompt": message.prompt_snapshot, "model": message.model_name,
+                    "created_at": _iso(message.created_at), "change_id": change.id if change else None,
+                    "change_status": change.status if change else None, "proposal": proposal, "create_draft": draft,
+                })
             return {
                 "id": conversation.id, "title": conversation.title, "project_id": conversation.page_id
                 if conversation.page_type == "project" else None,
                 "selected_record_ids": _load_json(conversation.selected_record_ids_json, []),
-                "messages": [{
-                    "id": message.id, "role": message.role, "content": message.content,
-                    "prompt": message.prompt_snapshot, "model": message.model_name,
-                    "created_at": _iso(message.created_at),
-                    "change_id": changes[message.id].id if message.id in changes else None,
-                    "change_status": changes[message.id].status if message.id in changes else None,
-                    "proposal": _load_json(message.proposal_json, {}),
-                } for message in conversation.messages],
+                "messages": messages,
             }
         return self._run(query)
 
@@ -3560,6 +3572,8 @@ class DesktopModuleServiceMixin:
         title = _string(payload.get("title") or "新聊天", 160, "title")
         record_ids = payload.get("record_ids") if isinstance(payload.get("record_ids"), list) else []
         selected_record_ids = list(dict.fromkeys(_positive_id(value, "record_ids") for value in record_ids))[:200]
+        if not project_id and selected_record_ids:
+            raise ValidationError("普通对话不能关联实验记录。")
 
         def create(workspace):
             if project_id:
@@ -3573,7 +3587,7 @@ class DesktopModuleServiceMixin:
                         raise ValidationError("部分实验记录不属于当前项目。")
             conversation = AIConversation(
                 user_id=workspace.legacy_user_id, title=title,
-                page_type="project" if project_id else "", page_id=project_id,
+                page_type="project" if project_id else "general", page_id=project_id,
                 selected_record_ids_json=_json(selected_record_ids),
             )
             db.session.add(conversation)
@@ -3786,18 +3800,46 @@ class DesktopModuleServiceMixin:
         setattr(target, field, self._ai_assignment_value(field, value))
         return None
 
+    @staticmethod
+    def _ai_create_draft(value, project_id=None):
+        if not isinstance(value, dict) or value.get("kind") not in ("project", "lab_record"):
+            return None
+        kind = value["kind"]
+        title = value.get("title")
+        if not isinstance(title, str) or not title.strip() or len(title.strip()) > (180 if kind == "project" else 200):
+            return None
+        draft = {"kind": kind, "title": title.strip()}
+        if kind == "project":
+            objective = value.get("objective")
+            if isinstance(objective, str) and objective.strip():
+                draft["objective"] = objective.strip()[:12000]
+        else:
+            draft["project_id"] = project_id
+            try:
+                experiment_date = _date(value.get("experiment_date"), "experiment_date")
+            except ValidationError:
+                experiment_date = None
+            if experiment_date:
+                draft["experiment_date"] = experiment_date.isoformat()
+        return draft
+
     def ai_propose(self, payload):
         target_type = _string(payload.get("target_type"), 30, "target_type", required=True)
-        target_id = _positive_id(payload.get("target_id"), "target_id")
+        general = target_type == "general"
+        target_id = _positive_id(payload.get("target_id"), "target_id", optional=general)
         prompt = _string(payload.get("prompt"), 30000, "prompt", required=True)
         source_snapshot = payload.get("source_snapshot") if isinstance(payload.get("source_snapshot"), dict) else {}
         conversation_id = _positive_id(payload.get("conversation_id"), "conversation_id", optional=True)
         web_access = bool(payload.get("web_access"))
         record_ids = payload.get("record_ids") if isinstance(payload.get("record_ids"), list) else []
         selected_record_ids = list(dict.fromkeys(_positive_id(value, "record_ids") for value in record_ids))[:200]
+        if general:
+            if target_id or selected_record_ids:
+                raise ValidationError("普通对话不关联项目或实验记录。")
+            source_snapshot = {}
 
         def propose(workspace):
-            target = self._ai_target(workspace, target_type, target_id)
+            target = None if general else self._ai_target(workspace, target_type, target_id)
             conversation = None
             history = []
             if conversation_id:
@@ -3820,9 +3862,9 @@ class DesktopModuleServiceMixin:
                 raise ValidationError("请先在设置中启用 API 并配置 Key。")
             from app.ai_service import AIConfig, AIServiceError, chat_with_assistant
             from app.secrets import SecretDecryptionError
-            target_snapshot = self._ai_target_snapshot(target_type, target)
-            field_schema = self._ai_field_schema(target_type)
-            allowed = sorted(AI_TARGET_FIELDS[target_type])
+            target_snapshot = {} if general else self._ai_target_snapshot(target_type, target)
+            field_schema = {} if general else self._ai_field_schema(target_type)
+            allowed = AI_TARGET_FIELDS.get(target_type, ())
             system_prompt = build_desktop_ai_system_prompt(
                 target_type, field_schema, today=date.today(), timezone=workspace.timezone,
             )
@@ -3833,7 +3875,7 @@ class DesktopModuleServiceMixin:
                     allowed_hosts=tuple(self.flask_app.config.get("AI_ALLOWED_HOSTS") or ()),
                     source="desktop", temperature=None,
                 )
-                user_content = _json({
+                user_content = prompt if general else _json({
                     "request": prompt, "current_target": target_snapshot,
                     "source_snapshot": source_snapshot,
                 })
@@ -3846,10 +3888,12 @@ class DesktopModuleServiceMixin:
                 if isinstance(exc.__cause__, urllib.error.HTTPError):
                     message = f"API 返回 HTTP {exc.__cause__.code}，请检查当前方案的地址、Key 和模型。"
                 raise ValidationError(message) from None
-            proposal = result.get("proposal") if isinstance(result.get("proposal"), dict) else {}
-            proposal = {
+            proposed = result.get("proposal") if isinstance(result.get("proposal"), dict) else {}
+            requested_creation = proposed.get("create_draft")
+            draft = self._ai_create_draft(requested_creation, target_id if target_type == "project" else None)
+            proposal = {} if requested_creation is not None else {
                 field: self._normalize_ai_value(target_type, field, value)
-                for field, value in proposal.items() if field in allowed
+                for field, value in proposed.items() if field in allowed
             }
             if conversation_id:
                 conversation = self._ai_conversation_or_error(workspace, conversation_id)
@@ -3857,7 +3901,7 @@ class DesktopModuleServiceMixin:
                     raise ValidationError("该聊天记录不属于当前项目。")
                 conversation.page_type, conversation.page_id, conversation.updated_at = target_type, target_id, utcnow()
                 conversation.selected_record_ids_json = _json(selected_record_ids)
-                if conversation.title in {"", "新聊天"}:
+                if conversation.title in {"", "新聊天", "新对话"}:
                     conversation.title = prompt[:80]
             else:
                 conversation = AIConversation(
@@ -3872,21 +3916,24 @@ class DesktopModuleServiceMixin:
             ))
             message = AIMessage(
                 conversation_id=conversation.id, role="assistant", content=result.get("reply") or "已生成字段建议。",
-                proposal_json=_json(proposal), model_name=preset.text_model, prompt_snapshot=prompt,
+                proposal_json=_json({"create_draft": draft} if draft else proposal),
+                model_name=preset.text_model, prompt_snapshot=prompt,
                 context_snapshot_json=_json(source_snapshot), requires_human_review=False,
             )
             db.session.add(message)
             db.session.flush()
-            change = AIChangeSet(
-                message_id=message.id, target_type=target_type, target_id=target_id,
-                base_row_version=target.row_version, proposal_json=_json(proposal),
-                before_json=_json(self._ai_target_snapshot(target_type, target)),
-                source_snapshot_json=_json(source_snapshot), model_name=preset.text_model, prompt_snapshot=prompt,
-            )
-            db.session.add(change)
-            db.session.flush()
-            return {"id": change.id, "conversation_id": conversation.id, "reply": message.content,
-                    "proposal": proposal, "field_schema": field_schema, "status": change.status,
+            change = None
+            if target is not None and requested_creation is None:
+                change = AIChangeSet(
+                    message_id=message.id, target_type=target_type, target_id=target_id,
+                    base_row_version=target.row_version, proposal_json=_json(proposal), before_json=_json(target_snapshot),
+                    source_snapshot_json=_json(source_snapshot), model_name=preset.text_model, prompt_snapshot=prompt,
+                )
+                db.session.add(change)
+                db.session.flush()
+            return {"id": change.id if change else None, "conversation_id": conversation.id, "reply": message.content,
+                    "proposal": proposal, "create_draft": draft, "field_schema": field_schema,
+                    "status": change.status if change else None,
                     "web_used": bool(result.get("web_used")), "references": result.get("references") or []}
         return self._run(propose)
 
@@ -4340,7 +4387,8 @@ class DesktopModuleServiceMixin:
                     self._api_preset_dto(item) for item in ApiPreset.query.filter_by(user_id=user_id)
                     .order_by(ApiPreset.name, ApiPreset.id)
                 ],
-                "about": {"product": "R/LAB Research Assistant", "author": "面壁者"},
+                "about": {"product": "R/LAB Research Assistant", "author": "面壁者",
+                          "repository_url": f"https://github.com/{GITHUB_REPOSITORY}"},
             }
         return self._run(query)
 

@@ -8,6 +8,7 @@ def test_production_desktop_entry_has_no_http_server_or_browser_startup():
     sources = "\n".join(
         (ROOT / path).read_text(encoding="utf-8")
         for path in (
+            "run.py",
             "desktop_main.py",
             "desktop_launcher.py",
             "app/desktop/runtime.py",

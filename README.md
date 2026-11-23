@@ -44,10 +44,12 @@ Get-Content .\release\SHA256SUMS.txt
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe desktop_main.py
+python run.py
 ```
 
-`desktop_launcher.py` 是为旧快捷方式和构建脚本保留的兼容入口，新开发应使用 `desktop_main.py`。
+`run.py` 从当前源码启动桌面版，并优先使用项目的 `.venv`。安装包继续使用 `desktop_main.py`，旧快捷方式可使用 `desktop_launcher.py`。
+
+在「设置 → 工作区」点击「选择文件夹」可以选择已有 R/LAB 工作区或为新工作区指定目录。确认后重开应用即可切换。
 
 ## 快速使用
 
@@ -77,7 +79,7 @@ python -m venv .venv
 
 ## 数据与隐私
 
-R/LAB 默认采用本地优先模式。数据库、托管文件、日志和 WebView 配置保存在当前 Windows 用户目录：
+R/LAB 默认采用本地优先模式。数据库、托管文件、日志和 WebView 配置的默认位置如下：
 
 | 内容 | 默认位置 |
 |---|---|
