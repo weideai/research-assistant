@@ -33,7 +33,7 @@ def test_desktop_ui_is_local_and_has_no_remote_dependency():
     assert "bridgeRequired" in script
     assert 'window.location.hash === "#bridge=pywebview"' in script
     assert "if(!bridgeRequired)setTimeout(boot" in script
-    assert (ROOT / "app/static/vendor/lucide.min.js").is_file()
+    assert (ROOT / "app/desktop_ui/assets/lucide.min.js").is_file()
 
 
 def test_dialog_cancel_bypasses_required_field_validation():

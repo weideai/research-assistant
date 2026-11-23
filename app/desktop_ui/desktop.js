@@ -191,7 +191,7 @@
     try{
     const previous={view:state.view,params:{...state.params},panel:$(".view.active"),historyIndex:state.historyIndex};
     const switchingRecord=state.view==="record-edit"&&(view!=="record-edit"||Number(params?.id)!==Number(state.currentRecord?.id));
-    if(state.dirty&&switchingRecord){if(!confirm("当前实验记录尚未保存，仍要离开吗？"))return;clearTimeout(state.saveTimer);state.dirty=false;}
+    if(state.dirty&&switchingRecord){if(!await modules.get("record-edit")?.save?.())return false;clearTimeout(state.saveTimer);}
     const panelView=view;
     const panel=$(`[data-view-panel="${panelView}"]`);if(!panel){toast("页面不存在");return;}
     $$(".view").forEach(item=>item.classList.remove("active"));panel.classList.add("active");
@@ -232,7 +232,7 @@
   }
   function updateHistory(){$("#nav-back").disabled=state.historyIndex<=0;$("#nav-forward").disabled=state.historyIndex>=state.history.length-1;}
   async function moveHistory(delta){const previousIndex=state.historyIndex,next=previousIndex+delta;if(next<0||next>=state.history.length)return;const current=state.history[previousIndex];if(current)current.ui=captureNavigationState();state.historyIndex=next;const item=state.history[next];if(!await navigate(item.view,item.params,{push:false}))state.historyIndex=previousIndex;updateHistory();}
-  async function refresh(){const loader=modules.get(state.view);if(loader?.load)await loader.load(state.params);else await loadInitial();toast("视图已刷新");}
+  async function refresh(){if(state.view==="record-edit"&&state.dirty&&!await modules.get("record-edit")?.save?.())return;const loader=modules.get(state.view);if(loader?.load)await loader.load(state.params);else await loadInitial();toast("视图已刷新");}
 
   function validateProtocol(info){
     const version=Number(info?.protocol_version);

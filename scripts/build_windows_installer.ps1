@@ -15,8 +15,8 @@ $DistRoot = Join-Path $ProjectRoot "dist\windows"
 $AppDist = Join-Path $DistRoot "app"
 $AppBundle = Join-Path $AppDist "ResearchAssistant"
 $DesktopUi = Join-Path $ProjectRoot "app\desktop_ui"
-$DesktopTokens = Join-Path $ProjectRoot "app\static\css\tokens.css"
-$LucideIcons = Join-Path $ProjectRoot "app\static\vendor\lucide.min.js"
+$DesktopTokens = Join-Path $ProjectRoot "app\desktop_ui\assets\tokens.css"
+$LucideIcons = Join-Path $ProjectRoot "app\desktop_ui\assets\lucide.min.js"
 $Migrations = Join-Path $ProjectRoot "migrations"
 $PresentationScript = Join-Path $ProjectRoot "scripts\build_weekly_presentation.mjs"
 $DesktopLauncher = Join-Path $ProjectRoot "desktop_main.py"
@@ -76,8 +76,6 @@ try {
         "--distpath", $AppDist,
         "--workpath", (Join-Path $BuildRoot "app"),
         "--specpath", (Join-Path $BuildRoot "spec"),
-        "--add-data", "$DesktopTokens;app\static\css",
-        "--add-data", "$LucideIcons;app\static\vendor",
         "--add-data", "$DesktopUi;app\desktop_ui",
         "--add-data", "$Migrations;migrations",
         "--add-data", "$PresentationScript;scripts",
@@ -113,8 +111,8 @@ try {
     Assert-MirroredDirectory $Migrations (Join-Path $BundleInternal "migrations") "migrations"
     $RequiredBundleFiles = @(
         (Join-Path $AppBundle "ResearchAssistant.exe"),
-        (Join-Path $BundleInternal "app\static\css\tokens.css"),
-        (Join-Path $BundleInternal "app\static\vendor\lucide.min.js"),
+        (Join-Path $BundleInternal "app\desktop_ui\assets\tokens.css"),
+        (Join-Path $BundleInternal "app\desktop_ui\assets\lucide.min.js"),
         (Join-Path $BundleInternal "app\desktop_ui\index.html"),
         (Join-Path $BundleInternal "app\desktop_ui\desktop.css"),
         (Join-Path $BundleInternal "app\desktop_ui\desktop.js"),

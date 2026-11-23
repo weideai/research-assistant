@@ -5,10 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; script-src 'self' file:; style-src 'self' file: 'unsafe-inline'; img-src 'self' file: data:; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'">
   <title>R/LAB Research Assistant</title>
-  <link rel="stylesheet" href="../static/css/tokens.css">
+  <link rel="stylesheet" href="assets/tokens.css">
   <link rel="stylesheet" href="desktop.css">
-  <script src="../static/vendor/lucide.min.js" defer></script>
+  <script src="assets/lucide.min.js" defer></script>
   <script src="desktop.js" defer></script>
+  <script src="record_editor.js" defer></script>
   <script src="desktop_research.js" defer></script>
   <script src="desktop_resources.js" defer></script>
   <script src="desktop_planning.js" defer></script>
@@ -101,7 +102,7 @@
         <div class="record-workspace">
           <section class="panel data-list paged-list record-list-pane"><div class="table-wrap"><table><thead><tr><th class="check-column"><input id="record-select-page" type="checkbox" aria-label="选择当前页"></th><th>记录</th><th>所属项目</th><th>实验日期</th><th>状态</th><th>执行者</th><th>最近更新</th><th></th></tr></thead><tbody id="record-list"></tbody></table></div><footer class="list-pagination" id="record-pagination"></footer></section>
           <section id="record-inline-detail" class="panel record-inline-detail" hidden>
-            <header class="record-head"><div><button class="text-button" id="record-inline-close" type="button"><i data-lucide="arrow-left"></i>记录列表</button><h1 id="record-editor-title">实验记录</h1><span id="record-code"></span></div><div><span class="save-state" id="save-state"><i data-lucide="circle-check"></i>已保存</span><button class="button" id="save-record" type="button"><i data-lucide="save"></i>立即保存</button></div></header>
+            <header class="record-head"><div><button class="text-button" id="record-inline-close" type="button"><i data-lucide="arrow-left"></i>记录列表</button><h1 id="record-editor-title">实验记录</h1><span id="record-code"></span></div><div><span class="save-state" id="save-state"><i data-lucide="circle-check"></i>已保存</span><button class="button" id="reload-record" type="button" hidden>重新载入</button><button class="button" id="finalize-record" type="button">定稿</button><button class="button" id="revise-record" type="button" hidden>修订记录</button><button class="button" id="save-record" type="button"><i data-lucide="save"></i>立即保存</button></div></header>
             <nav class="record-view-tabs"><button class="active" data-record-view="record-edit" type="button">编辑记录</button><button data-record-view="record-files" type="button">文件与数据</button><button data-record-view="record-read" type="button">阅读与导出</button><button data-record-view="record-history" type="button">修订历史</button></nav>
             <div class="page-actions"><button class="button compact" id="new-record-task" type="button">为本次实验建后续任务</button></div>
             <form id="record-form" class="record-document">

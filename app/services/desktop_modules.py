@@ -2401,10 +2401,13 @@ class DesktopModuleServiceMixin:
             raise ValidationError("文件分类无效。")
         project_id = _positive_id(payload.get("project_id"), "project_id", optional=True)
         record_id = _positive_id(payload.get("record_id"), "record_id", optional=True)
+        display_name = _string(payload.get("display_name") or source_path.name, 255, "display_name", required=True)
+        description = _string(payload.get("description"), 20000, "description")
 
         with self.flask_app.app_context():
             operation = None
             target_path = None
+            committed = False
             try:
                 workspace = self._workspace()
                 self._ensure_project(workspace.id, project_id)
@@ -2414,6 +2417,8 @@ class DesktopModuleServiceMixin:
                     ).first()
                     if not record:
                         raise NotFoundError("关联实验记录不存在。")
+                    if record.is_finalized:
+                        raise ValidationError("定稿记录的附件关系不能通过普通导入修改。")
                     if project_id and record.project_id != project_id:
                         raise ValidationError("文件的项目与实验记录不一致。")
                 mime_type = mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
@@ -2423,7 +2428,7 @@ class DesktopModuleServiceMixin:
                     root = (Path(self.flask_app.instance_path) / "library").resolve()
                     root.mkdir(parents=True, exist_ok=True)
                     safe_name = re.sub(r"[^\w.()\- \u4e00-\u9fff]", "_", source_path.name)[:180] or "file"
-                    relative = Path(date.today().strftime("%Y/%m")) / f"{uuid.uuid4().hex[:12]}-{safe_name}"
+                    relative = Path(date.today().strftime("%Y/%m")) / f"{uuid.uuid4().hex}-{safe_name}"
                     target_path = (root / relative).resolve()
                     if root != target_path and root not in target_path.parents:
                         raise ValidationError("托管文件路径越界。")
@@ -2434,6 +2439,8 @@ class DesktopModuleServiceMixin:
                     db.session.add(operation)
                     db.session.commit()
                     shutil.copy2(source_path, target_path)
+                    if target_path.stat().st_size != size or _sha256(target_path) != file_hash:
+                        raise ValidationError("复制期间源文件发生变化，请文件写入完成后重试。")
                     operation.status = "file_done"
                     db.session.commit()
                     managed_relative_path = relative.as_posix()
@@ -2445,8 +2452,8 @@ class DesktopModuleServiceMixin:
                     path_normalized = str(source_path).replace("/", "\\").casefold()
                 item = LibraryItem(
                     workspace_id=workspace.id,
-                    display_name=_string(payload.get("display_name") or source_path.name, 255, "display_name", required=True),
-                    original_name=source_path.name, description=_string(payload.get("description"), 20000, "description"),
+                    display_name=display_name,
+                    original_name=source_path.name, description=description,
                     kind=kind, storage_mode=storage_mode, managed_relative_path=managed_relative_path,
                     external_path=external_path, path_normalized=path_normalized, mime_type=mime_type,
                     size_bytes=size, sha256=file_hash, link_status="available", last_verified_at=utcnow(),
@@ -2469,15 +2476,18 @@ class DesktopModuleServiceMixin:
                     operation.status = "db_done"
                 self._activity(workspace, "file_imported", f"导入文件：{item.display_name}", "library_item", item.id, project_id=project_id)
                 db.session.commit()
+                committed = True
                 return {**self._library_dto(item), "duplicate_count": LibraryItem.query.filter(
                     LibraryItem.workspace_id == workspace.id, LibraryItem.sha256 == file_hash,
                     LibraryItem.size_bytes == size, LibraryItem.id != item.id, LibraryItem.is_deleted.is_(False),
                 ).count()}
             except Exception as exc:
                 db.session.rollback()
-                if operation:
+                if target_path is not None and not committed:
+                    target_path.unlink(missing_ok=True)
+                if operation and not committed:
                     operation.status = "failed"
-                    operation.error_message = str(exc)[:1000]
+                    operation.error_message = type(exc).__name__
                     db.session.add(operation)
                     db.session.commit()
                 raise
@@ -3790,6 +3800,23 @@ class DesktopModuleServiceMixin:
 
         def propose(workspace):
             target = self._ai_target(workspace, target_type, target_id)
+            conversation = None
+            history = []
+            if conversation_id:
+                conversation = self._ai_conversation_or_error(workspace, conversation_id)
+                if conversation.page_type not in {"", target_type} or conversation.page_id not in {None, target_id}:
+                    raise ValidationError("该聊天记录不属于当前项目。")
+                previous = AIMessage.query.filter_by(conversation_id=conversation.id).filter(
+                    AIMessage.role.in_(["user", "assistant"]),
+                ).order_by(AIMessage.id.desc()).limit(20).all()
+                remaining = 24000
+                for message in previous:
+                    content = (message.content or "")[-min(6000, remaining):]
+                    if not content or remaining <= 0:
+                        break
+                    history.append({"role": message.role, "content": content})
+                    remaining -= len(content)
+                history.reverse()
             preset = ApiPreset.query.filter_by(user_id=workspace.legacy_user_id, is_default=True).first()
             if not preset:
                 preset = ApiPreset.query.filter_by(user_id=workspace.legacy_user_id).first()
@@ -3815,7 +3842,7 @@ class DesktopModuleServiceMixin:
                 kwargs = {"config": config}
                 if web_access:
                     kwargs["web_access"] = True
-                result = chat_with_assistant([{"role": "user", "content": user_content}], system_prompt, **kwargs)
+                result = chat_with_assistant([*history, {"role": "user", "content": user_content}], system_prompt, **kwargs)
             except AIServiceError as exc:
                 raise ValidationError(str(exc)) from exc
             proposal = result.get("proposal") if isinstance(result.get("proposal"), dict) else {}
@@ -3871,6 +3898,8 @@ class DesktopModuleServiceMixin:
             if not change or change.status not in {"proposed", "stale"}:
                 raise NotFoundError("AI 变更集不存在或已处理。")
             target = self._ai_target(workspace, change.target_type, change.target_id)
+            if change.target_type == "lab_record" and target.is_finalized:
+                raise ValidationError("定稿记录只能通过人工修订更正，不能直接应用 AI 建议。")
             if target.row_version != change.base_row_version:
                 change.status = "stale"
                 raise ConflictError("目标已发生变化，请重新生成差异。")
@@ -3924,6 +3953,8 @@ class DesktopModuleServiceMixin:
             if not change or change.status not in {"applied", "partially_applied"}:
                 raise NotFoundError("该 AI 变更不可撤销。")
             target = self._ai_target(workspace, change.target_type, change.target_id)
+            if change.target_type == "lab_record" and target.is_finalized:
+                raise ValidationError("定稿记录只能通过修订更正，不能直接撤销历史 AI 写入。")
             if target.row_version != change.base_row_version + 1:
                 raise ConflictError("目标在 AI 应用后又发生了变化，不能直接撤销，请先重新加载。")
             before_apply = _load_json(change.before_json, {})
@@ -4224,17 +4255,8 @@ class DesktopModuleServiceMixin:
         return self._run(save)
 
     def create_backup(self, payload=None):
-        with self.flask_app.app_context():
-            db.session.remove()
-            source = Path(self.flask_app.instance_path) / "research.db"
-            if not source.is_file():
-                raise NotFoundError("当前数据库文件不存在。")
-            target_dir = Path(self.flask_app.config["BACKUP_DIR"]).resolve()
-            target_dir.mkdir(parents=True, exist_ok=True)
-            target = target_dir / f"research-{datetime.now():%Y%m%d-%H%M%S}.db"
-            with sqlite3.connect(source) as source_db, sqlite3.connect(target) as target_db:
-                source_db.backup(target_db)
-            return {"path": str(target), "size_bytes": target.stat().st_size}
+        from .workspace_backup import create_backup
+        return create_backup(self.flask_app, payload or {})
 
     def export_record(self, payload):
         record_id = _positive_id(payload.get("id"))

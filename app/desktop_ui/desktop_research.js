@@ -66,21 +66,56 @@
   function updateRecordSelection(){const bar=$("#record-bulk-bar");bar.hidden=!recordSelection.size;bar.querySelector('[data-selected-count]').textContent=recordSelection.size;const visible=$$('[data-select-record]');$("#record-select-page").checked=visible.length>0&&visible.every(x=>x.checked);}
 
   function renderSteps(steps){$("#step-list").innerHTML=steps.map((step,index)=>`<div class="step-row" data-step><span class="step-number">${String(index+1).padStart(2,"0")}</span><input name="step-title" maxlength="180" value="${escapeHtml(step.title||"")}" placeholder="步骤标题"><textarea name="step-instruction" rows="2" placeholder="操作说明">${escapeHtml(step.instruction||"")}</textarea><input type="hidden" name="step-id" value="${step.id||""}"><input type="hidden" name="step-duration" value="${step.planned_duration_minutes||""}"><input type="hidden" name="step-checkpoint" value="${escapeHtml(step.checkpoint||"")}"><input type="hidden" name="step-risk" value="${escapeHtml(step.risk||"")}"><input type="hidden" name="step-done" value="${step.is_done?"true":"false"}"><input type="hidden" name="step-deviation" value="${escapeHtml(step.actual_deviation||"")}"><button class="icon-button remove-step" type="button" title="删除步骤"><i data-lucide="trash-2"></i></button></div>`).join("");icons();}
+  let revisionMode=false;
+  const recordEditor=window.RLabRecordEditor.createRecordEditor({
+    save:(payload,version)=>invoke(revisionMode?"record.revise":"record.update",payload,version),
+    onChange:snapshot=>{
+      state.dirty=snapshot.dirty;
+      if(!snapshot.record)return;
+      state.currentRecord=snapshot.record;
+      $("#record-editor-title").textContent=snapshot.draft?.title||snapshot.record.title;
+      setSaveState(snapshot.status,snapshot.error?.message||"");
+    }
+  });
+  function lockRecordEditor(){
+    const locked=Boolean(state.currentRecord?.is_finalized&&!revisionMode);
+    $$("input,textarea,select,button",$("#record-form")).forEach(node=>node.disabled=locked);
+    $("#save-record").hidden=locked;$("#save-record").textContent=revisionMode?"提交修订":"立即保存";
+    $("#finalize-record").hidden=Boolean(state.currentRecord?.is_finalized);
+    $("#revise-record").hidden=!locked;
+    if(locked)setSaveState("locked");
+  }
   async function openRecord(params){
     const id=Number(params.id||state.currentRecord?.id);if(!id)return navigate("records");const record=await invoke("record.get",{id});state.currentRecord=record;state.dirty=false;
     if(!$("#record-list")?.children.length)await records();
     const detail=$("#record-inline-detail");if(detail)detail.hidden=false;
-    $("#record-editor-title").textContent=record.title;$("#record-code").textContent=record.record_code;const form=$("#record-form");fields.forEach(name=>{if(form.elements[name])form.elements[name].value=record[name]??"";});renderSteps(record.steps||[]);setSaveState("saved");
+    clearTimeout(state.saveTimer);revisionMode=false;recordEditor.open(record);
+    $("#record-editor-title").textContent=record.title;$("#record-code").textContent=record.record_code;const form=$("#record-form");fields.forEach(name=>{if(form.elements[name])form.elements[name].value=record[name]??"";});renderSteps(record.steps||[]);lockRecordEditor();
     setAssistantContext();icons();
   }
   function collectRecord(){const payload={id:state.currentRecord.id};new FormData($("#record-form")).forEach((value,key)=>payload[key]=value);payload.steps=$$("[data-step]",$("#record-form")).map(row=>({id:Number($("[name=step-id]",row)?.value)||null,title:$("[name=step-title]",row).value,instruction:$("[name=step-instruction]",row).value,planned_duration_minutes:Number($("[name=step-duration]",row)?.value)||null,checkpoint:$("[name=step-checkpoint]",row)?.value||"",risk:$("[name=step-risk]",row)?.value||"",is_done:$("[name=step-done]",row)?.value==="true",actual_deviation:$("[name=step-deviation]",row)?.value||""}));return payload;}
-  function setSaveState(mode,message=""){const node=$("#save-state");node.className=`save-state ${mode}`;node.innerHTML=mode==="saving"?`<i data-lucide="loader-circle"></i>正在保存`:mode==="error"?`<i data-lucide="circle-alert"></i>${escapeHtml(message||"保存失败")}`:`<i data-lucide="circle-check"></i>已保存`;icons();}
-  async function saveRecord(){if(!state.currentRecord||!state.dirty)return;clearTimeout(state.saveTimer);setSaveState("saving");try{const saved=await invoke("record.update",collectRecord(),state.currentRecord.row_version);state.currentRecord=saved;state.dirty=false;$("#record-editor-title").textContent=saved.title;setSaveState("saved");}catch(error){setSaveState("error",error.message);toast(error.message);}}
-  function markDirty(){if(!state.currentRecord)return;state.dirty=true;setSaveState("saving");clearTimeout(state.saveTimer);state.saveTimer=setTimeout(saveRecord,900);}
+  function setSaveState(mode,message=""){
+    const labels={saving:"正在保存",dirty:revisionMode?"修订待提交":"尚未保存",saved:"已保存",locked:"已定稿 · 原文已锁定"};
+    const node=$("#save-state");node.className=`save-state ${mode}`;$("#reload-record").hidden=mode!=="error";
+    node.textContent=mode==="error"?`${message||"保存失败"} 输入已保留，请重试。`:(labels[mode]||"");
+  }
+  async function saveRecord(){
+    clearTimeout(state.saveTimer);
+    if(!recordEditor.snapshot().dirty)return true;
+    if(revisionMode&&!await R.confirmAction("提交修订","保存本次更正并保留原记录和修订历史？"))return false;
+    const saved=await recordEditor.flush();
+    if(saved&&revisionMode){revisionMode=false;lockRecordEditor();}
+    return saved;
+  }
+  function markDirty(){
+    if(!state.currentRecord||(state.currentRecord.is_finalized&&!revisionMode))return;
+    recordEditor.edit(collectRecord());clearTimeout(state.saveTimer);
+    if(!revisionMode)state.saveTimer=setTimeout(saveRecord,900);
+  }
 
   async function recordFiles(params){const id=Number(params.id||state.currentRecord?.id);if(!id)return navigate("records");if(!state.currentRecord||state.currentRecord.id!==id)state.currentRecord=await invoke("record.get",{id});$("#record-files-title").textContent=state.currentRecord.title;const items=await invoke("library.list",{record_id:id});$("#record-file-list").innerHTML=items.length?items.map(item=>`<tr><td><button type="button" class="text-button" data-open-library="${item.id}" aria-label="打开文件 ${escapeHtml(item.display_name)}">${escapeHtml(item.display_name)}</button></td><td>${escapeHtml(item.kind)}</td><td>${escapeHtml(item.storage_mode)}</td><td>${statusBadge(item.link_status)}</td><td>${R.formatBytes(item.size_bytes)}</td><td>${dateLabel(item.updated_at,true)}</td></tr>`).join(""):emptyRow(6,"尚未关联文件。使用“导入文件”添加实验数据或结果图。");icons();}
   async function recordRead(params){const id=Number(params.id||state.currentRecord?.id);if(!id)return navigate("records");const r=await invoke("record.get",{id});state.currentRecord=r;$("#record-read-title").textContent=r.title;const sections=[["实验目的",r.objective],["背景与假设",[r.background,r.hypothesis].filter(Boolean).join("\n")],["实验设计",r.design],["材料与条件",r.materials_conditions],["实验步骤",(r.steps||[]).map((s,i)=>`${i+1}. ${s.title}\n${s.instruction}`).join("\n\n")],["预期结果",r.expected_result],["实际过程",r.actual_process_summary],["实际结果",r.actual_result],["分析与结论",[r.analysis,r.conclusion].filter(Boolean).join("\n")],["下一步",r.next_steps]];$("#record-reading-surface").innerHTML=`<header><p>${escapeHtml(r.record_code)} · ${escapeHtml(r.project_title)} · ${dateLabel(r.experiment_date)}</p><h1>${escapeHtml(r.title)}</h1></header>${sections.map(x=>`<section><h2>${x[0]}</h2><p>${escapeHtml(x[1]||"未填写").replaceAll("\n","<br>")}</p></section>`).join("")}`;}
-  async function recordHistory(params){const id=Number(params.id||state.currentRecord?.id);if(!id)return navigate("records");const r=await invoke("record.get",{id});state.currentRecord=r;const revisions=r.revisions||[];$("#record-history-list").innerHTML=revisions.length?revisions.map(item=>`<article><span class="timeline-dot"></span><div><h3>${escapeHtml(item.reason)}</h3><p>${escapeHtml(item.scope)} · ${dateLabel(item.created_at,true)}</p></div><button class="button compact" type="button">查看差异</button></article>`).join(""):`<div class="empty-state"><i data-lucide="history"></i><p>尚无修订历史。第一次保存后会形成修订。</p></div>`;icons();}
+  async function recordHistory(params){const id=Number(params.id||state.currentRecord?.id);if(!id)return navigate("records");const r=await invoke("record.get",{id});state.currentRecord=r;const revisions=r.revisions||[];$("#record-history-list").innerHTML=revisions.length?revisions.map(item=>`<article><span class="timeline-dot"></span><div><h3>${escapeHtml(item.reason)}</h3><p>${escapeHtml(item.scope)} · ${dateLabel(item.created_at,true)}</p></div><button class="button compact" data-revision-id="${item.id}" type="button">查看差异</button></article>`).join(""):`<div class="empty-state"><i data-lucide="history"></i><p>尚无修订历史。第一次保存后会形成修订。</p></div>`;icons();}
 
   function exportQuery(){return {pagination:true,page:exportPage,page_size:exportPageSize,search:$("#export-search").value.trim(),project_id:$("#export-project-filter").value||null,status:$("#export-status-filter").value||null,date_start:$("#export-date-start").value,date_end:$("#export-date-end").value};}
   function updateExportSelection(){const bar=$("#export-selection-count"),target=$("#export-target-count"),visible=$$('[data-export-select]');if(bar)bar.textContent=`已选 ${exportSelection.size} 条`;if(target)target.textContent=exportSelection.size?`将导出 ${exportSelection.size} 条记录`:`未选择记录`;const pageBox=$("#export-select-page");if(pageBox)pageBox.checked=visible.length>0&&visible.every(box=>box.checked);$("#export-count").textContent=`${exportItems.serverPagination?.total??exportItems.length} 条记录`;}
@@ -100,6 +135,18 @@
   async function openProjectResource(section,id){if(section==="records")return navigate("record-edit",{id});if(section==="literature")return navigate("literature",{id});if(section==="notes")return navigate("notes",{id});if(section==="files")return navigate("files",{id});if(section==="tasks")return navigate("tasks",{id});if(section==="weekly")return navigate("weekly-library",{id});}
 
   document.addEventListener("click",async event=>{
+    const revision=event.target.closest("[data-revision-id]");
+    if(revision){
+      try{
+        const data=await invoke("record.revision.get",{id:Number(revision.dataset.revisionId),record_id:state.currentRecord.id});
+        let dialog=$("#revision-diff-dialog");
+        if(!dialog){dialog=document.createElement("dialog");dialog.id="revision-diff-dialog";document.body.append(dialog);}
+        const keys=[...new Set([...Object.keys(data.before),...Object.keys(data.after)])].filter(key=>key!=="revisions"&&JSON.stringify(data.before[key])!==JSON.stringify(data.after[key]));
+        const changes=Object.fromEntries(keys.map(key=>[key,{修改前:data.before[key],修改后:data.after[key]}]));
+        dialog.innerHTML=`<form method="dialog"><header><h2>${escapeHtml(data.reason)}</h2></header><pre class="revision-diff">${escapeHtml(JSON.stringify(changes,null,2))}</pre><footer><button class="button" value="cancel">关闭</button></footer></form>`;
+        openDialog("revision-diff-dialog");
+      }catch(error){toast(error.message);}return;
+    }
     const homeDay=event.target.closest("[data-home-calendar-day]");if(homeDay){await navigate("calendar",{date:homeDay.dataset.homeCalendarDay});return;}
     const homeEvent=event.target.closest("[data-home-calendar-event]");if(homeEvent){const item=homeCalendarEvents.get(homeEvent.dataset.homeCalendarEvent);await navigate("calendar",{date:item?.date||""});return;}
     const focus=event.target.closest("[data-home-focus-view]");if(focus){let params={};try{params=JSON.parse(focus.dataset.homeFocusParams||"{}");}catch(_){ }await navigate(focus.dataset.homeFocusView,params);return;}
@@ -124,15 +171,30 @@
     const projectBulkButton=event.target.closest("[data-project-bulk]");if(projectBulkButton){await projectBulk(projectBulkButton.dataset.projectBulk);return;}
     if(event.target.closest("[data-project-select-all]")){projectItems.forEach(item=>projectSelection.add(item.id));updateProjectSelection();toast(`已选择当前筛选的 ${projectItems.length} 个项目`);return;}
     if(event.target.closest("[data-project-clear]")){projectSelection.clear();await projects();return;}
-    if(event.target.closest("#record-inline-close")){if(state.dirty&&!confirm("当前实验记录尚未保存，仍要关闭编辑器吗？"))return;$("#record-inline-detail").hidden=true;state.currentRecord=null;state.dirty=false;setAssistantContext();await navigate("records");return;}
+    if(event.target.closest("#record-inline-close")){if(!await saveRecord())return;clearTimeout(state.saveTimer);recordEditor.detach();$("#record-inline-detail").hidden=true;state.currentRecord=null;setAssistantContext();await navigate("records");return;}
     if(event.target.closest("#export-select-all")){const query=exportQuery();delete query.pagination;delete query.page;delete query.page_size;const all=await invoke("record.list",query);const items=Array.isArray(all)?all:(all.items||[]);items.forEach(item=>exportSelection.add(item.id));await recordExport();toast(`已选择当前查询的 ${items.length} 条记录`);return;}
     if(event.target.closest("#export-clear-selection")){exportSelection.clear();selectedExportId=null;$$('[data-export-select]').forEach(box=>{box.checked=false;box.closest('.check-row')?.classList.remove('selected');});updateExportSelection();$("#export-preview-title").textContent="选择一条实验记录";$("#export-preview-body").innerHTML=`<div class="empty-state"><p>勾选记录后查看导出摘要。</p></div>`;return;}
   });
   document.addEventListener("change",event=>{if(event.target.matches('[data-select-record]')){const id=Number(event.target.dataset.selectRecord);event.target.checked?recordSelection.add(id):recordSelection.delete(id);event.target.closest('tr')?.classList.toggle('selected',event.target.checked);updateRecordSelection();}if(event.target.matches('[data-select-project]')){const id=Number(event.target.dataset.selectProject);event.target.checked?projectSelection.add(id):projectSelection.delete(id);event.target.closest('tr')?.classList.toggle('selected',event.target.checked);updateProjectSelection();}if(event.target.matches('[data-project-resource-select]')){const local=projectResourceState.get(projectSection),id=Number(event.target.dataset.projectResourceSelect);event.target.checked?local.selection.add(id):local.selection.delete(id);}if(event.target.matches('[data-picker-select]')){const id=Number(event.target.dataset.pickerSelect);event.target.checked?projectPicker.selection.add(id):projectPicker.selection.delete(id);renderProjectPicker();}if(event.target.matches('[data-picker-select-page]')){const items=projectPicker.items.filter(item=>!projectPicker.search||JSON.stringify(item).toLowerCase().includes(projectPicker.search.toLowerCase())),page=paginate(items,projectPicker.page,projectPicker.pageSize);page.items.forEach(item=>event.target.checked?projectPicker.selection.add(item.id):projectPicker.selection.delete(item.id));renderProjectPicker();}if(event.target.matches('[data-export-select]')){const id=Number(event.target.dataset.exportSelect);event.target.checked?exportSelection.add(id):exportSelection.delete(id);event.target.closest('.check-row')?.classList.toggle('selected',event.target.checked);if(event.target.checked)selectExportRecord(id);updateExportSelection();}if(event.target.matches('#export-select-page')){$$('[data-export-select]').forEach(box=>{box.checked=event.target.checked;const id=Number(box.dataset.exportSelect);event.target.checked?exportSelection.add(id):exportSelection.delete(id);box.closest('.check-row')?.classList.toggle('selected',event.target.checked);});updateExportSelection();}});
   $("#project-form").addEventListener("submit",submitProject);$("#create-record-form").addEventListener("submit",submitRecord);
   $("#project-search").addEventListener("input",()=>{clearTimeout(state.projectTimer);projectsPage=1;state.projectTimer=setTimeout(projects,180);});$("#project-select-page").addEventListener("change",event=>{$$('[data-select-project]').forEach(box=>{box.checked=event.target.checked;const id=Number(box.dataset.selectProject);event.target.checked?projectSelection.add(id):projectSelection.delete(id);box.closest('tr')?.classList.toggle('selected',event.target.checked);});updateProjectSelection();});$("#record-query-button").addEventListener("click",()=>{recordsPage=1;records();});for(const id of ["record-search","record-date-start","record-date-end","record-project-filter","record-status-filter"])$("#"+id).addEventListener(id==="record-search"?"keydown":"change",event=>{if(id!=="record-search"||event.key==="Enter"){recordsPage=1;records();}});$("#record-query-reset").addEventListener("click",()=>{for(const id of ["record-search","record-date-start","record-date-end","record-project-filter","record-status-filter"])$("#"+id).value="";recordsPage=1;records();});$("#record-select-page").addEventListener("change",event=>{$$('[data-select-record]').forEach(box=>{box.checked=event.target.checked;const id=Number(box.dataset.selectRecord);event.target.checked?recordSelection.add(id):recordSelection.delete(id);box.closest('tr')?.classList.toggle('selected',event.target.checked);});updateRecordSelection();});
-  $("#record-form").addEventListener("input",markDirty);$("#record-form").addEventListener("change",markDirty);$("#save-record").addEventListener("click",()=>{state.dirty=true;saveRecord();});
-  $("#add-step").addEventListener("click",()=>{const steps=$$("[data-step]").map(row=>({title:$("[name=step-title]",row).value,instruction:$("[name=step-instruction]",row).value}));steps.push({});renderSteps(steps);markDirty();});
+  $("#record-form").addEventListener("input",markDirty);$("#record-form").addEventListener("change",markDirty);$("#save-record").addEventListener("click",saveRecord);
+  $("#add-step").addEventListener("click",()=>{const steps=collectRecord().steps;steps.push({});renderSteps(steps);markDirty();});
+  $("#reload-record").addEventListener("click",async()=>{
+    if(!await R.confirmAction("重新载入记录","这会放弃当前未保存的输入。请先复制需要保留的内容，再确认重新载入。"))return;
+    const id=state.currentRecord.id;clearTimeout(state.saveTimer);
+    try{await openRecord({id});}catch(error){toast(error.message);}
+  });
+  $("#revise-record").addEventListener("click",()=>{revisionMode=true;lockRecordEditor();setSaveState("dirty");$("#record-form textarea")?.focus();});
+  $("#finalize-record").addEventListener("click",async()=>{
+    if(!await saveRecord())return;
+    if(!await R.confirmAction("定稿记录","定稿后普通编辑将锁定，后续更正通过修订保存。"))return;
+    $$("input,textarea,select,button",$("#record-form")).forEach(node=>node.disabled=true);$("#finalize-record").disabled=true;
+    const finalizingId=state.currentRecord.id,finalizingVersion=state.currentRecord.row_version;
+    try{const result=await invoke("record.finalize",{id:finalizingId},finalizingVersion);if(state.view==="record-edit"&&state.currentRecord?.id===finalizingId){recordEditor.open(result);lockRecordEditor();}}
+    catch(error){toast(error.message);}
+    finally{$("#finalize-record").disabled=false;lockRecordEditor();}
+  });
   $("#resume-strip").addEventListener("click",event=>navigate("record-edit",{id:Number(event.currentTarget.dataset.recordId)}));
   $("#export-record-button").addEventListener("click",exportSelected);$("#export-query-button").addEventListener("click",()=>{exportPage=1;recordExport();});$("#export-query-reset").addEventListener("click",()=>{for(const id of ["export-search","export-date-start","export-date-end","export-project-filter","export-status-filter"])$("#"+id).value="";exportPage=1;recordExport();});for(const id of ["export-search","export-date-start","export-date-end","export-project-filter","export-status-filter"])$("#"+id).addEventListener(id==="export-search"?"keydown":"change",event=>{if(id!=="export-search"||event.key==="Enter"){exportPage=1;recordExport();}});
 

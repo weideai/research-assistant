@@ -100,7 +100,7 @@ class DesktopApplicationService(DesktopModuleServiceMixin):
                 db.session.remove()
 
     @staticmethod
-    def _project_dto(project):
+    def _project_dto(project, record_count=None):
         return {
             "id": project.id,
             "title": project.title,
@@ -108,7 +108,7 @@ class DesktopApplicationService(DesktopModuleServiceMixin):
             "objective": project.objective or "",
             "status": project.status,
             "status_label": PROJECT_STATUS_LABELS.get(project.status, project.status),
-            "record_count": len(project.lab_records),
+            "record_count": record_count if record_count is not None else db.session.query(func.count(LabRecord.id)).filter_by(project_id=project.id, workspace_id=project.workspace_id, is_deleted=False).scalar(),
             "row_version": project.row_version,
             "updated_at": _iso(project.updated_at),
         }
@@ -161,7 +161,7 @@ class DesktopApplicationService(DesktopModuleServiceMixin):
     def dashboard(self):
         def query(workspace):
             projects = (
-                ResearchProject.query.options(selectinload(ResearchProject.lab_records)).filter_by(workspace_id=workspace.id, is_deleted=False)
+                ResearchProject.query.filter_by(workspace_id=workspace.id, is_deleted=False)
                 .order_by(ResearchProject.updated_at.desc()).limit(5).all()
             )
             records = (
@@ -189,9 +189,10 @@ class DesktopApplicationService(DesktopModuleServiceMixin):
                 .filter_by(workspace_id=workspace.id, is_deleted=False)
                 .scalar() or 0
             )
+            project_counts = self._project_record_counts(workspace.id, [item.id for item in projects])
             return {
                 "workspace": {"name": workspace.name, "schema_generation": workspace.schema_generation},
-                "projects": [self._project_dto(item) for item in projects],
+                "projects": [self._project_dto(item, project_counts.get(item.id, 0)) for item in projects],
                 "recent_records": [self._record_dto(item) for item in records],
                 "counts": {
                     "projects": project_count,
@@ -203,12 +204,19 @@ class DesktopApplicationService(DesktopModuleServiceMixin):
             }
         return self._run(query)
 
+    @staticmethod
+    def _project_record_counts(workspace_id, project_ids):
+        return dict(db.session.query(LabRecord.project_id, func.count(LabRecord.id)).filter(
+            LabRecord.workspace_id == workspace_id, LabRecord.is_deleted.is_(False),
+            LabRecord.project_id.in_(project_ids),
+        ).group_by(LabRecord.project_id).all())
+
     def list_projects(self, payload=None):
         payload = payload or {}
         search = _text(payload.get("search"), 120, "search")
 
         def query(workspace):
-            items = ResearchProject.query.options(selectinload(ResearchProject.lab_records)).filter_by(workspace_id=workspace.id, is_deleted=False)
+            items = ResearchProject.query.filter_by(workspace_id=workspace.id, is_deleted=False)
             if search:
                 escaped = search.replace("%", r"\%").replace("_", r"\_")
                 pattern = f"%{escaped}%"
@@ -217,7 +225,9 @@ class DesktopApplicationService(DesktopModuleServiceMixin):
                     ResearchProject.code.ilike(pattern, escape="\\"),
                     ResearchProject.objective.ilike(pattern, escape="\\"),
                 ))
-            return [self._project_dto(item) for item in items.order_by(ResearchProject.updated_at.desc()).all()]
+            projects = items.order_by(ResearchProject.updated_at.desc()).all()
+            counts = self._project_record_counts(workspace.id, [item.id for item in projects])
+            return [self._project_dto(item, counts.get(item.id, 0)) for item in projects]
         return self._run(query)
 
     def create_project(self, payload):
@@ -381,6 +391,8 @@ class DesktopApplicationService(DesktopModuleServiceMixin):
 
         def bulk(workspace):
             items = LabRecord.query.filter(LabRecord.workspace_id == workspace.id, LabRecord.is_deleted.is_(False), LabRecord.id.in_(ids)).all()
+            if action != "trash" and any(item.is_finalized for item in items):
+                raise ValidationError("所选记录包含定稿记录，请通过修订修改；本次批量操作未写入。")
             if action == "status":
                 value = _text(payload.get("value"), 30, "value", required=True)
                 if value not in RECORD_STATUSES: raise ValidationError("记录状态无效。")
@@ -434,6 +446,58 @@ class DesktopApplicationService(DesktopModuleServiceMixin):
         return self._run(create)
 
     def update_record(self, payload, expected_row_version):
+        return self._save_record(payload, expected_row_version)
+
+    def revise_record(self, payload, expected_row_version):
+        reason = _text(payload.get("reason") or "用户提交修订", 500, "reason")
+        return self._save_record(payload, expected_row_version, revision_reason=reason)
+
+    def record_revision(self, payload):
+        record_id = self._positive_id(payload.get("record_id"), "record_id")
+        revision_id = self._positive_id(payload.get("id"), "id")
+        def query(workspace):
+            item = LabRecordRevision.query.join(LabRecord).filter(
+                LabRecordRevision.id == revision_id, LabRecordRevision.record_id == record_id,
+                LabRecord.workspace_id == workspace.id, LabRecord.is_deleted.is_(False),
+            ).first()
+            if not item:
+                raise NotFoundError("修订不存在。")
+            import json
+            return {"id": item.id, "reason": item.reason, "before": json.loads(item.before_json),
+                    "after": json.loads(item.after_json), "created_at": _iso(item.created_at)}
+        return self._run(query)
+
+    def finalize_record(self, payload, expected_row_version):
+        record_id = self._positive_id(payload.get("id"), "id")
+        try:
+            expected = int(expected_row_version)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("缺少有效的记录版本。") from exc
+
+        def finalize(workspace):
+            current = LabRecord.query.filter_by(id=record_id, workspace_id=workspace.id, is_deleted=False).first()
+            if not current:
+                raise NotFoundError("实验记录不存在。")
+            if current.row_version != expected:
+                raise ConflictError("记录已更新，请重新加载后定稿。")
+            if current.is_finalized:
+                raise ValidationError("记录已经定稿。")
+            before = self._record_dto(current, detail=True)
+            result = db.session.execute(update(LabRecord).where(
+                LabRecord.id == record_id, LabRecord.workspace_id == workspace.id,
+                LabRecord.row_version == expected, LabRecord.is_finalized.is_(False),
+            ).values(is_finalized=True, finalized_at=utcnow(), row_version=expected + 1, updated_at=utcnow()))
+            if result.rowcount != 1:
+                raise ConflictError("记录版本冲突，未定稿。")
+            db.session.expire(current)
+            after = self._record_dto(current, detail=True)
+            db.session.add(LabRecordRevision(record_id=record_id, scope="finalize", reason="用户确认定稿",
+                before_json=self._json(before), after_json=self._json(after),
+                diff_json=self._json({"is_finalized": True}), actor_kind="local_user"))
+            return after
+        return self._run(finalize)
+
+    def _save_record(self, payload, expected_row_version, *, revision_reason=None):
         record_id = self._positive_id(payload.get("id"), "id")
         try:
             expected = int(expected_row_version)
@@ -468,6 +532,10 @@ class DesktopApplicationService(DesktopModuleServiceMixin):
                 raise NotFoundError("实验记录不存在或已移入回收站。")
             if current.row_version != expected:
                 raise ConflictError("记录已在其他操作中更新，请重新加载后合并修改。")
+            if current.is_finalized and revision_reason is None:
+                raise ValidationError("记录已定稿，请使用修订入口保存更正。")
+            if revision_reason is not None and not current.is_finalized:
+                raise ValidationError("草稿记录请使用普通保存。")
             if "project_id" in values:
                 project = ResearchProject.query.filter_by(
                     id=values["project_id"], workspace_id=workspace.id, is_deleted=False,
@@ -511,8 +579,8 @@ class DesktopApplicationService(DesktopModuleServiceMixin):
             self._index_entity(workspace, "record", current)
             db.session.add(LabRecordRevision(
                 record_id=record_id,
-                scope="record",
-                reason="桌面编辑器保存",
+                scope="revision" if revision_reason is not None else "record",
+                reason=revision_reason if revision_reason is not None else "桌面编辑器保存",
                 before_json=self._json(before),
                 after_json=self._json(after),
                 diff_json=self._json({key: after.get(key) for key in values}),

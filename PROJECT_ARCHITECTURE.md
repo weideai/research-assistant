@@ -204,3 +204,15 @@ node --check app\desktop_ui\desktop_system.js
 ```
 
 发布时应同时校验安装包哈希，并确认发布差异中没有本地数据库、附件、凭据、个人路径、开发对话或过程记录。
+
+
+## REV-002：记录可靠性与桌面资源（TASK-004）
+
+- `app/desktop_ui/record_editor.js` 管理编辑会话、草稿和串行保存；页面控制器负责表单和状态显示，导航先等待保存。
+- `record.finalize`、`record.revise`、`record.revision.get` 通过 Bridge v1 暴露；普通保存、批量更改和 AI 不直接修改定稿正文。
+- `app/services/workspace_backup.py` 负责数据库快照和包含托管文件的 ZIP 归档，服务入口保留在 DesktopApplicationService。
+- `app/desktop_ui/assets/` 保存桌面所需 CSS、图标和许可证；Windows 构建随桌面目录打包。
+- 文件导入先校验元数据，复制后核验哈希；异常仅补偿本次新建副本。项目记录数使用软删除过滤后的 SQL 聚合。
+- AI 会话在访问模型前核对目标归属，并装配有限历史消息。
+
+需求：FR-REC-02、FR-FILE-01、FR-SYS-01、NFR-03/04/06、REQ-001/002。实施与验证见 docs/IMPROVEMENT-2026-09-08.md 和 TASK-004；独立审查未完成。回滚时按任务清单同时撤回调用方和服务，不改 schema、不删除用户数据或备份。

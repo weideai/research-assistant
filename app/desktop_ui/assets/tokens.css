@@ -1,0 +1,137 @@
+/* R/LAB design tokens — the single source of truth for design.md.
+ *
+ * Load order: tokens.css -> app.css -> assistant.css -> skins.css -> ide.css
+ * Rules elsewhere must reference var(--token); no literal hex values.
+ *
+ * Semantic colours come in two grades:
+ *   --x        fill grade: backgrounds, borders, status dots. NOT for text.
+ *   --x-ink    text grade: verified >= 4.5:1 on the matching --x-soft.
+ *   --x-soft   tinted background.
+ * Fill grades are reserved for non-text UI. Every --x-ink is verified against
+ * its matching soft background rather than inferred from the fill colour; see
+ * tests/test_design_tokens.py, which recomputes the ratios on every run.
+ */
+
+:root {
+  /* Typography */
+  --font-sans: "Inter", "Microsoft YaHei UI", "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+
+  --fs-display: 28px;
+  --fs-h1: 24px;
+  --fs-h2: 16px;
+  --fs-h3: 16px;
+  --fs-body: 14px;
+  --fs-sm: 13px;
+  --fs-caption: 12px;
+  --fs-micro: 11px;          /* floor: Chinese glyphs are unreadable below this */
+
+  --fw-regular: 400;
+  --fw-medium: 600;
+  --fw-bold: 700;
+  --fw-heavy: 800;
+  --fw-brand: 900;
+
+  --lh-tight: 1.25;
+  --lh-body: 1.55;
+  --lh-dense: 1.4;
+  --ls-eyebrow: 0;
+
+  /* Spacing — 4pt grid */
+  --space-1: 4px;   --space-2: 8px;   --space-3: 12px;  --space-4: 16px;
+  --space-5: 20px;  --space-6: 24px;  --space-8: 32px;  --space-10: 40px;
+  --space-12: 48px; --space-16: 64px;
+  --page-inline: clamp(24px, 4vw, 56px);
+
+  /* Radius — 3 scale steps plus a pill. The stylesheets had grown 11 distinct values
+   * (2..16px); at that density a 1px difference is noise, not intent. Panels and
+   * controls stay near-square in the fixed desktop design. */
+  --radius-sm: 6px;          /* buttons, inputs, chips, small tiles */
+  --radius-md: 8px;          /* panels, cards, dialogs */
+  --radius-lg: 12px;         /* floating docks and bottom sheets */
+  --radius-full: 999px;      /* pills; circles keep 50% */
+
+  --radius-panel: var(--radius-md);
+  --radius-control: var(--radius-sm);
+
+  /* Elevation */
+  --shadow-1: 0 1px 3px rgba(15, 31, 46, .06);
+  --shadow-2: 0 8px 24px rgba(15, 31, 46, .10);
+  --shadow-3: 0 18px 48px rgba(15, 31, 46, .20);
+
+  /* Motion */
+  --motion-fast: 120ms;
+  --motion-slow: 180ms;
+  --motion-ease: cubic-bezier(.2, 0, 0, 1);
+
+  /* Controls */
+  --control-height: 40px;
+  --icon-button-size: 40px;
+  --hit-area-inset: 2px;     /* ::after expansion to reach 44x44 */
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--blue) 30%, transparent);
+
+  /* IDE shell */
+  --explorer-width: 216px;
+  --editor-bar-height: 36px;
+  --ai-sidecar-width: 264px;
+}
+
+/* R/LAB medical-instrument palette from Page 1.svg. The light palette is the
+ * default so the first frame is also the no-JavaScript fallback. Optional
+ * dark and Swiss variants live in skins.css. */
+:root {
+  --bg: #f5f7fb;
+  --surface: #fff;
+  --surface-soft: #f8fcfb;
+  --surface-hover: #f1f6f7;
+  --line: #dce6e8;
+  --line-strong: #c8d7db;
+  --ink: #0f1f2e;
+  --muted: #5c7480;
+
+  --sidebar: #fff;
+  --sidebar-ink: #0f1f2e;
+  --sidebar-muted: #5c7480;
+  --sidebar-hover: #f1f4fb;
+  --sidebar-line: #dce6e8;
+  --sidebar-active-bg: #eef0ff;
+  --sidebar-active-ink: #3947c6;
+  --brand-accent: #5560e6;
+  --on-accent: #fff;
+  --on-danger: #fff;
+
+  --blue: #5560e6;   --blue-ink: #3947c6;   --blue-soft: #eef0ff;   --blue-hover: #4652d5;
+  --red: #eb5757;    --red-ink: #b52f35;    --red-soft: #fdedee;
+  --green: #29b69f;  --green-ink: #137667;  --green-soft: #e4f7f3;
+  --yellow: #f2c94c; --yellow-ink: #765b00; --yellow-soft: #fff7d8;
+  --accent: #5bcfc5; --accent-ink: #157c76; --accent-soft: #e8f8f6;
+  --info: #4a90d9;   --info-ink: #2b68a3;   --info-soft: #eaf3fc;
+  --secondary: #5c7480;
+
+  --chip-blue: #eef0ff;   --chip-blue-ink: #5560e6;
+  --chip-purple: #f3edfd; --chip-purple-ink: #8254e8;
+  --chip-green: #e4f7f3;  --chip-green-ink: #137667;
+  --chip-orange: #fff2e2; --chip-orange-ink: #a85e13;
+
+  --chrome: #fff;
+  --chrome-soft: #f8fcfb;
+  --chrome-active: #eef0ff;
+  --panel-sheen: linear-gradient(145deg, rgba(255, 255, 255, .72), rgba(255, 255, 255, 0));
+  --workspace-texture:
+    linear-gradient(to right, rgba(85, 96, 230, .022) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(85, 96, 230, .018) 1px, transparent 1px);
+  --workspace-texture-size: 64px 64px;
+  --workspace-texture-opacity: .7;
+
+  /* Theme previews remain stable while the active skin changes. */
+  --preview-light-bg: #f5f7fb;
+  --preview-light-accent: #5560e6;
+  --preview-light-panel: #fff;
+  --preview-dark-bg: #0b0e14;
+  --preview-dark-accent: #8b96ff;
+  --preview-dark-panel: #20283a;
+  --preview-swiss-bg: #f2f2ef;
+  --preview-swiss-accent: #d71920;
+  --preview-swiss-panel: #111;
+  --scrim: rgba(15, 31, 46, .48);
+}

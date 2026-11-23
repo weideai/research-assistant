@@ -1,0 +1,628 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>R/LAB 科研工作台 - HTML 设计预览</title>
+  <style>
+    :root {
+      --font-sans: "Microsoft YaHei UI", "Noto Sans SC", system-ui, sans-serif;
+      --font-serif: "Source Han Serif SC", "Noto Serif SC", Georgia, serif;
+      --font-mono: "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+      --bg: #f4f6f8;
+      --surface: #ffffff;
+      --surface-soft: #f8fafb;
+      --surface-hover: #f1f4f6;
+      --line: #dbe3e7;
+      --line-strong: #c9d4da;
+      --ink: #152632;
+      --muted: #607783;
+      --subtle: #8297a2;
+      --accent: #4d59d9;
+      --accent-hover: #3d48c4;
+      --accent-soft: #eef0ff;
+      --accent-line: #dce0ff;
+      --teal: #148270;
+      --teal-soft: #e7f6f2;
+      --amber: #8a6500;
+      --amber-soft: #fff5d6;
+      --red: #b73a44;
+      --red-soft: #fdebed;
+      --blue: #2f6d9f;
+      --blue-soft: #eaf3fa;
+      --sidebar: 224px;
+      --topbar: 56px;
+      --radius-control: 6px;
+      --radius-panel: 8px;
+      --shadow-panel: 0 1px 2px rgba(20, 38, 50, .04);
+      --shadow-float: 0 12px 34px rgba(20, 38, 50, .14);
+      --motion: 140ms cubic-bezier(.2, 0, 0, 1);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--ink);
+      font: 14px/1.5 var(--font-sans);
+      font-synthesis: none;
+      -webkit-font-smoothing: antialiased;
+    }
+    button, input, select { font: inherit; }
+    button { color: inherit; }
+    table, time, .mono, .metric-value { font-variant-numeric: tabular-nums; }
+    [hidden] { display: none !important; }
+    :focus-visible { outline: 3px solid rgba(77, 89, 217, .22); outline-offset: 2px; }
+
+    .app-shell { height: 100vh; display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); }
+    .sidebar {
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--surface);
+      border-right: 1px solid var(--line);
+    }
+    .explorer-title {
+      height: 32px;
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      border-bottom: 1px solid var(--line);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .workspace-card {
+      margin: 10px 10px 8px;
+      min-height: 58px;
+      display: grid;
+      grid-template-columns: 28px 1fr 20px;
+      align-items: center;
+      gap: 10px;
+      padding: 9px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-control);
+      background: #f3f5fc;
+      cursor: pointer;
+    }
+    .workspace-mark {
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border-radius: 5px;
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+    .workspace-card strong { display: block; font-size: 13px; }
+    .workspace-card small { display: block; margin-top: 1px; color: #59707c; font: 10px/1.3 var(--font-mono); }
+    .sidebar-nav { min-height: 0; flex: 1; overflow: auto; padding: 0 10px 12px; }
+    .nav-group { margin: 5px 0 15px; }
+    .nav-label {
+      min-height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 25px;
+      color: #6a808c;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .nav-label span:last-child { color: #8297a2; font: 9px/1 var(--font-mono); }
+    .nav-item {
+      width: 100%;
+      height: 34px;
+      display: grid;
+      grid-template-columns: 20px 1fr auto;
+      align-items: center;
+      gap: 7px;
+      padding: 0 9px;
+      border: 0;
+      border-radius: var(--radius-control);
+      background: transparent;
+      color: #4e6876;
+      text-align: left;
+      cursor: pointer;
+      position: relative;
+    }
+    .nav-item:hover { background: var(--surface-hover); color: var(--ink); }
+    .nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+    .nav-item.active::before {
+      content: "";
+      position: absolute;
+      left: -10px;
+      width: 3px;
+      height: 20px;
+      border-radius: 0 2px 2px 0;
+      background: var(--accent);
+    }
+    .nav-item svg { width: 16px; height: 16px; stroke-width: 1.8; }
+    .nav-count {
+      min-width: 22px;
+      padding: 0 6px;
+      border-radius: 999px;
+      background: var(--surface-hover);
+      color: var(--muted);
+      font: 10px/18px var(--font-mono);
+      text-align: center;
+    }
+    .nav-item.active .nav-count { background: var(--surface); color: var(--accent); }
+    .sidebar-bottom { border-top: 1px solid var(--line); padding: 8px 10px; }
+    .local-workspace, .settings-link {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 28px 1fr;
+      align-items: center;
+      gap: 9px;
+      padding: 6px 0;
+      border: 0;
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+    }
+    .local-icon { width: 28px; height: 28px; border: 1px solid var(--line); border-radius: 6px; display: grid; place-items: center; color: var(--muted); }
+    .local-workspace strong, .settings-link strong { display: block; font-size: 12px; }
+    .local-workspace small, .settings-link small { display: block; color: var(--muted); font-size: 10px; }
+    .author { margin-top: 7px; padding-top: 8px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+    .author b { color: var(--ink); }
+
+    .main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+    .topbar {
+      height: var(--topbar);
+      flex: none;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 22px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--line);
+    }
+    .history-tools { display: flex; gap: 4px; }
+    .icon-button {
+      width: 36px;
+      height: 36px;
+      display: grid;
+      place-items: center;
+      border: 1px solid transparent;
+      border-radius: var(--radius-control);
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      position: relative;
+    }
+    .icon-button::after { content: ""; position: absolute; inset: -4px; }
+    .icon-button:hover { border-color: var(--line); background: var(--surface-soft); color: var(--ink); }
+    .icon-button svg { width: 17px; height: 17px; }
+    .breadcrumb { min-width: 160px; color: var(--muted); font-size: 12px; }
+    .breadcrumb b { color: var(--ink); }
+    .global-search { width: min(460px, 42vw); margin: 0 auto; position: relative; }
+    .global-search svg { width: 16px; height: 16px; position: absolute; left: 11px; top: 10px; color: var(--subtle); }
+    .global-search input {
+      width: 100%; height: 36px; padding: 0 42px 0 36px;
+      border: 1px solid var(--line); border-radius: var(--radius-control);
+      background: var(--surface-soft); color: var(--ink);
+    }
+    .global-search kbd { position: absolute; right: 9px; top: 8px; padding: 1px 5px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--subtle); font: 10px/16px var(--font-sans); }
+    .top-actions { display: flex; align-items: center; gap: 6px; }
+
+    .button {
+      min-height: 38px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      padding: 0 13px;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-control);
+      background: var(--surface);
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .button:hover { background: var(--surface-hover); }
+    .button.primary { border-color: var(--accent); background: var(--accent); color: #fff; }
+    .button.primary:hover { border-color: var(--accent-hover); background: var(--accent-hover); }
+    .button.danger { color: var(--red); }
+    .button.compact { min-height: 32px; padding: 0 10px; }
+    .button svg { width: 15px; height: 15px; }
+    .text-button { padding: 0; border: 0; background: transparent; color: var(--accent); font-size: 12px; font-weight: 700; cursor: pointer; }
+
+    .content { min-height: 0; flex: 1; overflow: auto; padding: 22px clamp(18px, 3vw, 38px) 34px; }
+    .view { display: none; max-width: 1540px; margin: 0 auto; }
+    .view.active { display: block; animation: enter 160ms ease-out; }
+    @keyframes enter { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+    .page-head { min-height: 62px; display: flex; align-items: flex-end; gap: 20px; margin-bottom: 18px; }
+    .page-head h1 { margin: 0; font: 700 24px/1.2 var(--font-serif); }
+    .page-head p { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
+    .page-actions { margin-left: auto; display: flex; gap: 8px; }
+
+    .metric-band {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(150px, 1fr));
+      margin-bottom: 16px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-panel);
+      background: var(--surface);
+      box-shadow: var(--shadow-panel);
+      overflow: hidden;
+    }
+    .metric { min-height: 104px; display: grid; grid-template-columns: 38px 1fr; gap: 12px; align-items: center; padding: 18px; border: 0; border-right: 1px solid var(--line); background: transparent; text-align: left; cursor: pointer; }
+    .metric:last-child { border-right: 0; }
+    .metric:hover { background: var(--surface-soft); }
+    .metric-icon { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 7px; }
+    .metric-icon svg { width: 19px; height: 19px; }
+    .metric:nth-child(1) .metric-icon { background: var(--accent-soft); color: var(--accent); }
+    .metric:nth-child(2) .metric-icon { background: var(--teal-soft); color: var(--teal); }
+    .metric:nth-child(3) .metric-icon { background: var(--amber-soft); color: var(--amber); }
+    .metric:nth-child(4) .metric-icon { background: var(--blue-soft); color: var(--blue); }
+    .metric-label { color: var(--muted); font-size: 11px; }
+    .metric-value { margin-top: 2px; font-size: 24px; font-weight: 750; line-height: 1.1; }
+    .metric-note { margin-top: 4px; color: var(--subtle); font-size: 10px; }
+
+    .dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(280px, .7fr); gap: 16px; align-items: start; }
+    .stack { display: grid; gap: 16px; }
+    .panel { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); box-shadow: var(--shadow-panel); overflow: hidden; }
+    .panel-head { min-height: 50px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--line); }
+    .panel-head h2 { margin: 0; font: 700 15px/1.2 var(--font-serif); }
+    .panel-head .meta { color: var(--muted); font-size: 11px; }
+    .panel-head .panel-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+    .panel-body { padding: 14px; }
+
+    .toolbar { min-height: 54px; display: flex; align-items: center; gap: 9px; padding: 9px 12px; border-bottom: 1px solid var(--line); background: var(--surface); }
+    .field { position: relative; }
+    .field svg { width: 15px; height: 15px; position: absolute; left: 10px; top: 10px; color: var(--subtle); pointer-events: none; }
+    .field input, .field select, .toolbar select {
+      height: 36px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-control);
+      background: var(--surface);
+      color: var(--ink);
+      font-size: 12px;
+    }
+    .field input { min-width: 260px; padding: 0 11px 0 34px; }
+    .toolbar select { padding: 0 30px 0 10px; }
+    .toolbar-spacer { flex: 1; }
+    .result-count { color: var(--muted); font-size: 11px; white-space: nowrap; }
+    .segmented { display: inline-flex; padding: 3px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface-soft); }
+    .segmented button { height: 28px; min-width: 32px; padding: 0 9px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; }
+    .segmented button.active { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-panel); font-weight: 700; }
+
+    .table-wrap { width: 100%; overflow: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th { height: 38px; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--surface-soft); color: var(--muted); text-align: left; font-size: 10px; font-weight: 750; white-space: nowrap; }
+    td { min-height: 52px; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+    tbody tr { transition: background var(--motion); }
+    tbody tr:hover { background: var(--surface-soft); }
+    tbody tr.selected { background: var(--accent-soft); }
+    tbody tr:last-child td { border-bottom: 0; }
+    .check-cell { width: 42px; text-align: center; }
+    input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent); }
+    .mono { color: #4d6978; font: 11px/1.4 var(--font-mono); white-space: nowrap; }
+    .title-cell { min-width: 240px; }
+    .cell-title { color: var(--ink); font-weight: 700; }
+    .cell-desc { max-width: 390px; margin-top: 2px; color: var(--muted); font-size: 11px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .right { text-align: right; }
+    .chip { height: 22px; display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border-radius: 999px; font-size: 10px; font-weight: 750; white-space: nowrap; }
+    .chip::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+    .chip[data-tone="active"] { background: var(--accent-soft); color: var(--accent); }
+    .chip[data-tone="success"] { background: var(--teal-soft); color: var(--teal); }
+    .chip[data-tone="warning"] { background: var(--amber-soft); color: var(--amber); }
+    .chip[data-tone="danger"] { background: var(--red-soft); color: var(--red); }
+    .chip[data-tone="neutral"] { background: var(--surface-hover); color: var(--muted); }
+    .row-menu { width: 30px; height: 30px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; }
+    .row-menu:hover { background: var(--surface-hover); color: var(--ink); }
+
+    .pagination { min-height: 48px; display: flex; align-items: center; gap: 5px; padding: 8px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+    .pagination .pages { margin-left: auto; display: flex; gap: 4px; }
+    .page-button { min-width: 30px; height: 30px; padding: 0 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--muted); cursor: pointer; }
+    .page-button:hover, .page-button.active { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent); }
+
+    .task-list { list-style: none; margin: 0; padding: 4px 14px 12px; }
+    .task-list li { display: grid; grid-template-columns: 22px 1fr auto; gap: 9px; align-items: start; padding: 10px 0; border-bottom: 1px solid var(--line); }
+    .task-list li:last-child { border-bottom: 0; }
+    .task-list input { margin-top: 2px; }
+    .task-list strong { display: block; font-size: 12px; }
+    .task-list small { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; }
+    .due { color: var(--amber); font-size: 10px; white-space: nowrap; }
+    .due.overdue { color: var(--red); }
+    .week-strip { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+    .day { min-width: 0; padding: 8px 3px; border: 1px solid var(--line); border-radius: 5px; text-align: center; }
+    .day b { display: block; font-size: 11px; }
+    .day span { display: block; color: var(--muted); font-size: 9px; }
+    .day.active { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent); }
+    .day.has-event::after { content: ""; width: 5px; height: 5px; display: block; margin: 5px auto 0; border-radius: 50%; background: var(--teal); }
+
+    .split-view { display: grid; grid-template-columns: minmax(560px, 1fr) minmax(340px, .6fr); gap: 14px; align-items: start; }
+    .preview { position: sticky; top: 0; }
+    .preview-head { padding: 16px; border-bottom: 1px solid var(--line); }
+    .preview-head h2 { margin: 0 0 5px; font: 700 16px/1.4 var(--font-serif); }
+    .preview-meta { display: flex; flex-wrap: wrap; gap: 8px 14px; color: var(--muted); font-size: 10px; }
+    .preview-body { max-height: calc(100vh - 245px); overflow: auto; padding: 16px; }
+    .section-label { margin: 0 0 7px; color: var(--muted); font-size: 10px; font-weight: 750; }
+    .read { margin: 0 0 18px; font: 13px/1.78 var(--font-serif); }
+    .parameter-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; margin-bottom: 18px; }
+    .parameter { display: flex; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-soft); font-size: 11px; }
+    .parameter span { color: var(--muted); }
+    .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+    .steps li { display: grid; grid-template-columns: 20px 1fr; gap: 8px; padding: 8px; border: 1px solid var(--line); border-radius: 5px; font-size: 11px; }
+    .step-number { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; background: var(--surface-hover); color: var(--muted); font-size: 9px; font-weight: 750; }
+    .steps li.done .step-number { background: var(--teal-soft); color: var(--teal); }
+
+    .empty { min-height: 130px; display: grid; place-items: center; padding: 20px; text-align: center; }
+    .empty svg { width: 26px; height: 26px; margin-bottom: 7px; color: var(--subtle); }
+    .empty strong { display: block; font-size: 12px; }
+    .empty small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
+
+    dialog { width: min(680px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--line-strong); border-radius: var(--radius-panel); box-shadow: var(--shadow-float); color: var(--ink); }
+    dialog::backdrop { background: rgba(21, 38, 50, .34); }
+    .dialog-head, .dialog-foot { min-height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 16px; }
+    .dialog-head { border-bottom: 1px solid var(--line); }
+    .dialog-head h2 { margin: 0; font: 700 16px/1.2 var(--font-serif); }
+    .dialog-head button { margin-left: auto; }
+    .dialog-body { padding: 16px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+    .form-field { display: grid; gap: 5px; }
+    .form-field.full { grid-column: 1 / -1; }
+    .form-field span { font-size: 11px; font-weight: 700; }
+    .form-field input, .form-field select, .form-field textarea { width: 100%; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); color: var(--ink); font: 12px/1.5 var(--font-sans); }
+    .form-field input, .form-field select { height: 38px; padding: 0 10px; }
+    .form-field textarea { min-height: 84px; padding: 9px 10px; resize: vertical; }
+    .dialog-foot { justify-content: flex-end; border-top: 1px solid var(--line); background: var(--surface-soft); }
+
+    .mobile-nav-button { display: none; }
+    @media (max-width: 1080px) {
+      :root { --sidebar: 208px; }
+      .dashboard-grid, .split-view { grid-template-columns: 1fr; }
+      .preview { position: static; }
+      .metric-band { grid-template-columns: repeat(2, 1fr); }
+      .metric:nth-child(2) { border-right: 0; }
+      .metric:nth-child(-n + 2) { border-bottom: 1px solid var(--line); }
+    }
+    @media (max-width: 760px) {
+      body { overflow: auto; }
+      .app-shell { height: auto; min-height: 100vh; grid-template-columns: 1fr; }
+      .sidebar { position: fixed; inset: 0 auto 0 0; width: min(284px, 88vw); z-index: 20; box-shadow: var(--shadow-float); transform: translateX(-102%); transition: transform var(--motion); }
+      .sidebar.open { transform: none; }
+      .mobile-nav-button { display: grid; }
+      .main { min-height: 100vh; }
+      .topbar { padding: 0 10px; }
+      .history-tools, .breadcrumb, .top-actions .button span, .global-search kbd { display: none; }
+      .global-search { width: auto; flex: 1; margin: 0; }
+      .content { padding: 16px 12px 28px; overflow: visible; }
+      .page-head { align-items: flex-start; flex-direction: column; }
+      .page-actions { margin-left: 0; width: 100%; }
+      .page-actions .button { flex: 1; }
+      .metric-band { grid-template-columns: 1fr 1fr; }
+      .metric { padding: 13px; grid-template-columns: 32px 1fr; }
+      .metric-icon { width: 32px; height: 32px; }
+      .toolbar { align-items: stretch; flex-wrap: wrap; }
+      .field, .field input { width: 100%; min-width: 0; }
+      .toolbar-spacer { display: none; }
+      .parameter-grid { grid-template-columns: 1fr; }
+      .dialog-body { grid-template-columns: 1fr; }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar" aria-label="资源管理器">
+      <div class="explorer-title">资源管理器</div>
+      <button class="workspace-card" type="button">
+        <span class="workspace-mark"><i data-lucide="microscope"></i></span>
+        <span><strong>科研工作区</strong><small>LOCAL WORKSPACE</small></span>
+        <i data-lucide="chevrons-up-down"></i>
+      </button>
+      <nav class="sidebar-nav" id="sidebar-nav">
+        <section class="nav-group">
+          <div class="nav-label"><span>工作</span><span>WORKSPACE</span></div>
+          <button class="nav-item active" data-view="overview" type="button"><i data-lucide="layout-dashboard"></i><span>总览</span></button>
+          <button class="nav-item" data-view="records" type="button"><i data-lucide="flask-conical"></i><span>实验记录</span><span class="nav-count">128</span></button>
+          <button class="nav-item" data-view="plans" type="button"><i data-lucide="route"></i><span>实验计划</span><span class="nav-count">8</span></button>
+          <button class="nav-item" data-view="tasks" type="button"><i data-lucide="list-checks"></i><span>任务</span><span class="nav-count">12</span></button>
+        </section>
+        <section class="nav-group">
+          <div class="nav-label"><span>资料</span><span>RESOURCES</span></div>
+          <button class="nav-item" data-view="files" type="button"><i data-lucide="folder-open"></i><span>报告与文件</span><span class="nav-count">86</span></button>
+          <button class="nav-item" data-view="weekly" type="button"><i data-lucide="notebook-tabs"></i><span>周报</span><span class="nav-count">18</span></button>
+        </section>
+        <section class="nav-group">
+          <div class="nav-label"><span>复用</span><span>LIBRARY</span></div>
+          <button class="nav-item" data-view="templates" type="button"><i data-lucide="blocks"></i><span>模板中心</span><span class="nav-count">14</span></button>
+          <button class="nav-item" data-view="materials" type="button"><i data-lucide="package-search"></i><span>物品管理</span><span class="nav-count">43</span></button>
+        </section>
+        <section class="nav-group">
+          <div class="nav-label"><span>系统</span><span>SYSTEM</span></div>
+          <button class="nav-item" data-view="recycle" type="button"><i data-lucide="trash-2"></i><span>回收站</span><span class="nav-count">6</span></button>
+        </section>
+      </nav>
+      <div class="sidebar-bottom">
+        <button class="local-workspace" type="button"><span class="local-icon"><i data-lucide="hard-drive"></i></span><span><strong>本地工作区</strong><small>数据保存在此设备</small></span></button>
+        <button class="settings-link" type="button"><span class="local-icon"><i data-lucide="settings-2"></i></span><span><strong>设置</strong><small>工作区与执行偏好</small></span></button>
+        <div class="author"><b>R/LAB</b> · v3.0 HTML Preview</div>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <button class="icon-button mobile-nav-button" id="mobile-nav" type="button" aria-label="打开导航"><i data-lucide="menu"></i></button>
+        <div class="history-tools">
+          <button class="icon-button" type="button" aria-label="后退"><i data-lucide="arrow-left"></i></button>
+          <button class="icon-button" type="button" aria-label="前进"><i data-lucide="arrow-right"></i></button>
+        </div>
+        <div class="breadcrumb">科研工作区 / <b id="breadcrumb-current">总览</b></div>
+        <label class="global-search"><i data-lucide="search"></i><input id="global-search" type="search" placeholder="搜索记录、文件、任务和周报"><kbd>Ctrl K</kbd></label>
+        <div class="top-actions">
+          <button class="icon-button" type="button" aria-label="通知"><i data-lucide="bell"></i></button>
+          <button class="button" type="button"><i data-lucide="sparkles"></i><span>AI 助手</span></button>
+        </div>
+      </header>
+
+      <div class="content">
+        <section class="view active" data-view-panel="overview">
+          <header class="page-head">
+            <div><h1>科研工作总览</h1><p>2026 年 8 月 19 日 · 3 条记录待分析，2 项任务今日到期</p></div>
+            <div class="page-actions"><button class="button" type="button"><i data-lucide="upload"></i>导入资料</button><button class="button primary" data-open-record type="button"><i data-lucide="plus"></i>新建实验记录</button></div>
+          </header>
+
+          <div class="metric-band" aria-label="工作区指标">
+            <button class="metric" data-view="plans" type="button"><span class="metric-icon"><i data-lucide="route"></i></span><span><span class="metric-label">进行中计划</span><span class="metric-value">8</span><span class="metric-note">本周新增 2 项</span></span></button>
+            <button class="metric" data-view="records" type="button"><span class="metric-icon"><i data-lucide="flask-conical"></i></span><span><span class="metric-label">实验记录</span><span class="metric-value">128</span><span class="metric-note">本周完成 9 条</span></span></button>
+            <button class="metric" data-view="tasks" type="button"><span class="metric-icon"><i data-lucide="clock-3"></i></span><span><span class="metric-label">待办任务</span><span class="metric-value">12</span><span class="metric-note">2 项今日到期</span></span></button>
+            <button class="metric" data-view="files" type="button"><span class="metric-icon"><i data-lucide="folder-open"></i></span><span><span class="metric-label">报告与文件</span><span class="metric-value">86</span><span class="metric-note">最近备份 14:32</span></span></button>
+          </div>
+
+          <div class="dashboard-grid">
+            <section class="panel" data-table-panel>
+              <div class="panel-head"><h2>近期实验记录</h2><span class="meta">最近 30 天</span><div class="panel-actions"><button class="text-button" data-view="records" type="button">查看全部</button></div></div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>编号</th><th>实验记录</th><th>项目</th><th>状态</th><th class="right">更新时间</th></tr></thead>
+                  <tbody>
+                    <tr><td class="mono">EXP-2026-0142</td><td class="title-cell"><div class="cell-title">HEK293 转染效率优化 · 第 3 轮</div><div class="cell-desc">调整 PEI 与质粒配比，比较无血清与含血清条件。</div></td><td>外泌体递送体系</td><td><span class="chip" data-tone="active">进行中</span></td><td class="right"><time>今天 14:02</time></td></tr>
+                    <tr><td class="mono">EXP-2026-0141</td><td class="title-cell"><div class="cell-title">Western blot 抗体滴定</div><div class="cell-desc">一抗 1:500 / 1:1000 / 1:2000 三档并行。</div></td><td>蛋白表达验证</td><td><span class="chip" data-tone="warning">待分析</span></td><td class="right"><time>昨天 18:41</time></td></tr>
+                    <tr><td class="mono">EXP-2026-0139</td><td class="title-cell"><div class="cell-title">小鼠给药耐受性预实验</div><div class="cell-desc">低中高三剂量组，记录体重与摄食量变化。</div></td><td>候选化合物评估</td><td><span class="chip" data-tone="success">已完成</span></td><td class="right"><time>08-15 16:20</time></td></tr>
+                    <tr><td class="mono">EXP-2026-0137</td><td class="title-cell"><div class="cell-title">qPCR 引物特异性验证</div><div class="cell-desc">熔解曲线单峰，无引物二聚体。</div></td><td>表达谱分析</td><td><span class="chip" data-tone="neutral">已定稿</span></td><td class="right"><time>08-13 09:08</time></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <div class="stack">
+              <section class="panel"><div class="panel-head"><h2>今日任务</h2><span class="meta">4 项</span><div class="panel-actions"><button class="text-button" data-view="tasks" type="button">全部任务</button></div></div><ul class="task-list"><li><input type="checkbox" aria-label="完成任务"><span><strong>复核 EXP-0141 曝光图</strong><small>蛋白表达验证</small></span><time class="due overdue">已逾期 1h</time></li><li><input type="checkbox" aria-label="完成任务"><span><strong>补充转染实验参数</strong><small>外泌体递送体系</small></span><time class="due">16:30</time></li><li><input type="checkbox" aria-label="完成任务"><span><strong>订购二抗</strong><small>预计到货 3 天</small></span><time class="due">今天</time></li><li><input type="checkbox" aria-label="完成任务"><span><strong>整理第 33 周周报</strong><small>周报管理</small></span><time class="due">周五</time></li></ul></section>
+              <section class="panel"><div class="panel-head"><h2>本周节奏</h2></div><div class="panel-body"><div class="week-strip"><div class="day"><b>一</b><span>17</span></div><div class="day has-event"><b>二</b><span>18</span></div><div class="day active has-event"><b>三</b><span>19</span></div><div class="day has-event"><b>四</b><span>20</span></div><div class="day"><b>五</b><span>21</span></div><div class="day"><b>六</b><span>22</span></div><div class="day"><b>日</b><span>23</span></div></div></div></section>
+            </div>
+          </div>
+        </section>
+
+        <section class="view" data-view-panel="records">
+          <header class="page-head"><div><h1>实验记录</h1><p>按记录查找实验过程、结果、附件与修订历史</p></div><div class="page-actions"><button class="button" type="button"><i data-lucide="download"></i>批量导出</button><button class="button primary" data-open-record type="button"><i data-lucide="plus"></i>新建记录</button></div></header>
+          <div class="split-view">
+            <section class="panel" data-table-panel>
+              <div class="toolbar"><label class="field"><i data-lucide="search"></i><input data-table-search type="search" placeholder="搜索编号、标题或项目"></label><select data-status-filter aria-label="筛选状态"><option value="">全部状态</option><option>进行中</option><option>待分析</option><option>已完成</option><option>草稿</option></select><span class="toolbar-spacer"></span><span class="result-count" data-result-count>128 条记录</span><div class="segmented" aria-label="表格密度"><button class="active" type="button" data-density="comfortable">舒适</button><button type="button" data-density="compact">紧凑</button></div></div>
+              <div class="table-wrap"><table data-filter-table><thead><tr><th class="check-cell"><input data-check-all type="checkbox" aria-label="选择当前页"></th><th>编号</th><th>实验记录</th><th>项目</th><th>执行者</th><th>状态</th><th>更新时间</th><th></th></tr></thead><tbody>
+                <tr class="selected" data-preview="0"><td class="check-cell"><input type="checkbox" aria-label="选择 EXP-2026-0142"></td><td class="mono">EXP-2026-0142</td><td class="title-cell"><div class="cell-title">HEK293 转染效率优化 · 第 3 轮</div><div class="cell-desc">比较 3:1 条件下两种培养基环境。</div></td><td>外泌体递送体系</td><td>李明</td><td><span class="chip" data-tone="active">进行中</span></td><td><time>今天 14:02</time></td><td><button class="row-menu" type="button" aria-label="更多操作"><i data-lucide="ellipsis"></i></button></td></tr>
+                <tr data-preview="1"><td class="check-cell"><input type="checkbox" aria-label="选择 EXP-2026-0141"></td><td class="mono">EXP-2026-0141</td><td class="title-cell"><div class="cell-title">Western blot 抗体滴定</div><div class="cell-desc">一抗三档并行，待完成曝光图复核。</div></td><td>蛋白表达验证</td><td>王琳</td><td><span class="chip" data-tone="warning">待分析</span></td><td><time>昨天 18:41</time></td><td><button class="row-menu" type="button" aria-label="更多操作"><i data-lucide="ellipsis"></i></button></td></tr>
+                <tr data-preview="2"><td class="check-cell"><input type="checkbox" aria-label="选择 EXP-2026-0140"></td><td class="mono">EXP-2026-0140</td><td class="title-cell"><div class="cell-title">细胞爬片免疫荧光</div><div class="cell-desc">比较 BSA 与正常山羊血清封闭条件。</div></td><td>成像条件优化</td><td>李明</td><td><span class="chip" data-tone="neutral">草稿</span></td><td><time>08-17 11:20</time></td><td><button class="row-menu" type="button" aria-label="更多操作"><i data-lucide="ellipsis"></i></button></td></tr>
+                <tr data-preview="3"><td class="check-cell"><input type="checkbox" aria-label="选择 EXP-2026-0139"></td><td class="mono">EXP-2026-0139</td><td class="title-cell"><div class="cell-title">小鼠给药耐受性预实验</div><div class="cell-desc">低中高三剂量组体重与摄食量变化。</div></td><td>候选化合物评估</td><td>陈思</td><td><span class="chip" data-tone="success">已完成</span></td><td><time>08-15 16:20</time></td><td><button class="row-menu" type="button" aria-label="更多操作"><i data-lucide="ellipsis"></i></button></td></tr>
+                <tr data-preview="4"><td class="check-cell"><input type="checkbox" aria-label="选择 EXP-2026-0138"></td><td class="mono">EXP-2026-0138</td><td class="title-cell"><div class="cell-title">质粒双酶切验证</div><div class="cell-desc">条带位置符合预期，准备送测序。</div></td><td>载体构建</td><td>王琳</td><td><span class="chip" data-tone="success">已完成</span></td><td><time>08-14 10:06</time></td><td><button class="row-menu" type="button" aria-label="更多操作"><i data-lucide="ellipsis"></i></button></td></tr>
+              </tbody></table></div>
+              <footer class="pagination"><span>第 1-5 条，共 128 条</span><div class="pages"><button class="page-button" type="button" aria-label="上一页"><i data-lucide="chevron-left"></i></button><button class="page-button active" type="button">1</button><button class="page-button" type="button">2</button><button class="page-button" type="button">3</button><button class="page-button" type="button">…</button><button class="page-button" type="button">26</button><button class="page-button" type="button" aria-label="下一页"><i data-lucide="chevron-right"></i></button></div></footer>
+            </section>
+            <aside class="panel preview" id="record-preview"><div class="preview-head"><h2 id="preview-title">HEK293 转染效率优化 · 第 3 轮</h2><div class="preview-meta"><span class="mono" id="preview-code">EXP-2026-0142</span><span id="preview-project">外泌体递送体系</span><span id="preview-owner">执行者：李明</span><span class="chip" data-tone="active" id="preview-status">进行中</span></div></div><div class="preview-body"><p class="section-label">实验目的</p><p class="read" id="preview-purpose">提高 HEK293 瞬时转染的荧光阳性率至 60% 以上，为后续外泌体载药量测定提供稳定起始材料。</p><p class="section-label">关键参数</p><div class="parameter-grid"><div class="parameter"><span>PEI : 质粒</span><b>3 : 1</b></div><div class="parameter"><span>孵育时间</span><b>48 h</b></div><div class="parameter"><span>接种密度</span><b>2.5×10⁵</b></div><div class="parameter"><span>血清浓度</span><b>0% / 10%</b></div></div><p class="section-label">步骤概览 · 3 / 5 已完成</p><ol class="steps"><li class="done"><span class="step-number">1</span><span>接种 6 孔板，密度 2.5×10⁵</span></li><li class="done"><span class="step-number">2</span><span>配制 PEI / 质粒复合物，静置 20 min</span></li><li class="done"><span class="step-number">3</span><span>换液并加入复合物，设置两组条件</span></li><li><span class="step-number">4</span><span>48 h 后荧光显微镜计数</span></li><li><span class="step-number">5</span><span>流式复核阳性率并记录 MFI</span></li></ol></div></aside>
+          </div>
+        </section>
+
+        <section class="view" data-view-panel="plans"><header class="page-head"><div><h1>实验计划</h1><p>管理准备中的实验、依赖条件和执行进度</p></div><div class="page-actions"><button class="button primary" type="button"><i data-lucide="plus"></i>新建计划</button></div></header><section class="panel" data-table-panel><div class="toolbar"><label class="field"><i data-lucide="search"></i><input data-table-search type="search" placeholder="搜索计划或研究目标"></label><select data-status-filter><option value="">全部阶段</option><option>准备中</option><option>执行中</option><option>待复核</option></select><span class="toolbar-spacer"></span><span class="result-count" data-result-count>8 项计划</span></div><div class="table-wrap"><table data-filter-table><thead><tr><th>计划</th><th>关联项目</th><th>当前阶段</th><th>负责人</th><th>计划日期</th><th>进度</th><th></th></tr></thead><tbody><tr><td class="title-cell"><div class="cell-title">转染条件矩阵补充实验</div><div class="cell-desc">补充 2.5:1 与 3.5:1 两组，统一 48h 终点。</div></td><td>外泌体递送体系</td><td><span class="chip" data-tone="active">执行中</span></td><td>李明</td><td>08-19 - 08-21</td><td>3 / 5</td><td><button class="row-menu"><i data-lucide="ellipsis"></i></button></td></tr><tr><td class="title-cell"><div class="cell-title">抗体滴定复核</div><div class="cell-desc">复核曝光图并确定正式稀释比例。</div></td><td>蛋白表达验证</td><td><span class="chip" data-tone="warning">待复核</span></td><td>王琳</td><td>08-20</td><td>4 / 5</td><td><button class="row-menu"><i data-lucide="ellipsis"></i></button></td></tr><tr><td class="title-cell"><div class="cell-title">候选化合物第二轮给药</div><div class="cell-desc">等待动物伦理编号与试剂到货。</div></td><td>候选化合物评估</td><td><span class="chip" data-tone="neutral">准备中</span></td><td>陈思</td><td>08-25</td><td>1 / 6</td><td><button class="row-menu"><i data-lucide="ellipsis"></i></button></td></tr></tbody></table></div><footer class="pagination"><span>第 1-3 条，共 8 条</span><div class="pages"><button class="page-button active">1</button><button class="page-button">2</button><button class="page-button">3</button></div></footer></section></section>
+
+        <section class="view" data-view-panel="tasks"><header class="page-head"><div><h1>任务</h1><p>集中跟进实验、资料和报告中的下一步行动</p></div><div class="page-actions"><button class="button primary" type="button"><i data-lucide="plus"></i>新建任务</button></div></header><section class="panel" data-table-panel><div class="toolbar"><label class="field"><i data-lucide="search"></i><input data-table-search type="search" placeholder="搜索任务"></label><select data-status-filter><option value="">全部状态</option><option>待处理</option><option>进行中</option><option>已完成</option></select><span class="toolbar-spacer"></span><span class="result-count" data-result-count>12 项任务</span></div><div class="table-wrap"><table data-filter-table><thead><tr><th class="check-cell"><input data-check-all type="checkbox"></th><th>任务</th><th>关联对象</th><th>优先级</th><th>状态</th><th>截止日期</th><th></th></tr></thead><tbody><tr><td class="check-cell"><input type="checkbox"></td><td class="title-cell"><div class="cell-title">复核 EXP-0141 曝光图</div><div class="cell-desc">确认最佳一抗稀释比，并补充结论。</div></td><td>Western blot 抗体滴定</td><td><span class="chip" data-tone="danger">高</span></td><td><span class="chip" data-tone="active">进行中</span></td><td>今天 14:30</td><td><button class="row-menu"><i data-lucide="ellipsis"></i></button></td></tr><tr><td class="check-cell"><input type="checkbox"></td><td class="title-cell"><div class="cell-title">整理第 33 周周报</div></td><td>周报</td><td><span class="chip" data-tone="warning">中</span></td><td><span class="chip" data-tone="neutral">待处理</span></td><td>08-21</td><td><button class="row-menu"><i data-lucide="ellipsis"></i></button></td></tr><tr><td class="check-cell"><input type="checkbox"></td><td class="title-cell"><div class="cell-title">订购二抗</div></td><td>蛋白表达验证</td><td><span class="chip" data-tone="neutral">普通</span></td><td><span class="chip" data-tone="neutral">待处理</span></td><td>08-19</td><td><button class="row-menu"><i data-lucide="ellipsis"></i></button></td></tr></tbody></table></div><footer class="pagination"><span>第 1-3 条，共 12 条</span><div class="pages"><button class="page-button active">1</button><button class="page-button">2</button><button class="page-button">3</button><button class="page-button">4</button></div></footer></section></section>
+
+        <section class="view" data-view-panel="files"><header class="page-head"><div><h1>报告与文件</h1><p>统一管理实验附件、原始数据、导出报告和归档文件</p></div><div class="page-actions"><button class="button"><i data-lucide="folder-plus"></i>新建文件夹</button><button class="button primary"><i data-lucide="upload"></i>上传文件</button></div></header><section class="panel" data-table-panel><div class="toolbar"><label class="field"><i data-lucide="search"></i><input data-table-search type="search" placeholder="搜索文件名、项目或标签"></label><select data-status-filter><option value="">全部类型</option><option>PDF</option><option>图像</option><option>表格</option><option>数据</option></select><span class="toolbar-spacer"></span><span class="result-count" data-result-count>86 个文件</span></div><div class="table-wrap"><table data-filter-table><thead><tr><th class="check-cell"><input data-check-all type="checkbox"></th><th>文件</th><th>关联项目</th><th>类型</th><th>大小</th><th>更新时间</th><th></th></tr></thead><tbody><tr><td class="check-cell"><input type="checkbox"></td><td class="title-cell"><div class="cell-title">EXP-0141-exposure-review.pdf</div><div class="cell-desc">抗体滴定曝光图复核报告</div></td><td>蛋白表达验证</td><td>PDF</td><td>2.8 MB</td><td>今天 13:24</td><td><button class="row-menu"><i data-lucide="ellipsis"></i></button></td></tr><tr><td class="check-cell"><input type="checkbox"></td><td class="title-cell"><div class="cell-title">transfection-48h-images.zip</div><div class="cell-desc">无血清与含血清组原始荧光图</div></td><td>外泌体递送体系</td><td>图像</td><td>184 MB</td><td>昨天 20:18</td><td><button class="row-menu"><i data-lucide="ellipsis"></i></button></td></tr><tr><td class="check-cell"><input type="checkbox"></td><td class="title-cell"><div class="cell-title">dose-tolerance-weight.xlsx</div></td><td>候选化合物评估</td><td>表格</td><td>148 KB</td><td>08-15 16:38</td><td><button class="row-menu"><i data-lucide="ellipsis"></i></button></td></tr></tbody></table></div><footer class="pagination"><span>第 1-3 条，共 86 条</span><div class="pages"><button class="page-button active">1</button><button class="page-button">2</button><button class="page-button">3</button><button class="page-button">…</button><button class="page-button">18</button></div></footer></section></section>
+
+        <section class="view" data-view-panel="weekly"><header class="page-head"><div><h1>周报</h1><p>以用户上传和整理的内容为中心管理周期报告</p></div><div class="page-actions"><button class="button"><i data-lucide="sliders-horizontal"></i>报告类型</button><button class="button primary"><i data-lucide="upload"></i>上传周报</button></div></header><section class="panel" data-table-panel><div class="toolbar"><label class="field"><i data-lucide="search"></i><input data-table-search type="search" placeholder="搜索标题、周期或批注"></label><select data-status-filter><option value="">全部类型</option><option>周报</option><option>月报</option><option>组会</option><option>里程碑</option></select><span class="toolbar-spacer"></span><span class="result-count" data-result-count>18 份报告</span></div><div class="table-wrap"><table data-filter-table><thead><tr><th>报告</th><th>周期</th><th>类型</th><th>版本</th><th>个人批注</th><th>更新时间</th><th></th></tr></thead><tbody><tr><td class="title-cell"><div class="cell-title">第 33 周研究周报</div><div class="cell-desc">转染效率优化、抗体滴定与下周计划。</div></td><td>08-10 - 08-16</td><td>周报</td><td>v3</td><td>2 条</td><td>昨天 19:30</td><td><button class="row-menu"><i data-lucide="ellipsis"></i></button></td></tr><tr><td class="title-cell"><div class="cell-title">8 月组会进展汇报</div><div class="cell-desc">候选化合物与载体构建阶段性进展。</div></td><td>2026-08</td><td>组会</td><td>v1</td><td>暂无</td><td>08-14 10:22</td><td><button class="row-menu"><i data-lucide="ellipsis"></i></button></td></tr></tbody></table></div><footer class="pagination"><span>第 1-2 条，共 18 条</span><div class="pages"><button class="page-button active">1</button><button class="page-button">2</button><button class="page-button">3</button><button class="page-button">…</button><button class="page-button">9</button></div></footer></section></section>
+
+        <section class="view" data-view-panel="templates"><header class="page-head"><div><h1>模板中心</h1><p>复用实验记录、规范报告和周期总结的结构</p></div><div class="page-actions"><button class="button primary"><i data-lucide="plus"></i>新建模板</button></div></header><section class="panel" data-table-panel><div class="toolbar"><label class="field"><i data-lucide="search"></i><input data-table-search type="search" placeholder="搜索模板"></label><select data-status-filter><option value="">全部模板</option><option>实验记录</option><option>导出报告</option><option>周报</option></select><span class="toolbar-spacer"></span><span class="result-count" data-result-count>14 个模板</span></div><div class="table-wrap"><table data-filter-table><thead><tr><th>模板</th><th>用途</th><th>包含模块</th><th>最近使用</th><th>更新时间</th><th></th></tr></thead><tbody><tr><td class="title-cell"><div class="cell-title">细胞实验完整记录</div><div class="cell-desc">目的、材料、步骤、关键参数、日志、结果与结论。</div></td><td>实验记录</td><td>8</td><td>24 次</td><td>08-12</td><td><button class="row-menu"><i data-lucide="ellipsis"></i></button></td></tr><tr><td class="title-cell"><div class="cell-title">实验室规范报告</div><div class="cell-desc">A4 打印版式，适合实验室归档。</div></td><td>导出报告</td><td>6</td><td>17 次</td><td>08-10</td><td><button class="row-menu"><i data-lucide="ellipsis"></i></button></td></tr><tr><td class="title-cell"><div class="cell-title">个人研究周报</div></td><td>周报</td><td>5</td><td>11 次</td><td>08-01</td><td><button class="row-menu"><i data-lucide="ellipsis"></i></button></td></tr></tbody></table></div></section></section>
+
+        <section class="view" data-view-panel="materials"><header class="page-head"><div><h1>物品管理</h1><p>记录实验常用试剂、耗材和存放位置，不承担库存审批</p></div><div class="page-actions"><button class="button primary"><i data-lucide="plus"></i>添加物品</button></div></header><section class="panel" data-table-panel><div class="toolbar"><label class="field"><i data-lucide="search"></i><input data-table-search type="search" placeholder="搜索名称、货号或位置"></label><select data-status-filter><option value="">全部状态</option><option>正常</option><option>临期</option><option>待补充</option></select><span class="toolbar-spacer"></span><span class="result-count" data-result-count>43 项物品</span></div><div class="table-wrap"><table data-filter-table><thead><tr><th>物品</th><th>货号</th><th>存放位置</th><th>状态</th><th>到期日期</th><th>备注</th><th></th></tr></thead><tbody><tr><td class="title-cell"><div class="cell-title">PEI MAX 40K</div></td><td class="mono">24765-1</td><td>-20°C 冰箱 B2</td><td><span class="chip" data-tone="success">正常</span></td><td>2027-02-10</td><td>分装 5 支</td><td><button class="row-menu"><i data-lucide="ellipsis"></i></button></td></tr><tr><td class="title-cell"><div class="cell-title">HRP 二抗</div></td><td class="mono">7074S</td><td>4°C 冰箱 A1</td><td><span class="chip" data-tone="warning">待补充</span></td><td>2026-12-08</td><td>余量不足</td><td><button class="row-menu"><i data-lucide="ellipsis"></i></button></td></tr></tbody></table></div></section></section>
+
+        <section class="view" data-view-panel="recycle"><header class="page-head"><div><h1>回收站</h1><p>恢复或永久删除最近移除的项目内容</p></div><div class="page-actions"><button class="button danger"><i data-lucide="trash-2"></i>清空回收站</button></div></header><section class="panel" data-table-panel><div class="toolbar"><label class="field"><i data-lucide="search"></i><input data-table-search type="search" placeholder="搜索已删除内容"></label><select data-status-filter><option value="">全部类型</option><option>实验记录</option><option>文件</option><option>任务</option></select><span class="toolbar-spacer"></span><span class="result-count" data-result-count>6 项内容</span></div><div class="table-wrap"><table data-filter-table><thead><tr><th class="check-cell"><input data-check-all type="checkbox"></th><th>名称</th><th>类型</th><th>原位置</th><th>删除时间</th><th>操作</th></tr></thead><tbody><tr><td class="check-cell"><input type="checkbox"></td><td class="title-cell"><div class="cell-title">旧版转染图像汇总.zip</div></td><td>文件</td><td>外泌体递送体系 / 文件</td><td>昨天 10:42</td><td><button class="text-button">恢复</button></td></tr><tr><td class="check-cell"><input type="checkbox"></td><td class="title-cell"><div class="cell-title">EXP-2026-0112 预实验</div></td><td>实验记录</td><td>候选化合物评估</td><td>08-10 09:12</td><td><button class="text-button">恢复</button></td></tr></tbody></table></div></section></section>
+      </div>
+    </div>
+  </div>
+
+  <dialog id="record-dialog">
+    <form method="dialog">
+      <header class="dialog-head"><h2>新建实验记录</h2><button class="icon-button" value="cancel" aria-label="关闭"><i data-lucide="x"></i></button></header>
+      <div class="dialog-body"><label class="form-field full"><span>记录标题</span><input required placeholder="例如：HEK293 转染效率优化 · 第 4 轮"></label><label class="form-field"><span>所属项目</span><select><option>外泌体递送体系</option><option>蛋白表达验证</option><option>候选化合物评估</option></select></label><label class="form-field"><span>计划日期</span><input type="date" value="2026-08-19"></label><label class="form-field full"><span>实验目的</span><textarea placeholder="简要说明本次实验要验证的问题；可稍后补充。"></textarea></label><label class="form-field"><span>执行者</span><input placeholder="姓名或角色"></label><label class="form-field"><span>记录模板</span><select><option>细胞实验完整记录</option><option>通用实验记录</option><option>空白记录</option></select></label></div>
+      <footer class="dialog-foot"><button class="button" value="cancel">取消</button><button class="button primary" value="create">创建记录</button></footer>
+    </form>
+  </dialog>
+
+  <script src="../../app/static/vendor/lucide.min.js"></script>
+  <script>
+    (() => {
+      const viewLabels = { overview: "总览", records: "实验记录", plans: "实验计划", tasks: "任务", files: "报告与文件", weekly: "周报", templates: "模板中心", materials: "物品管理", recycle: "回收站" };
+      const previews = [
+        { title: "HEK293 转染效率优化 · 第 3 轮", code: "EXP-2026-0142", project: "外泌体递送体系", owner: "执行者：李明", status: "进行中", tone: "active", purpose: "提高 HEK293 瞬时转染的荧光阳性率至 60% 以上，为后续外泌体载药量测定提供稳定起始材料。" },
+        { title: "Western blot 抗体滴定", code: "EXP-2026-0141", project: "蛋白表达验证", owner: "执行者：王琳", status: "待分析", tone: "warning", purpose: "确定目标蛋白 Western blot 的最佳一抗稀释比例，在可接受背景下获得稳定且可重复的条带信号。" },
+        { title: "细胞爬片免疫荧光", code: "EXP-2026-0140", project: "成像条件优化", owner: "执行者：李明", status: "草稿", tone: "neutral", purpose: "比较 BSA 与正常山羊血清封闭条件，减少非特异背景并保持细胞形态完整。" },
+        { title: "小鼠给药耐受性预实验", code: "EXP-2026-0139", project: "候选化合物评估", owner: "执行者：陈思", status: "已完成", tone: "success", purpose: "评估低、中、高三档剂量的短期耐受性，为正式药效实验确定可接受剂量区间。" },
+        { title: "质粒双酶切验证", code: "EXP-2026-0138", project: "载体构建", owner: "执行者：王琳", status: "已完成", tone: "success", purpose: "通过双酶切条带验证重组载体片段长度，为后续送测序和细胞转染建立材料依据。" }
+      ];
+
+      const renderIcons = () => window.lucide?.createIcons({ attrs: { "aria-hidden": "true" } });
+
+      function navigate(view) {
+        document.querySelectorAll("[data-view-panel]").forEach(panel => panel.classList.toggle("active", panel.dataset.viewPanel === view));
+        document.querySelectorAll(".nav-item").forEach(item => item.classList.toggle("active", item.dataset.view === view));
+        document.getElementById("breadcrumb-current").textContent = viewLabels[view] || view;
+        document.getElementById("sidebar").classList.remove("open");
+        document.querySelector(".content").scrollTop = 0;
+      }
+
+      document.addEventListener("click", event => {
+        const view = event.target.closest("[data-view]");
+        if (view) { navigate(view.dataset.view); return; }
+        if (event.target.closest("[data-open-record]")) document.getElementById("record-dialog").showModal();
+      });
+
+      document.getElementById("mobile-nav").addEventListener("click", () => document.getElementById("sidebar").classList.toggle("open"));
+      document.addEventListener("keydown", event => {
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") { event.preventDefault(); document.getElementById("global-search").focus(); }
+        if (event.key === "Escape") document.getElementById("sidebar").classList.remove("open");
+      });
+
+      document.querySelectorAll("[data-table-panel]").forEach(panel => {
+        const input = panel.querySelector("[data-table-search]");
+        const select = panel.querySelector("[data-status-filter]");
+        const rows = [...panel.querySelectorAll("tbody tr")];
+        const count = panel.querySelector("[data-result-count]");
+        const filter = () => {
+          const query = (input?.value || "").trim().toLowerCase();
+          const state = (select?.value || "").trim().toLowerCase();
+          let visible = 0;
+          rows.forEach(row => {
+            const text = row.textContent.toLowerCase();
+            const show = (!query || text.includes(query)) && (!state || text.includes(state));
+            row.hidden = !show;
+            if (show) visible += 1;
+          });
+          if (count) count.textContent = `${visible} 条当前结果`;
+        };
+        input?.addEventListener("input", filter);
+        select?.addEventListener("change", filter);
+        const checkAll = panel.querySelector("[data-check-all]");
+        checkAll?.addEventListener("change", () => rows.filter(row => !row.hidden).forEach(row => { const checkbox = row.querySelector('input[type="checkbox"]'); if (checkbox) checkbox.checked = checkAll.checked; }));
+      });
+
+      document.querySelectorAll("[data-density]").forEach(button => button.addEventListener("click", () => {
+        const panel = button.closest(".panel");
+        panel.querySelectorAll("[data-density]").forEach(item => item.classList.toggle("active", item === button));
+        panel.querySelector("table").style.fontSize = button.dataset.density === "compact" ? "11px" : "12px";
+        panel.querySelectorAll("td").forEach(cell => cell.style.paddingBlock = button.dataset.density === "compact" ? "6px" : "10px");
+      }));
+
+      document.querySelectorAll("[data-preview]").forEach(row => row.addEventListener("click", event => {
+        if (event.target.closest("input,button")) return;
+        document.querySelectorAll("[data-preview]").forEach(item => item.classList.toggle("selected", item === row));
+        const data = previews[Number(row.dataset.preview)];
+        document.getElementById("preview-title").textContent = data.title;
+        document.getElementById("preview-code").textContent = data.code;
+        document.getElementById("preview-project").textContent = data.project;
+        document.getElementById("preview-owner").textContent = data.owner;
+        const status = document.getElementById("preview-status");
+        status.textContent = data.status;
+        status.dataset.tone = data.tone;
+        document.getElementById("preview-purpose").textContent = data.purpose;
+      }));
+
+      document.getElementById("record-dialog").addEventListener("close", event => {
+        if (event.target.returnValue === "create") navigate("records");
+      });
+      renderIcons();
+    })();
+  </script>
+</body>
+</html>
