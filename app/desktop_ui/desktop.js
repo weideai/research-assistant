@@ -50,6 +50,8 @@
     files:[{id:1,display_name:"hypoxia-result-01.png",kind:"image",storage_mode:"managed",path:"2026/08/result.png",size_bytes:428000,link_status:"available",updated_at:"2026-08-11T13:10:00"}],
     tasks:[{id:1,title:"完成低氧组取样",status:"doing",priority:"high",deadline:"2026-08-11",project_id:1,row_version:1},{id:2,title:"整理转化效率数据",status:"todo",priority:"medium",deadline:"2026-08-12",project_id:2,row_version:1}],
     aiConversations:[],
+    apiPresets:[],
+    activeApiPresetId:null,
     weekly:{id:1,title:"第 32 周研究进展",project_id:1,report_date:"2026-08-09",period_start:"2026-08-03",period_end:"2026-08-09",status:"reviewed",summary:"完成低氧培养条件预实验并整理初步结果。",body:"完成低氧培养条件预实验并整理初步结果。",issues_and_feedback:"补充阴性对照并统一图表单位。",next_week_plan:"完成 HIF-1α 检测。",row_version:2,annotation_count:2,updated_at:"2026-08-11T15:20:00",files:[{id:11,version_number:2,display_name:"week-32-v2.pptx",original_name:"week-32-v2.pptx",storage_mode:"managed",mime_type:"application/vnd.openxmlformats-officedocument.presentationml.presentation",size_bytes:1284000,sha256:"demo",link_status:"available",updated_at:"2026-08-11T15:20:00"},{id:10,version_number:1,display_name:"week-32-v1.pptx",original_name:"week-32-v1.pptx",storage_mode:"managed",mime_type:"application/vnd.openxmlformats-officedocument.presentationml.presentation",size_bytes:984000,sha256:"demo",link_status:"available",updated_at:"2026-08-09T18:10:00"}],updates:[{id:1,kind:"批注",status:"待处理",content:"第 12 页图表坐标轴需要补充单位。",created_at:"2026-08-11T11:15:00"},{id:2,kind:"指导",status:"已处理",content:"下一周增加与预期目标的横向对比。",created_at:"2026-08-11T15:30:00"}]},
   };
 
@@ -65,7 +67,7 @@
     let data = {};
     switch (request.command) {
       case "system.ping": data={status:"ok"}; break;
-      case "system.app_info": data={version:"desktop-preview",transport:"in-process-js-bridge",http_listener:false,protocol_version:1,protocol_compatibility:{minimum:1,maximum:1},capabilities:["ai.changesets","records.batch_export","zotero.jobs"],commands:[],deprecated_commands:{"record.export_batch":{replacement:"record.export.batch",remove_in_protocol:2}}}; break;
+      case "system.app_info": data={version:"desktop-preview",transport:"in-process-js-bridge",http_listener:false,protocol_version:1,protocol_compatibility:{minimum:1,maximum:1},capabilities:["ai.changesets","api.presets","records.batch_export","zotero.jobs"],commands:[],deprecated_commands:{"record.export_batch":{replacement:"record.export.batch",remove_in_protocol:2}}}; break;
       case "dashboard.get": data={workspace:{name:"R/LAB 工作区"},projects:demo.projects,recent_records:demo.records,counts:{projects:3,records:4,open_tasks:demo.tasks.filter(x=>x.status!=="done").length,files:demo.files.length,in_progress:1,awaiting_analysis:1,completed:2}}; break;
       case "project.list": data=demo.projects.filter(x=>!p.search||`${x.title} ${x.code}`.includes(p.search)); break;
        case "project.create": data={id:Date.now(),title:p.title,code:p.code||"",objective:p.objective||"",status:"active",status_label:"进行中",record_count:0,row_version:1,updated_at:new Date().toISOString()},demo.projects.unshift(data); break;
@@ -100,8 +102,29 @@
       case "weekly.update": Object.assign(demo.weekly,p,{row_version:(demo.weekly.row_version||0)+1});data={...demo.weekly,current_file:demo.weekly.files?.[0]||null};break;
       case "weekly.import_file": data={...demo.weekly,current_file:demo.weekly.files?.[0]||null};break;
       case "trash.list": data=[]; break;
-      case "settings.get": data={workspace:{name:"R/LAB 工作区",timezone:"Asia/Shanghai",data_path:"%LOCALAPPDATA%\\ResearchAssistant\\data"},executors:[{id:1,name:"面壁者",role:"研究者",is_active:true}],save:{autosave:true,interval:30},zotero:{base_url:"http://127.0.0.1:23119",state:"connected"},api:{name:"桌面默认",url:"https://api.openai.com/v1",model:"gpt-5.6-terra",enabled:false,has_key:false},about:{product:"R/LAB Research Assistant",author:"面壁者"}}; break;
+      case "settings.get": data={workspace:{name:"R/LAB 工作区",timezone:"Asia/Shanghai",data_path:"%LOCALAPPDATA%\\ResearchAssistant\\data"},executors:[{id:1,name:"面壁者",role:"研究者",is_active:true}],save:{autosave:true,interval:30},zotero:{base_url:"http://127.0.0.1:23119",state:"connected"},api:demo.apiPresets.find(item=>item.id===demo.activeApiPresetId)||{id:null,name:"未配置",url:"",model:"",enabled:false,has_key:false},api_presets:demo.apiPresets,about:{product:"R/LAB Research Assistant",author:"面壁者"}}; break;
       case "settings.save": data={saved:true,section:p.section}; break;
+      case "api.presets.save": {
+        let preset = demo.apiPresets.find(item => item.id === p.id);
+        if (!preset) {
+          preset = {id: demo.apiPresets.length + 1, has_key: false};
+          demo.apiPresets.push(preset);
+          demo.activeApiPresetId ??= preset.id;
+        }
+        Object.assign(preset, {name:p.name,url:p.url,model:p.model,enabled:p.enabled,has_key:Boolean(p.api_key || preset.has_key)});
+        data = preset;
+        break;
+      }
+      case "api.presets.activate": {
+        const preset = demo.apiPresets.find(item => item.id === p.id);
+        if (!preset?.enabled || !preset.has_key || !preset.model) {
+          return {ok:false,error:{message:"请先保存模型和 API Key，并启用这个方案。"}};
+        }
+        demo.activeApiPresetId = preset.id;
+        data = preset;
+        break;
+      }
+      case "api.models.discover": data={models:["demo-chat","demo-reasoner"]}; break;
       case "search.query": {const all=[...demo.projects.map(x=>({id:x.id,entity_type:"project",title:x.title,excerpt:x.objective,view_key:"projects"})),...demo.records.map(x=>({id:x.id,entity_type:"record",title:x.title,excerpt:x.objective||"",view_key:"record-edit"})),...demo.literature.map(x=>({id:x.id,entity_type:"literature",title:x.title,excerpt:x.abstract,view_key:"literature"}))];data={mode:"like",diagnostic:"连续子串匹配",items:all.filter(x=>JSON.stringify(x).toLowerCase().includes(String(p.query||"").toLowerCase()))};break;}
       case "search.rebuild": data={count:12,mode:"fts5-trigram",diagnostic:"FTS5 trigram"}; break;
       case "ai.preview": data={target:{title:"当前对象"},base_row_version:1,endpoint:"https://api.openai.com/v1",model:"gpt-5.6-terra",api_enabled:false,estimated_characters:240,source_snapshot:{},warning:"应用操作会直接写入所选字段，并生成可撤销的变更记录。"}; break;

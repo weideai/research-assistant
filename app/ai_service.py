@@ -36,6 +36,28 @@ class AIConfig:
     source: str = "explicit"
     allow_private: bool = False
     allowed_hosts: tuple = ()
+    temperature: float | None = 0.2
+
+
+def normalize_openai_base_url(value):
+    """Keep provider prefixes while accepting a pasted Chat Completions or Models URL."""
+    value = value.strip().rstrip("/")
+    try:
+        parsed = urlparse(value)
+        port = parsed.port
+    except ValueError as exc:
+        raise AIServiceError("API 地址格式无效。") from exc
+    if (parsed.scheme not in {"http", "https"} or not parsed.hostname
+            or any(char.isspace() or ord(char) < 32 for char in value) or "\\" in value):
+        raise AIServiceError("请输入有效的 HTTP 或 HTTPS 接口地址。")
+    if parsed.username is not None or parsed.password is not None or "?" in value or "#" in value:
+        raise AIServiceError("API 地址不能包含账号、密码、查询参数或片段。")
+    if port == 0:
+        raise AIServiceError("API 地址的端口无效。")
+    for suffix in ("/chat/completions", "/models"):
+        if parsed.path.endswith(suffix) and not parsed.params:
+            return value.removesuffix(suffix)
+    return value
 
 def _host_allowed(hostname, allowed_hosts):
     if not allowed_hosts:
@@ -349,8 +371,8 @@ def discover_models(config):
         if not isinstance(item, dict):
             continue
         model_id = next((
-            str(item.get(key, "")).strip() for key in ("id", "name", "model")
-            if str(item.get(key, "")).strip()
+            item[key].strip() for key in ("id", "name", "model")
+            if isinstance(item.get(key), str) and item[key].strip()
         ), "")
         if not model_id:
             continue
@@ -487,12 +509,13 @@ def chat_with_assistant(messages, system_prompt, config=None, web_access=False):
         )
         payload = {
             "model": config.model,
-            "temperature": 0.2,
             "messages": [
                 {"role": "system", "content": f"{system_prompt}\n{compatibility_note}".strip()},
                 *normalized,
             ],
         }
+        if config.temperature is not None:
+            payload["temperature"] = config.temperature
         request = urllib.request.Request(
             _endpoint(config, "chat/completions"),
             data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),

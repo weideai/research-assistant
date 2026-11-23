@@ -12,6 +12,7 @@ MAX_COMPATIBLE_PROTOCOL = 1
 
 CAPABILITIES = (
     "ai.changesets",
+    "api.presets",
     "records.batch_export",
     "zotero.jobs",
 )

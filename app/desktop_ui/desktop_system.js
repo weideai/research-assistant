@@ -23,12 +23,139 @@
   async function purgeTrash(items){if(!items.length||!await R.confirmAction("永久删除",`确认永久删除 ${items.length} 项吗？此操作不可恢复。`))return;for(const item of items)await invoke("trash.purge",{entity_type:item.entity_type,id:Number(item.id)});items.forEach(item=>trashSelection.delete(trashKey(item)));toast(`已永久删除 ${items.length} 项`);await trash();}
 
   async function settings(){settingsData=await invoke("settings.get",{});showSettings("workspace");}
+  let apiPresetChoice;
+  let apiPresetTemplate = "";
+  const deepSeekApi = "https://api.deepseek.com";
+
+  function renderApiSettings(data) {
+    const presets = data.api_presets || [];
+    const selectedId = apiPresetChoice === undefined ? data.api.id : apiPresetChoice;
+    const selected = presets.find(preset => preset.id === selectedId);
+    const fields = selected || {
+      name: apiPresetTemplate === "deepseek" ? "DeepSeek" : "",
+      url: apiPresetTemplate === "deepseek" ? deepSeekApi : "",
+      model: "", enabled: true, has_key: false,
+    };
+    const current = selected && data.api.id === selected.id;
+    const ready = data.api.enabled && data.api.has_key && data.api.model;
+    return `<header><div><h2>API 与模型</h2><p>管理 OpenAI 兼容接口</p></div>
+      <span class="api-current">${ready ? `助手使用 ${escapeHtml(data.api.name)}` : "助手尚未配置可用方案"}</span></header>
+      <div class="api-profile-bar">
+        <label>编辑方案<select data-api-profile>
+          <option value="" ${selected ? "" : "selected"}>新方案</option>
+          ${presets.map(preset => `<option value="${preset.id}" ${preset.id === selectedId ? "selected" : ""}>${escapeHtml(preset.name)}${preset.id === data.api.id ? " · 当前" : ""}</option>`).join("")}
+        </select></label>
+        <button class="button" type="button" data-api-action="new"><i data-lucide="plus"></i>新建方案</button>
+      </div>
+      <div class="api-provider-bar">
+        <button class="button compact" type="button" data-api-action="deepseek">使用 DeepSeek 预设</button>
+        <button class="text-button" type="button" data-open-url="https://www.deepseek.com/">官网</button>
+        <button class="text-button" type="button" data-open-url="https://platform.deepseek.com/api_keys">管理 API Key</button>
+        <button class="text-button" type="button" data-open-url="https://api-docs.deepseek.com/zh-cn/">接口文档<i data-lucide="external-link"></i></button>
+      </div>
+      <form id="api-preset-form" data-preset-id="${selected?.id || ""}">
+        <label>方案名称<input name="name" maxlength="120" value="${escapeHtml(fields.name)}" placeholder="例如 DeepSeek 或我的转发接口" required></label>
+        <label>API 地址<input type="url" name="url" maxlength="500" value="${escapeHtml(fields.url)}" placeholder="https://api.example.com/v1" spellcheck="false" required></label>
+        <label>API Key<input name="api_key" type="password" maxlength="4096" autocomplete="new-password" placeholder="${fields.has_key ? "已加密保存，留空沿用" : "粘贴服务商提供的 Key"}"></label>
+        <div class="api-model-row">
+          <label>模型 ID<input name="model" maxlength="160" value="${escapeHtml(fields.model)}" placeholder="拉取后选择，或手动输入" spellcheck="false"></label>
+          <button class="button" type="button" data-api-action="models"><i data-lucide="refresh-cw"></i>拉取模型</button>
+        </div>
+        <label data-api-results hidden>从接口返回的模型中选择<select data-api-models></select></label>
+        <label class="toggle-row"><span><b>允许助手使用此方案</b><small>${fields.has_key ? "Key 已存储在本机" : "此方案尚未保存 Key"}</small></span><input name="enabled" type="checkbox" ${fields.enabled ? "checked" : ""}></label>
+        <p class="api-feedback" role="status" aria-live="polite"></p>
+        <div class="api-profile-actions">
+          <button class="button primary" type="submit"><i data-lucide="save"></i>保存方案</button>
+          ${selected && !current ? `<button class="button" type="button" data-api-action="activate">设为助手当前方案</button>` : ""}
+        </div>
+      </form>`;
+  }
+
+  function apiFeedback(form, message, isError = false) {
+    const feedback = $(".api-feedback", form);
+    feedback.textContent = message;
+    feedback.classList.toggle("error", isError);
+  }
+
+  function apiPayload(form) {
+    const payload = Object.fromEntries(new FormData(form));
+    if (form.dataset.presetId) payload.id = Number(form.dataset.presetId);
+    payload.enabled = form.elements.enabled.checked;
+    return payload;
+  }
+
+  async function selectApiPreset(id, template = "") {
+    const form = $("#api-preset-form");
+    if (form?.dataset.dirty && !await R.confirmAction("切换 API 方案", "当前方案有未保存的修改，是否放弃这些修改？")) {
+      $("[data-api-profile]").value = form.dataset.presetId;
+      return;
+    }
+    apiPresetChoice = id;
+    apiPresetTemplate = template;
+    showSettings("api");
+    const focus = template ? "api_key" : "name";
+    $("#api-preset-form").elements[focus].focus();
+  }
+
+  async function fetchApiModels(form, button) {
+    if (!form.elements.url.reportValidity()) return;
+    const payload = apiPayload(form);
+    button.disabled = true;
+    apiFeedback(form, "正在拉取模型列表…");
+    try {
+      const result = await invoke("api.models.discover", {id:payload.id, url:payload.url, api_key:payload.api_key});
+      if (!form.isConnected || form.elements.url.value !== payload.url || form.elements.api_key.value !== payload.api_key) return;
+      const picker = $("[data-api-models]", form);
+      picker.replaceChildren(new Option("选择一个模型", ""), ...result.models.map(id => new Option(id, id)));
+      $("[data-api-results]", form).hidden = false;
+      if (result.models.includes(form.elements.model.value)) picker.value = form.elements.model.value;
+      apiFeedback(form, `已获取 ${result.models.length} 个模型。请选择或手动填写模型 ID。`);
+      picker.focus();
+    } catch (error) {
+      if (form.isConnected && form.elements.url.value === payload.url && form.elements.api_key.value === payload.api_key) {
+        apiFeedback(form, error.message, true);
+      }
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function persistApiPreset(form, activate = false) {
+    if (activate && form.dataset.dirty) {
+      apiFeedback(form, "请先保存方案修改，再设为当前方案。", true);
+      return;
+    }
+    const payload = apiPayload(form);
+    const controls = [...form.elements];
+    const editable = controls.filter(control => !control.disabled);
+    editable.forEach(control => control.disabled = true);
+    try {
+      const result = activate
+        ? await invoke("api.presets.activate", {id:payload.id})
+        : await invoke("api.presets.save", payload);
+      settingsData.api_presets = [
+        ...(settingsData.api_presets || []).filter(preset => preset.id !== result.id),
+        result,
+      ].sort((left, right) => left.name.localeCompare(right.name));
+      if (activate || !settingsData.api.id || settingsData.api.id === result.id) settingsData.api = result;
+      if (!form.isConnected) return;
+      apiPresetChoice = result.id;
+      apiPresetTemplate = "";
+      showSettings("api");
+      apiFeedback($("#api-preset-form"), activate ? "助手已切换到此方案。" : "方案已保存。");
+    } catch (error) {
+      apiFeedback(form, error.message, true);
+    } finally {
+      editable.forEach(control => control.disabled = false);
+    }
+  }
+
   function showSettings(section){$$('[data-settings-section]').forEach(x=>{const active=x.dataset.settingsSection===section;x.classList.toggle("active",active);x.setAttribute("aria-selected",String(active));x.tabIndex=active?0:-1;});const node=$("#settings-content"),d=settingsData;const templates={
     workspace:`<header><h2>工作区</h2><p>本机单工作区数据与时区</p></header><form data-settings-form="workspace"><label>工作区名称<input name="name" value="${escapeHtml(d.workspace.name)}" required></label><label>时区<input name="timezone" value="${escapeHtml(d.workspace.timezone)}" required></label><label>数据目录<input value="${escapeHtml(d.workspace.data_path)}" readonly></label><button class="button primary" type="submit"><i data-lucide="save"></i>保存</button></form>`,
     executors:`<header><h2>执行者</h2><p>统一管理可分配到项目和实验记录的人员</p></header><div class="settings-list">${d.executors.map(x=>`<div><i data-lucide="user-round"></i><span><b>${escapeHtml(x.name)}</b><small>${escapeHtml(x.role||"未设置角色")}</small></span>${statusBadge(x.is_active?"active":"disabled")}</div>`).join("")||`<p class="muted">尚无执行者</p>`}</div><form class="inline-settings-form" data-settings-form="executor"><input name="name" placeholder="执行者姓名" required><input name="role" placeholder="角色"><button class="button primary" type="submit"><i data-lucide="plus"></i>添加</button></form>`,
     save:`<header><h2>保存</h2><p>自动保存与恢复策略</p></header><form data-settings-form="save"><label class="toggle-row"><span><b>自动保存</b><small>编辑实验记录时定时保存</small></span><input name="autosave" type="checkbox" ${d.save.autosave?"checked":""}></label><label>保存间隔（秒）<input name="interval" type="number" min="5" max="600" value="${d.save.interval}"></label><button class="button primary" type="submit"><i data-lucide="save"></i>保存</button></form>`,
     zotero:`<header><h2>Zotero</h2><p>只读连接 Zotero Local API</p></header><div class="status-banner ${d.zotero.state}"><i data-lucide="library"></i><span><b>${d.zotero.state==="connected"?"已连接":"未连接"}</b><small>不会读写 zotero.sqlite</small></span></div><form data-settings-form="zotero"><label>Local API 地址<input name="base_url" value="${escapeHtml(d.zotero.base_url)}" required></label><button class="button primary" type="submit"><i data-lucide="save"></i>保存</button></form>`,
-    api:`<header><h2>API 与模型</h2><p>Key 加密保存在本机，页面不会回显明文</p></header><form data-settings-form="api"><label>API 地址<input name="url" value="${escapeHtml(d.api.url)}" required></label><label>模型<input name="model" value="${escapeHtml(d.api.model)}" required></label><label>API Key<input name="api_key" type="password" placeholder="${d.api.has_key?"已保存，留空表示不修改":"输入 API Key"}"></label><label class="toggle-row"><span><b>启用此配置</b><small>${escapeHtml(d.api.name)}</small></span><input name="enabled" type="checkbox" ${d.api.enabled?"checked":""}></label><button class="button primary" type="submit"><i data-lucide="shield-check"></i>加密保存</button></form>`,
+    api: section === "api" ? renderApiSettings(d) : "",
     appearance:`<header><h2>主题与背景</h2><p>四套皮肤共享相同的信息结构</p></header><label>界面皮肤<select id="settings-skin"><option value="soft-lab">柔雾实验室</option><option value="ide-light">Indigo Lab</option><option value="ide-dark">Research OS</option><option value="swiss">经典 Swiss</option></select></label><div class="skin-preview-row"><button data-set-skin="soft-lab">Soft Lab</button><button data-set-skin="ide-light">Indigo</button><button data-set-skin="ide-dark">Research OS</button><button data-set-skin="swiss">Swiss</button></div>`,
     backup:`<header><h2>备份</h2><p>保存数据库快照或完整工作区归档</p></header><div class="action-block"><i data-lucide="database-backup"></i><span><b>创建备份</b><small>保存到本地 backups 目录</small></span><label>范围<select id="backup-scope"><option value="workspace">完整工作区</option><option value="database">仅数据库</option></select></label><button class="button primary" id="create-backup"><i data-lucide="archive"></i>立即备份</button></div><p>完整工作区包含数据库及 library、uploads 中的托管文件。外部链接原文件不包含；换机恢复后需重新配置 API 凭据。</p><p id="backup-result" class="muted"></p>`,
     updates:`<header><h2>更新</h2><p>原位升级保留本地数据和附件</p></header><div class="status-banner connected"><i data-lucide="badge-check"></i><span><b>当前版本已就绪</b><small>更新前会创建备份并执行迁移预检</small></span></div><button class="button"><i data-lucide="refresh-cw"></i>检查更新</button>`,
@@ -71,6 +198,15 @@
     const copy=event.target.closest("[data-ai-message-copy]");if(copy)await copyAiMessage(copy.dataset.aiMessageCopy);
     const regenerate=event.target.closest("[data-ai-message-regenerate]");if(regenerate)lastAiPrompt?await aiGenerate(lastAiPrompt):toast("还没有可重新生成的消息");
     const section=event.target.closest("[data-settings-section]");if(section)showSettings(section.dataset.settingsSection);
+    const apiAction = event.target.closest("[data-api-action]");
+    if (apiAction) {
+      const action = apiAction.dataset.apiAction;
+      const form = $("#api-preset-form");
+      if (action === "models") await fetchApiModels(form, apiAction);
+      if (action === "activate") await persistApiPreset(form, true);
+      if (action === "deepseek" || action === "new") await selectApiPreset(null, action);
+      return;
+    }
     const skin=event.target.closest("[data-set-skin]");if(skin){document.documentElement.dataset.skin=skin.dataset.setSkin;$("#skin-select").value=skin.dataset.setSkin;localStorage.setItem("rlab-desktop-skin",skin.dataset.setSkin);}
     const conversationItem=event.target.closest("[data-ai-conversation-id]");if(conversationItem)await loadAiConversation(Number(conversationItem.dataset.aiConversationId));
     const historySelect=event.target.closest("[data-ai-history-select]");if(historySelect){historySelect.checked?aiHistorySelection.add(Number(historySelect.dataset.aiHistorySelect)):aiHistorySelection.delete(Number(historySelect.dataset.aiHistorySelect));syncAiHistoryBulk();}
@@ -81,6 +217,29 @@
     if(event.target.closest("#apply-ai-change"))await applyAi();
   });
   document.addEventListener("submit",event=>{const form=event.target.closest("[data-settings-form]");if(form){event.preventDefault();saveSettings(form);}});
+  $("#settings-content").addEventListener("submit", event => {
+    if (event.target.id !== "api-preset-form") return;
+    event.preventDefault();
+    persistApiPreset(event.target);
+  });
+  $("#settings-content").addEventListener("change", event => {
+    if (event.target.matches("[data-api-profile]")) {
+      selectApiPreset(Number(event.target.value) || null);
+    } else if (event.target.matches("[data-api-models]") && event.target.value) {
+      const form = event.target.form;
+      form.elements.model.value = event.target.value;
+      form.dataset.dirty = "true";
+    }
+  });
+  $("#settings-content").addEventListener("input", event => {
+    const form = event.target.form;
+    if (form?.id !== "api-preset-form") return;
+    form.dataset.dirty = "true";
+    if (event.target.name === "url" || event.target.name === "api_key") {
+      $("[data-api-results]", form).hidden = true;
+      apiFeedback(form, "");
+    }
+  });
   document.addEventListener("change",event=>{if(event.target.matches("[data-trash-select]")){const item=trashItems.find(value=>trashKey(value)===event.target.dataset.trashSelect);if(item){event.target.checked?trashSelection.set(trashKey(item),item):trashSelection.delete(trashKey(item));event.target.closest("tr")?.classList.toggle("selected",event.target.checked);syncTrashSelection();}}if(event.target.matches("[data-ai-record-select]")){const id=Number(event.target.dataset.aiRecordSelect);event.target.checked?aiRecordSelection.add(id):aiRecordSelection.delete(id);renderAiRecordPicker();}if(event.target.matches("[data-ai-record-select-page]")){const page=R.paginate(filteredAiRecords(),aiRecordPage,aiRecordPageSize);page.items.forEach(item=>event.target.checked?aiRecordSelection.add(item.id):aiRecordSelection.delete(item.id));renderAiRecordPicker();}});
   $("#global-search-input").addEventListener("input",()=>{clearTimeout(searchTimer);searchTimer=setTimeout(search,120);});$("#global-search-input").addEventListener("keydown",event=>{const results=$$(".search-result");if(event.key==="ArrowDown"||event.key==="ArrowUp"){event.preventDefault();if(!results.length)return;const current=Math.max(0,results.findIndex(item=>item.classList.contains("highlighted"))),next=event.key==="ArrowDown"?Math.min(results.length-1,current+1):Math.max(0,current-1);results.forEach((item,index)=>item.classList.toggle("highlighted",index===next));results[next].scrollIntoView({block:"nearest"});return;}if(event.key==="Enter"){event.preventDefault();$(".search-result.highlighted")?.click();}});$("#rebuild-search").addEventListener("click",async()=>{const data=await invoke("search.rebuild",{});$("#search-diagnostic").textContent=`${data.diagnostic} · ${data.count} 个文档`;await search();toast("搜索索引已重建");});
   document.addEventListener("rlab:assistant-open",()=>loadAiHistory(1));

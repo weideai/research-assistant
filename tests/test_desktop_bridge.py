@@ -116,7 +116,7 @@ def test_app_info_publishes_versioned_capabilities_and_deprecations():
     info = response["data"]
     assert info["protocol_version"] == PROTOCOL_VERSION == 1
     assert info["protocol_compatibility"] == {"minimum": 1, "maximum": 1}
-    assert info["capabilities"] == ["ai.changesets", "records.batch_export", "zotero.jobs"]
+    assert info["capabilities"] == ["ai.changesets", "api.presets", "records.batch_export", "zotero.jobs"]
     assert "record.export.batch" in info["commands"]
     assert "record.export_batch" in info["commands"]
     assert info["deprecated_commands"]["record.export_batch"] == {

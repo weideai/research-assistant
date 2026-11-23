@@ -3377,9 +3377,7 @@ class DesktopModuleServiceMixin:
         records_explicit = bool(payload.get("records_explicit"))
 
         def preview(workspace):
-            preset = ApiPreset.query.filter_by(user_id=workspace.legacy_user_id, is_default=True).first()
-            if not preset:
-                preset = ApiPreset.query.filter_by(user_id=workspace.legacy_user_id).first()
+            preset = self._active_api_preset(workspace.legacy_user_id)
             target = self._ai_target(workspace, target_type, target_id)
             target_snapshot = self._ai_target_snapshot(target_type, target)
             project_records = []
@@ -3410,7 +3408,7 @@ class DesktopModuleServiceMixin:
                 "base_row_version": target.row_version,
                 "endpoint": preset.api_url if preset else "未配置",
                 "model": preset.text_model if preset else "未配置",
-                "api_enabled": bool(preset and preset.is_enabled and preset.encrypted_api_key),
+                "api_enabled": bool(preset and preset.is_enabled and preset.encrypted_api_key and preset.text_model),
                 "source_snapshot": source_snapshot,
                 "estimated_characters": len(_json(source_snapshot)),
                 "warning": "应用操作会直接写入所选字段，并生成可撤销的变更记录。",
@@ -3817,24 +3815,24 @@ class DesktopModuleServiceMixin:
                     history.append({"role": message.role, "content": content})
                     remaining -= len(content)
                 history.reverse()
-            preset = ApiPreset.query.filter_by(user_id=workspace.legacy_user_id, is_default=True).first()
-            if not preset:
-                preset = ApiPreset.query.filter_by(user_id=workspace.legacy_user_id).first()
+            preset = self._active_api_preset(workspace.legacy_user_id)
             if not preset or not preset.is_enabled or not preset.encrypted_api_key:
                 raise ValidationError("请先在设置中启用 API 并配置 Key。")
             from app.ai_service import AIConfig, AIServiceError, chat_with_assistant
+            from app.secrets import SecretDecryptionError
             target_snapshot = self._ai_target_snapshot(target_type, target)
             field_schema = self._ai_field_schema(target_type)
             allowed = sorted(AI_TARGET_FIELDS[target_type])
             system_prompt = build_desktop_ai_system_prompt(
                 target_type, field_schema, today=date.today(), timezone=workspace.timezone,
             )
-            config = AIConfig(
-                api_url=preset.api_url, api_key=preset.get_api_key(), model=preset.text_model,
-                enabled=preset.is_enabled, allow_private=bool(self.flask_app.config.get("ALLOW_PRIVATE_API_URLS")),
-                allowed_hosts=tuple(self.flask_app.config.get("AI_ALLOWED_HOSTS") or ()), source="desktop",
-            )
             try:
+                config = AIConfig(
+                    api_url=preset.api_url, api_key=preset.get_api_key(), model=preset.text_model,
+                    enabled=preset.is_enabled, allow_private=bool(self.flask_app.config.get("ALLOW_PRIVATE_API_URLS")),
+                    allowed_hosts=tuple(self.flask_app.config.get("AI_ALLOWED_HOSTS") or ()),
+                    source="desktop", temperature=None,
+                )
                 user_content = _json({
                     "request": prompt, "current_target": target_snapshot,
                     "source_snapshot": source_snapshot,
@@ -3843,8 +3841,11 @@ class DesktopModuleServiceMixin:
                 if web_access:
                     kwargs["web_access"] = True
                 result = chat_with_assistant([*history, {"role": "user", "content": user_content}], system_prompt, **kwargs)
-            except AIServiceError as exc:
-                raise ValidationError(str(exc)) from exc
+            except (AIServiceError, SecretDecryptionError) as exc:
+                message = str(exc)
+                if isinstance(exc.__cause__, urllib.error.HTTPError):
+                    message = f"API 返回 HTTP {exc.__cause__.code}，请检查当前方案的地址、Key 和模型。"
+                raise ValidationError(message) from None
             proposal = result.get("proposal") if isinstance(result.get("proposal"), dict) else {}
             proposal = {
                 field: self._normalize_ai_value(target_type, field, value)
@@ -4180,11 +4181,150 @@ class DesktopModuleServiceMixin:
             return {"purged": True}
         return self._run(purge)
 
+    @staticmethod
+    def _active_api_preset(user_id):
+        return ApiPreset.query.filter_by(user_id=user_id).order_by(
+            ApiPreset.is_default.desc(), ApiPreset.id,
+        ).first()
+
+    @staticmethod
+    def _api_preset_dto(preset):
+        return {
+            "id": preset.id if preset else None,
+            "name": preset.name if preset else "未配置",
+            "url": preset.api_url if preset else "",
+            "model": (preset.text_model or "") if preset else "",
+            "enabled": bool(preset and preset.is_enabled),
+            "has_key": bool(preset and preset.encrypted_api_key),
+        }
+
+    @staticmethod
+    def _owned_api_preset(user_id, preset_id):
+        preset = ApiPreset.query.filter_by(user_id=user_id, id=preset_id).first()
+        if preset is None:
+            raise NotFoundError("API 方案不存在。")
+        return preset
+
+    @staticmethod
+    def _api_base_url(value):
+        from app.ai_service import AIServiceError, normalize_openai_base_url
+
+        try:
+            return normalize_openai_base_url(_string(value, 500, "url", required=True))
+        except AIServiceError as exc:
+            raise ValidationError(str(exc), field_errors={"url": str(exc)}) from None
+
+    @staticmethod
+    def _api_key(value):
+        key = _string(value, 4096, "api_key")
+        if key and not re.fullmatch(r"[!-~]+", key):
+            raise ValidationError("API Key 含有空格或无效字符，请复制原始 Key。", field_errors={"api_key": "格式无效"})
+        return key
+
+    def _write_api_preset(self, preset, payload):
+        from app.ai_service import model_capability_snapshot
+
+        url = self._api_base_url(payload.get("url"))
+        model = _string(payload.get("model"), 160, "model")
+        key = self._api_key(payload.get("api_key"))
+        if preset.encrypted_api_key and not key and url != self._api_base_url(preset.api_url):
+            raise ValidationError("更改 API 地址时，请输入新地址对应的 API Key。", field_errors={"api_key": "请重新填写"})
+        if model != preset.text_model or url != preset.api_url:
+            preset.model_capabilities_json = _json(model_capability_snapshot(model, api_url=url))
+        preset.name = _string(payload.get("name"), 120, "name", required=True)
+        preset.api_url = url
+        preset.text_model = model
+        preset.is_enabled = bool(payload.get("enabled", True if preset.id is None else preset.is_enabled))
+        if key:
+            preset.set_api_key(key)
+
+    def api_presets_save(self, payload):
+        preset_id = _positive_id(payload.get("id"), optional=True)
+
+        def save(workspace):
+            user_id = workspace.legacy_user_id
+            if preset_id is None:
+                preset = ApiPreset(user_id=user_id, is_default=self._active_api_preset(user_id) is None)
+                self._write_api_preset(preset, payload)
+                db.session.add(preset)
+            else:
+                preset = self._owned_api_preset(user_id, preset_id)
+                self._write_api_preset(preset, payload)
+            db.session.flush()
+            return self._api_preset_dto(preset)
+        return self._run(save)
+
+    def api_presets_activate(self, payload):
+        preset_id = _positive_id(payload.get("id"))
+
+        def activate(workspace):
+            user_id = workspace.legacy_user_id
+            preset = self._owned_api_preset(user_id, preset_id)
+            if not preset.is_enabled or not preset.encrypted_api_key or not preset.text_model:
+                raise ValidationError("请先保存模型和 API Key，并启用这个方案。")
+            ApiPreset.query.filter_by(user_id=user_id).update({ApiPreset.is_default: False})
+            preset.is_default = True
+            return self._api_preset_dto(preset)
+        return self._run(activate)
+
+    def api_models_discover(self, payload):
+        from app.ai_service import AIConfig, AIServiceError, discover_models
+        from app.secrets import SecretDecryptionError
+
+        preset_id = _positive_id(payload.get("id"), optional=True)
+        url = self._api_base_url(payload.get("url"))
+        key = self._api_key(payload.get("api_key"))
+        if preset_id is not None:
+            def stored_key(workspace):
+                preset = self._owned_api_preset(workspace.legacy_user_id, preset_id)
+                if key or not preset.encrypted_api_key:
+                    return key
+                if url != self._api_base_url(preset.api_url):
+                    raise ValidationError("当前地址已更改，请输入对应的 API Key 再拉取。")
+                return preset.get_api_key()
+
+            try:
+                key = self._run(stored_key)
+            except SecretDecryptionError as exc:
+                raise ValidationError(str(exc)) from None
+
+        config = AIConfig(
+            api_url=url, api_key=key, enabled=True, source="desktop",
+            allow_private=bool(self.flask_app.config.get("ALLOW_PRIVATE_API_URLS")),
+            allowed_hosts=tuple(self.flask_app.config.get("AI_ALLOWED_HOSTS") or ()),
+        )
+        try:
+            discovered = discover_models(config)
+        except AIServiceError as exc:
+            cause = exc.__cause__
+            if isinstance(cause, urllib.error.HTTPError):
+                hints = {
+                    401: "认证失败，请检查 API Key。",
+                    403: "此 Key 无权读取模型列表。",
+                    404: "此地址没有模型列表，请检查 API 地址，或手动填写模型名称。",
+                    405: "此接口不支持读取模型列表，可以手动填写模型名称。",
+                    429: "模型列表请求过于频繁，请稍后重试。",
+                }
+                detail = hints.get(cause.code, "模型列表请求失败。")
+                raise ValidationError(f"HTTP {cause.code}：{detail}") from None
+            if isinstance(cause, urllib.error.URLError):
+                raise ValidationError("无法连接模型服务，请检查 API 地址和网络。") from None
+            raise ValidationError(str(exc)) from None
+        except TimeoutError:
+            raise ValidationError("拉取模型超时，请重试或手动填写模型名称。") from None
+        models = [
+            model_id for item in discovered if (model_id := item["id"])
+            if len(model_id) <= 160 and not (key and key in model_id) and model_id.isprintable()
+        ]
+        if not models:
+            raise ValidationError("接口未返回可用模型名称，可以手动填写。")
+        return {"models": models}
+
     def settings_get(self, payload=None):
         def query(workspace):
             user_id = workspace.legacy_user_id
             setting = WorkspaceSetting.query.filter_by(user_id=user_id).first()
-            preset = ApiPreset.query.filter_by(user_id=user_id, is_default=True).first()
+            preset = self._active_api_preset(user_id)
             connection = ZoteroConnection.query.filter_by(workspace_id=workspace.id).first()
             return {
                 "workspace": {"name": workspace.name, "timezone": workspace.timezone,
@@ -4195,9 +4335,11 @@ class DesktopModuleServiceMixin:
                          "interval": setting.execution_autosave_interval if setting else 30},
                 "zotero": {"base_url": connection.base_url if connection else "http://127.0.0.1:23119",
                            "state": connection.connection_state if connection else "unknown"},
-                "api": {"name": preset.name if preset else "未配置", "url": preset.api_url if preset else "",
-                        "model": preset.text_model if preset else "", "enabled": bool(preset and preset.is_enabled),
-                        "has_key": bool(preset and preset.encrypted_api_key)},
+                "api": self._api_preset_dto(preset),
+                "api_presets": [
+                    self._api_preset_dto(item) for item in ApiPreset.query.filter_by(user_id=user_id)
+                    .order_by(ApiPreset.name, ApiPreset.id)
+                ],
                 "about": {"product": "R/LAB Research Assistant", "author": "面壁者"},
             }
         return self._run(query)
@@ -4230,16 +4372,12 @@ class DesktopModuleServiceMixin:
                     raise ValidationError("Zotero Local API 地址必须为 http://127.0.0.1:23119。")
                 connection.base_url = base_url
             elif section == "api":
-                preset = ApiPreset.query.filter_by(user_id=user_id, is_default=True).first()
+                preset = self._active_api_preset(user_id)
                 if not preset:
                     preset = ApiPreset(user_id=user_id, name="桌面默认", is_default=True)
                     db.session.add(preset)
-                preset.api_url = _string(payload.get("url"), 500, "url", required=True).rstrip("/")
-                preset.text_model = _string(payload.get("model"), 160, "model", required=True)
-                preset.is_enabled = bool(payload.get("enabled"))
-                key = str(payload.get("api_key") or "").strip()
-                if key:
-                    preset.set_api_key(key)
+                model = _string(payload.get("model"), 160, "model", required=True)
+                self._write_api_preset(preset, {**payload, "name": preset.name, "model": model})
             elif section == "executor":
                 name = _string(payload.get("name"), 120, "name", required=True)
                 normalized = " ".join(name.casefold().split())
