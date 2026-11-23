@@ -139,7 +139,7 @@
   function statusBadge(value){return `<span class="status ${escapeHtml(value)}">${escapeHtml(statusLabels[value]||value||"—")}</span>`;}
   function emptyRow(columns,message){return `<tr class="empty-row"><td colspan="${columns}">${escapeHtml(message)}</td></tr>`;}
   function register(view, loader){modules.set(view,loader);}
-  function setAssistantContext(){const select=$("#ai-project"),scope=$("#ai-project-scope");if(!select||!scope)return;if(!select.value&&state.currentProject?.id)select.value=String(state.currentProject.id);const projectId=Number(select.value),project=state.projects.find(item=>item.id===projectId),records=state.records.filter(item=>item.project_id===projectId);scope.textContent=project?`${project.title} · ${records.length} 条实验记录 · 不读取文件`:"选择后读取项目与实验记录，不读取文件";}
+  function setAssistantContext(){const select=$("#ai-project"),scope=$("#ai-project-scope");if(!select||!scope)return;if(!select.value&&state.currentProject?.id)select.value=String(state.currentProject.id);const projectId=Number(select.value),project=state.projects.find(item=>item.id===projectId);scope.textContent=project?`${project.title} · 项目资料及手动选择的记录；同一对话包含历史消息`:"先选项目，再按需选择记录。";}
   function fillProjectOptions(){const options=state.projects.map(item=>`<option value="${item.id}">${escapeHtml(item.title)}</option>`).join("");for(const select of [$("#create-record-form select[name=project_id]"),$("#note-project"),$("#task-project"),$("#file-project"),$("#weekly-upload-project"),$("#ppt-project")]){if(!select)continue;const current=select.value;const first=select.id==="ppt-project"?"全部项目":select.closest("#create-record-form")?"请先创建项目":"不关联项目";select.innerHTML=`<option value="">${first}</option>${options}`;select.value=current;}for(const filter of [$("#record-project-filter"),$("#export-project-filter"),$("#task-project-filter"),$("#weekly-project-filter")]){if(!filter)continue;const current=filter.value;filter.innerHTML=`<option value="">全部项目</option>${options}`;filter.value=current;}const aiProject=$("#ai-project");if(aiProject){const current=aiProject.value;aiProject.innerHTML=`<option value="">选择项目历史</option>${options}`;aiProject.value=current;setAssistantContext();}}
 
   function paginate(items,page=1,pageSize=20){if(items.serverPagination){const value=items.serverPagination;return {items,total:value.total,pages:value.pages,page:value.page,pageSize:value.page_size};}const total=items.length,pages=Math.max(1,Math.ceil(total/pageSize)),safePage=Math.min(Math.max(1,page),pages),start=(safePage-1)*pageSize;return {items:items.slice(start,start+pageSize),total,pages,page:safePage,pageSize};}
@@ -182,6 +182,8 @@
   // serialises these transactions so a burst of sidebar clicks cannot leave
   // several loaders mutating the same panel and history at once.
   async function navigateOnce(view,params={},options={}){
+    // Reopening the active editor must keep its draft and pending save timer.
+    if (view === "record-edit" && state.view === view && Number(params.id) === state.currentRecord?.id) return true;
     const navigationKey=`${view}|${JSON.stringify(params||{})}|${options.push===false?"replace":"push"}`;
     const now=performance.now();
     if(state.navigationLock===navigationKey||(state.lastNavigationKey===navigationKey&&now-state.lastNavigationAt<320))return true;
@@ -280,7 +282,20 @@
     document.addEventListener("click",event=>{
       const cancel=event.target.closest('dialog button[value="cancel"]');if(cancel){event.preventDefault();cancel.closest("dialog")?.close("cancel");return;}
       const view=event.target.closest("[data-view]");if(view){event.preventDefault();navigate(view.dataset.view);return;}
-      const open=event.target.closest("[data-open]");if(open){event.preventDefault();openDialog(open.dataset.open);return;}
+      const open=event.target.closest("[data-open]");if(open){
+        event.preventDefault();
+        if(open.dataset.open==="record-dialog"){
+          if(state.dashboard?.counts?.projects===0){
+            document.querySelector('[data-view-panel="home"] [data-open="project-dialog"]').click();
+            toast("先建立项目，再添加第一条实验记录");
+            return;
+          }
+          if(state.view==="project-workbench" && state.currentProject){
+            $("#create-record-form select[name=project_id]").value=String(state.currentProject.id);
+          }
+        }
+        openDialog(open.dataset.open);return;
+      }
       const recordView=event.target.closest("[data-record-view]");if(recordView){event.preventDefault();navigate(recordView.dataset.recordView,{id:state.currentRecord?.id});return;}
     });
     $("#nav-back").addEventListener("click",()=>moveHistory(-1));$("#nav-forward").addEventListener("click",()=>moveHistory(1));$("#refresh-view").addEventListener("click",refresh);
