@@ -77,9 +77,12 @@ class DesktopBridge:
             "zotero.collections.list": lambda payload, version: self._service.zotero_collections(payload),
             "zotero.collections.map": lambda payload, version: self._service.zotero_collection_map(payload),
             "library.list": lambda payload, version: self._service.list_library_items(payload),
+            "library.location": lambda payload, version: self._service.library_location(payload),
             "library.import": lambda payload, version: self._import_library_item(payload),
+            "library.import_directory": lambda payload, version: self._import_library_directory(payload),
             "library.verify": lambda payload, version: self._service.verify_library_item(payload),
             "library.open": lambda payload, version: self._open_library_item(payload),
+            "library.open_directory": lambda payload, version: self._open_library_item(payload, directory=True),
             "note.list": lambda payload, version: self._service.list_notes(payload),
             "note.get": lambda payload, version: self._service.get_note(payload),
             "note.save": lambda payload, version: self._service.save_note(payload, version),
@@ -223,12 +226,16 @@ class DesktopBridge:
         trusted = self._native.assert_trusted_path(payload.get("path"), must_exist=True)
         return self._service.import_library_item({**payload, "path": trusted})
 
+    def _import_library_directory(self, payload):
+        trusted = self._native.assert_trusted_path(payload.get("path"), must_exist=True)
+        return self._service.import_library_directory({**payload, "path": trusted})
+
     def _read_protocol_text(self, payload):
         trusted = self._native.assert_trusted_path(payload.get("path"), must_exist=True)
         return self._service.read_protocol_text(trusted)
 
-    def _open_library_item(self, payload):
-        resolved = self._service.library_item_path(payload)
+    def _open_library_item(self, payload, *, directory=False):
+        resolved = self._service.library_item_path(payload, directory=True) if directory else self._service.library_item_path(payload)
         return self._native.open_authorized_path(resolved["path"])
 
     def _export_record(self, payload):

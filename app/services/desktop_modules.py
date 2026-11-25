@@ -5,15 +5,18 @@ import hashlib
 import html
 import json
 import mimetypes
+import os
 from pathlib import Path
 import re
 import shutil
 import sqlite3
+import stat
 import uuid
 import urllib.error
 import urllib.parse
 import urllib.request
 
+from pypdf import PdfReader
 from sqlalchemy import func, or_, text
 
 from app import db
@@ -42,6 +45,8 @@ TASK_STATUSES = {"todo", "doing", "blocked", "done", "cancelled"}
 TASK_PRIORITIES = {"low", "medium", "high"}
 FILE_KINDS = {"raw_data", "image", "spreadsheet", "protocol", "report", "literature", "other"}
 STORAGE_MODES = {"managed", "external", "zotero"}
+FILE_SEARCH_LIMIT = 500000
+FILE_SEARCH_TEXT_EXTENSIONS = {".txt", ".md", ".markdown", ".csv", ".tsv", ".json", ".log"}
 WEEKLY_FILE_EXTENSIONS = {
     ".csv", ".doc", ".docx", ".key", ".md", ".odp", ".ods", ".pdf",
     ".ppt", ".pptx", ".txt", ".xls", ".xlsx", ".zip",
@@ -175,19 +180,21 @@ def _page_result(query, payload, serializer):
     """Opt-in server pagination while preserving the legacy list response."""
     if not payload.get("pagination"):
         return [serializer(item) for item in query.all()]
+    total = query.order_by(None).count()
+    pagination = _pagination(payload, total)
+    page, page_size = pagination["page"], pagination["page_size"]
+    rows = query.offset((page - 1) * page_size).limit(page_size).all()
+    return {"items": [serializer(item) for item in rows], "pagination": pagination}
+
+
+def _pagination(payload, total):
     try:
         page = max(1, int(payload.get("page") or 1))
         page_size = min(200, max(1, int(payload.get("page_size") or 50)))
     except (TypeError, ValueError) as exc:
         raise ValidationError("分页参数无效。") from exc
-    total = query.order_by(None).count()
     pages = max(1, (total + page_size - 1) // page_size)
-    page = min(page, pages)
-    rows = query.offset((page - 1) * page_size).limit(page_size).all()
-    return {
-        "items": [serializer(item) for item in rows],
-        "pagination": {"page": page, "page_size": page_size, "pages": pages, "total": total},
-    }
+    return {"page": min(page, pages), "page_size": page_size, "pages": pages, "total": total}
 
 
 def _sorted(query, payload, allowed, default):
@@ -233,6 +240,14 @@ def _iso(value):
 
 def _json(value):
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _search_excerpt(body, query):
+    content = re.sub(r"\s+", " ", body).strip()
+    match = re.search(re.escape(query), content, re.IGNORECASE)
+    start = max(0, match.start() - 45) if match else 0
+    end = start + 180
+    return ("…" if start else "") + content[start:end] + ("…" if end < len(content) else "")
 
 
 def _load_json(value, fallback):
@@ -1470,7 +1485,101 @@ class DesktopModuleServiceMixin:
         ))
 
     @staticmethod
-    def _index_entity(workspace, entity_type, item):
+    def _is_folder_entry_link(path):
+        info = path.lstat()
+        return stat.S_ISLNK(info.st_mode) or getattr(info, "st_reparse_tag", None) == getattr(
+            stat, "IO_REPARSE_TAG_MOUNT_POINT", 0xA0000003,
+        )
+
+    def _folder_files(self, root):
+        for folder, directories, files in os.walk(root):
+            parent = Path(folder)
+            safe_directories = []
+            for name in sorted(directories):
+                path = parent / name
+                try:
+                    if not self._is_folder_entry_link(path) and path.resolve().is_relative_to(root):
+                        safe_directories.append(name)
+                except OSError:
+                    continue
+            directories[:] = safe_directories
+            for name in sorted(files):
+                path = parent / name
+                try:
+                    if not self._is_folder_entry_link(path) and path.resolve().is_relative_to(root) and path.is_file():
+                        yield path
+                except OSError:
+                    continue
+
+    def _read_search_text(self, path, extension, limit):
+        if limit <= 0 or extension not in FILE_SEARCH_TEXT_EXTENSIONS | {".pdf"}:
+            return ""
+        try:
+            if not path.is_file() or (extension == ".pdf" and path.stat().st_size > 64 * 1024 * 1024):
+                return ""
+            with path.open("rb") as stream:
+                if extension == ".pdf":
+                    reader = PdfReader(stream)
+                    if reader.is_encrypted:
+                        return ""
+                    chunks = []
+                    remaining = limit
+                    for page in reader.pages:
+                        page_text = page.extract_text()[:remaining]
+                        chunks.append(page_text)
+                        remaining -= len(page_text) + 1
+                        if remaining <= 0:
+                            break
+                    content = "\n".join(chunks)
+                else:
+                    raw = stream.read(limit * 4)
+                    try:
+                        content = raw.decode("utf-8-sig")
+                    except UnicodeDecodeError:
+                        content = raw.decode("gb18030", errors="replace")
+        except Exception:
+            # Missing and unreadable documents still have a searchable entry.
+            return ""
+        return re.sub(r"\s+", " ", content).strip()[:limit]
+
+    def _local_library_path(self, item):
+        if item.managed_relative_path:
+            root = (Path(self.flask_app.instance_path) / "library").resolve()
+            path = (root / item.managed_relative_path).resolve()
+            return path if path.is_relative_to(root) else None
+        return Path(item.external_path).resolve() if item.external_path else None
+
+    def _file_search_body(self, item):
+        metadata = f"{item.description or ''}\n{item.external_path or item.managed_relative_path or ''}"
+        if item.storage_mode not in {"external", "managed"}:
+            return metadata
+        path = self._local_library_path(item)
+        if path is None:
+            return metadata
+        if item.kind == "directory":
+            chunks = [metadata]
+            remaining = FILE_SEARCH_LIMIT
+            for child in self._folder_files(path):
+                label = child.relative_to(path).as_posix()[:remaining]
+                remaining -= len(label) + 1
+                content = self._read_search_text(child, child.suffix.lower(), remaining)
+                chunks.extend((label, content))
+                remaining -= len(content) + 1
+                if remaining <= 0:
+                    break
+            return "\n".join(chunks)
+        extension = Path(item.original_name or item.display_name).suffix.lower()
+        content = self._read_search_text(path, extension, FILE_SEARCH_LIMIT)
+        return f"{metadata}\n{content}" if content else metadata
+
+    def _index_entity(self, workspace, entity_type, item):
+        document = SearchDocument.query.filter_by(
+            workspace_id=workspace.id, entity_type=entity_type, entity_id=item.id,
+        ).first()
+        if getattr(item, "is_deleted", False):
+            if document:
+                db.session.delete(document)
+            return
         if entity_type == "project":
             config = (item.title, f"{item.objective or ''}\n{item.notes or ''}", item.code or "", "projects")
         elif entity_type == "record":
@@ -1481,7 +1590,7 @@ class DesktopModuleServiceMixin:
         elif entity_type == "literature":
             config = (item.title, f"{item.authors_json}\n{item.abstract}\n{item.reading_notes}", f"{item.doi}\n{item.keywords_json}", "literature")
         elif entity_type == "file":
-            config = (item.display_name, f"{item.description}\n{item.external_path or item.managed_relative_path or ''}", item.sha256, "files")
+            config = (item.display_name, self._file_search_body(item), item.sha256, "files")
         elif entity_type == "note":
             config = (item.title, item.body, item.kind, "notes")
         elif entity_type == "task":
@@ -1489,13 +1598,6 @@ class DesktopModuleServiceMixin:
         elif entity_type == "weekly":
             config = (item.title, f"{item.body}\n{item.issues_and_feedback}\n{item.next_week_plan}", item.status, "weekly")
         else:
-            return
-        document = SearchDocument.query.filter_by(
-            workspace_id=workspace.id, entity_type=entity_type, entity_id=item.id,
-        ).first()
-        if getattr(item, "is_deleted", False):
-            if document:
-                db.session.delete(document)
             return
         if not document:
             document = SearchDocument(workspace_id=workspace.id, entity_type=entity_type, entity_id=item.id)
@@ -2323,6 +2425,79 @@ class DesktopModuleServiceMixin:
             "ai_readability": item.ai_readability, "updated_at": _iso(item.updated_at),
         }
 
+    @staticmethod
+    def _legacy_folder_path(item):
+        if item.kind == "directory" or item.storage_mode != "external" or not item.external_path:
+            return None
+        _, _, last_line = (item.description or "").strip().rpartition("\n")
+        if not last_line.startswith("来源："):
+            return None
+        relative = Path(last_line.removeprefix("来源："))
+        path = Path(item.external_path)
+        count = len(relative.parts)
+        if count < 2 or relative.anchor or ".." in relative.parts or not path.is_absolute():
+            return None
+        if Path(*path.parts[-count:]) != relative:
+            return None
+        return path.parents[count - 2]
+
+    def _grouped_library_items(self, items, payload):
+        rows = items.all()
+        locations = {Path(item.external_path) for item in rows if item.kind == "directory" and item.external_path}
+        entries = []
+        for item in rows:
+            folder = self._legacy_folder_path(item)
+            if folder is None:
+                entries.append(self._library_dto(item))
+            elif folder not in locations:
+                locations.add(folder)
+                entries.append({
+                    **self._library_dto(item), "display_name": folder.name, "kind": "directory",
+                    "path": str(folder), "size_bytes": 0, "legacy_directory": True,
+                })
+        if not payload.get("pagination"):
+            return entries
+        pagination = _pagination(payload, len(entries))
+        size = pagination["page_size"]
+        start = (pagination["page"] - 1) * size
+        return {"items": entries[start:start + size], "pagination": pagination}
+
+    def _library_record_links(self, workspace, *, project_id=None):
+        query = db.select(lab_record_library_item.c.library_item_id).join(
+            LabRecord, LabRecord.id == lab_record_library_item.c.record_id,
+        ).join(ResearchProject, ResearchProject.id == LabRecord.project_id).where(
+            LabRecord.workspace_id == workspace.id, LabRecord.is_deleted.is_(False), ResearchProject.is_deleted.is_(False),
+        )
+        return query.where(LabRecord.project_id == project_id) if project_id else query
+
+    def library_location(self, payload):
+        item_id = _positive_id(payload.get("id"))
+
+        def locate(workspace):
+            item = LibraryItem.query.filter_by(id=item_id, workspace_id=workspace.id, is_deleted=False).first()
+            if not item:
+                raise NotFoundError("文件索引不存在。")
+            record = db.session.execute(
+                db.select(LabRecord.id, LabRecord.project_id)
+                .join(lab_record_library_item, lab_record_library_item.c.record_id == LabRecord.id)
+                .join(ResearchProject, ResearchProject.id == LabRecord.project_id)
+                .where(
+                    lab_record_library_item.c.library_item_id == item_id, LabRecord.workspace_id == workspace.id,
+                    LabRecord.is_deleted.is_(False), ResearchProject.is_deleted.is_(False),
+                ).order_by(LabRecord.id).limit(1)
+            ).first()
+            if record:
+                return {"project_id": record.project_id, "record_id": record.id, "display_name": item.display_name}
+            project = db.session.scalar(
+                db.select(ResearchProject.id).join(project_library_item)
+                .where(
+                    project_library_item.c.library_item_id == item_id, ResearchProject.workspace_id == workspace.id,
+                    ResearchProject.is_deleted.is_(False),
+                ).order_by(ResearchProject.id).limit(1)
+            )
+            return {"project_id": project, "record_id": None, "display_name": item.display_name}
+        return self._run(locate)
+
     def list_library_items(self, payload=None):
         payload = payload or {}
         search = _string(payload.get("search"), 200, "search")
@@ -2330,6 +2505,7 @@ class DesktopModuleServiceMixin:
         mode = _string(payload.get("storage_mode"), 20, "storage_mode")
         record_id = _positive_id(payload.get("record_id"), "record_id", optional=True)
         project_id = _positive_id(payload.get("project_id"), "project_id", optional=True)
+        scope = payload.get("scope")
 
         def query(workspace):
             items = LibraryItem.query.filter_by(workspace_id=workspace.id, is_deleted=False)
@@ -2344,22 +2520,44 @@ class DesktopModuleServiceMixin:
                     project_library_item,
                     project_library_item.c.library_item_id == LibraryItem.id,
                 ).filter(project_library_item.c.project_id == project_id)
+            if scope == "project_files" and project_id:
+                items = items.filter(LibraryItem.id.not_in(self._library_record_links(workspace, project_id=project_id)))
+            if scope == "unassigned":
+                project_links = db.select(project_library_item.c.library_item_id).join(
+                    ResearchProject, ResearchProject.id == project_library_item.c.project_id,
+                ).where(ResearchProject.workspace_id == workspace.id, ResearchProject.is_deleted.is_(False))
+                items = items.filter(
+                    LibraryItem.id.not_in(project_links), LibraryItem.id.not_in(self._library_record_links(workspace)),
+                )
             if kind:
                 items = items.filter_by(kind=kind)
             if mode:
                 items = items.filter_by(storage_mode=mode)
             if search:
                 pattern = f"%{search}%"
-                items = items.filter(or_(LibraryItem.display_name.ilike(pattern), LibraryItem.external_path.ilike(pattern)))
+                matches = db.select(SearchDocument.entity_id).where(
+                    SearchDocument.workspace_id == workspace.id,
+                    SearchDocument.entity_type == "file",
+                    SearchDocument.body.ilike(pattern),
+                )
+                items = items.filter(or_(
+                    LibraryItem.display_name.ilike(pattern), LibraryItem.external_path.ilike(pattern),
+                    LibraryItem.id.in_(matches),
+                ))
             items = _sorted(items, payload, {
                 "updated_desc": (LibraryItem.updated_at.desc(),),
                 "name_asc": (LibraryItem.display_name.asc(),),
                 "size_desc": (LibraryItem.size_bytes.desc(), LibraryItem.display_name.asc()),
             }, "updated_desc")
+            if payload.get("group_directories") and items.filter(
+                LibraryItem.storage_mode == "external", LibraryItem.kind != "directory",
+                LibraryItem.description.contains("来源："),
+            ).first():
+                return self._grouped_library_items(items, payload)
             return _page_result(items, payload, self._library_dto)
         return self._run(query)
 
-    def library_item_path(self, payload):
+    def library_item_path(self, payload, *, directory=False):
         item_id = _positive_id(payload.get("id"))
 
         def resolve(workspace):
@@ -2367,10 +2565,15 @@ class DesktopModuleServiceMixin:
             if not item:
                 raise NotFoundError("文件不存在或已移入回收站。")
             if item.storage_mode != "zotero":
-                raw = item.managed_relative_path or item.external_path
-                path = ((Path(self.flask_app.instance_path) / "library" / raw).resolve()
-                        if item.managed_relative_path else Path(raw or "").expanduser().resolve())
-                if not path.is_file():
+                path = self._local_library_path(item)
+                if path is None:
+                    raise NotFoundError("附件的位置不可用。")
+                if directory and item.kind != "directory":
+                    path = self._legacy_folder_path(item) or path.parent
+                if directory or item.kind == "directory":
+                    if not path.is_dir():
+                        raise NotFoundError("文件夹已失联，请检查原位置。")
+                elif not path.is_file():
                     raise NotFoundError("文件已失联，请重新定位或校验文件。")
                 return {"path": str(path), "storage_mode": item.storage_mode}
             source_key = item.source_key or ""
@@ -2400,10 +2603,73 @@ class DesktopModuleServiceMixin:
             if parsed.netloc:
                 file_path = f"//{parsed.netloc}{file_path}"
             path = Path(file_path).resolve()
+            if directory and path.parent.is_dir():
+                return {"path": str(path.parent), "storage_mode": item.storage_mode}
             if not path.is_file():
                 raise NotFoundError("Zotero 附件不存在，请在 Zotero 中重新定位文件。")
             return {"path": str(path), "storage_mode": "zotero"}
         return self._run(resolve)
+
+    def _validate_library_destination(self, workspace, project_id, record_id):
+        self._ensure_project(workspace.id, project_id)
+        if not record_id:
+            return
+        record = LabRecord.query.filter_by(
+            id=record_id, workspace_id=workspace.id, is_deleted=False,
+        ).first()
+        if not record:
+            raise NotFoundError("关联实验记录不存在。")
+        if record.is_finalized:
+            raise ValidationError("定稿记录的附件关系不能通过普通导入修改。")
+        if project_id and record.project_id != project_id:
+            raise ValidationError("文件的项目与实验记录不一致。")
+
+    def _link_library_destination(self, item, project_id, record_id):
+        if project_id and not db.session.execute(db.select(project_library_item.c.project_id).where(
+            project_library_item.c.project_id == project_id, project_library_item.c.library_item_id == item.id,
+        )).first():
+            db.session.execute(project_library_item.insert().values(
+                project_id=project_id, library_item_id=item.id, relation_role="evidence", created_at=utcnow(),
+            ))
+        if record_id and not db.session.execute(db.select(lab_record_library_item.c.record_id).where(
+            lab_record_library_item.c.record_id == record_id, lab_record_library_item.c.library_item_id == item.id,
+        )).first():
+            db.session.execute(lab_record_library_item.insert().values(
+                record_id=record_id, library_item_id=item.id, section_key="files",
+                relation_role="evidence", created_at=utcnow(),
+            ))
+
+    def import_library_directory(self, payload):
+        root = Path(_string(payload.get("path"), 2000, "path", required=True)).resolve()
+        if not root.is_dir():
+            raise ValidationError("请选择一个可访问的文件夹。")
+        project_id = _positive_id(payload.get("project_id"), "project_id", optional=True)
+        record_id = _positive_id(payload.get("record_id"), "record_id", optional=True)
+        description = _string(payload.get("description"), 20000, "description")
+        normalized = os.path.normcase(str(root))
+        source_key = "directory:" + hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+        def add(workspace):
+            self._validate_library_destination(workspace, project_id, record_id)
+            item = LibraryItem.query.filter_by(workspace_id=workspace.id, source_key=source_key).first()
+            if not item:
+                name = root.name or str(root)
+                item = LibraryItem(
+                    workspace_id=workspace.id, source_key=source_key, display_name=name, original_name=name,
+                    description=description, kind="directory", storage_mode="external", external_path=str(root),
+                    path_normalized=normalized, mime_type="inode/directory",
+                )
+                db.session.add(item)
+                db.session.flush()
+            elif description:
+                item.description = description
+            item.is_deleted, item.deleted_at = False, None
+            item.link_status, item.last_verified_at = "available", utcnow()
+            self._link_library_destination(item, project_id, record_id)
+            self._index_entity(workspace, "file", item)
+            self._activity(workspace, "file_imported", f"关联文件夹：{item.display_name}", "library_item", item.id, project_id=project_id)
+            return self._library_dto(item)
+        return self._run(add)
 
     def import_library_item(self, payload):
         source_path = Path(_string(payload.get("path"), 2000, "path", required=True)).expanduser().resolve()
@@ -2426,17 +2692,7 @@ class DesktopModuleServiceMixin:
             committed = False
             try:
                 workspace = self._workspace()
-                self._ensure_project(workspace.id, project_id)
-                if record_id:
-                    record = LabRecord.query.filter_by(
-                        id=record_id, workspace_id=workspace.id, is_deleted=False
-                    ).first()
-                    if not record:
-                        raise NotFoundError("关联实验记录不存在。")
-                    if record.is_finalized:
-                        raise ValidationError("定稿记录的附件关系不能通过普通导入修改。")
-                    if project_id and record.project_id != project_id:
-                        raise ValidationError("文件的项目与实验记录不一致。")
+                self._validate_library_destination(workspace, project_id, record_id)
                 mime_type = mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
                 file_hash = _sha256(source_path)
                 size = source_path.stat().st_size
@@ -2478,15 +2734,7 @@ class DesktopModuleServiceMixin:
                 db.session.add(item)
                 db.session.flush()
                 self._index_entity(workspace, "file", item)
-                if project_id:
-                    db.session.execute(project_library_item.insert().values(
-                        project_id=project_id, library_item_id=item.id, relation_role="evidence", created_at=utcnow(),
-                    ))
-                if record_id:
-                    db.session.execute(lab_record_library_item.insert().values(
-                        record_id=record_id, library_item_id=item.id, section_key="files",
-                        relation_role="evidence", created_at=utcnow(),
-                    ))
+                self._link_library_destination(item, project_id, record_id)
                 if operation:
                     operation.library_item_id = item.id
                     operation.status = "db_done"
@@ -2521,11 +2769,11 @@ class DesktopModuleServiceMixin:
                 item.link_status = "unchecked"
                 item.last_verified_at = utcnow()
                 return {**self._library_dto(item), "verification_message": "Zotero 附件将在打开时通过 Local API 校验。"}
-            if item.storage_mode == "managed":
-                path = (Path(self.flask_app.instance_path) / "library" / item.managed_relative_path).resolve()
-            else:
-                path = Path(item.external_path or "")
-            if not path.is_file():
+            path = self._local_library_path(item)
+            if item.kind == "directory":
+                item.link_status = "available" if path and path.is_dir() else "missing"
+                self._index_entity(workspace, "file", item)
+            elif path is None or not path.is_file():
                 item.link_status = "missing"
             else:
                 current_hash = _sha256(path)
@@ -4104,7 +4352,7 @@ class DesktopModuleServiceMixin:
             for item in LiteratureItem.query.filter_by(workspace_id=workspace.id, is_deleted=False):
                 documents.append(("literature", item.id, item.title, f"{item.authors_json}\n{item.doi}\n{item.abstract}\n{item.reading_notes}", "literature"))
             for item in LibraryItem.query.filter_by(workspace_id=workspace.id, is_deleted=False):
-                documents.append(("file", item.id, item.display_name, f"{item.external_path or item.managed_relative_path or ''}\n{item.description}", "files"))
+                documents.append(("file", item.id, item.display_name, self._file_search_body(item), "files"))
             for item in Note.query.filter_by(workspace_id=workspace.id, is_deleted=False):
                 documents.append(("note", item.id, item.title, item.body, "notes"))
             for item in Task.query.filter_by(workspace_id=workspace.id, is_deleted=False):
@@ -4153,7 +4401,6 @@ class DesktopModuleServiceMixin:
                                                   title=item.title, body=body, keywords=item.record_code, view_key="record-edit"))
                 for model, entity_type, view_key, body_field in (
                     (LiteratureItem, "literature", "literature", "abstract"),
-                    (LibraryItem, "file", "files", "description"),
                     (Note, "note", "notes", "body"),
                     (Task, "task", "tasks", "notes"),
                     (WeeklyReport, "weekly", "weekly", "body"),
@@ -4163,6 +4410,8 @@ class DesktopModuleServiceMixin:
                         db.session.add(SearchDocument(workspace_id=workspace.id, entity_type=entity_type, entity_id=item.id,
                                                       title=title_value, body=getattr(item, body_field) or "",
                                                       keywords="", view_key=view_key))
+                for item in LibraryItem.query.filter_by(workspace_id=workspace.id, is_deleted=False):
+                    self._index_entity(workspace, "file", item)
                 db.session.flush()
             mode, diagnostic = "like", "FTS5 trigram 不可用，当前使用 LIKE 降级搜索"
             rows = []
@@ -4186,7 +4435,7 @@ class DesktopModuleServiceMixin:
                 ).order_by(SearchDocument.updated_at.desc()).limit(80).all()
             return {"mode": mode, "diagnostic": diagnostic,
                     "items": [{"id": row.entity_id, "entity_type": row.entity_type, "title": row.title,
-                               "excerpt": re.sub(r"\s+", " ", row.body)[:180], "view_key": row.view_key}
+                               "excerpt": _search_excerpt(row.body, query_text), "view_key": row.view_key}
                               for row in rows]}
         return self._run(query)
 

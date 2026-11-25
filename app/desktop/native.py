@@ -45,6 +45,8 @@ class NativeCapabilities:
 
     def _remember(self, paths):
         normalized = []
+        if isinstance(paths, str):
+            paths = [paths]
         for value in paths or ():
             path = Path(value).expanduser().resolve()
             self._trusted_paths.add(str(path).casefold())

@@ -2,7 +2,8 @@
   "use strict";
   const R=window.RLab,{$,$$,state,invoke,icons,toast,escapeHtml,dateLabel,statusBadge,emptyRow,nativeDialog,navigate,paginate,renderPagination}=R;
   let literatureSource="",literatureItems=[],literaturePage=1,literaturePageSize=20;
-  let noteKind="",noteItems=[],notePage=1,notePageSize=20,filePage=1,filePageSize=20,fileImportRecordId=null;
+  let noteKind="",noteItems=[],notePage=1,notePageSize=20,filePage=1,filePageSize=20;
+  let pendingImport = null;
   let protocolMode = false;
   const protocolKind = "experiment_guide";
   const literatureSelection=new Set(),noteSelection=new Set();
@@ -107,12 +108,156 @@
       toast(error.message);
     }}
 
-  async function files(){const result=await invoke("library.list",{pagination:true,page:filePage,page_size:filePageSize,search:$("#file-search").value.trim(),storage_mode:$("#file-mode").value});const items=result.items;$("#file-count").textContent=`${result.pagination.total} 个文件`;$("#file-list").innerHTML=items.length?items.map(item=>`<tr><td><span class="record-cell"><i data-lucide="${fileIcon(item.kind)}"></i>${escapeHtml(item.display_name)}</span></td><td>${fileKind(item.kind)}</td><td>${storageLabel(item.storage_mode)}</td><td title="${escapeHtml(item.path)}">${escapeHtml(item.path||"—")}</td><td>${R.formatBytes(item.size_bytes)}</td><td>${statusBadge(item.link_status)}</td><td><div class="row-actions"><button class="icon-button" data-verify-file="${item.id}" title="校验完整性"><i data-lucide="shield-check"></i></button><button class="icon-button subtle" data-trash-file="${item.id}" title="移入回收站"><i data-lucide="ellipsis"></i></button></div></td></tr>`).join(""):emptyRow(7,"尚无文件。导入托管副本或链接外部路径。");let pager=$("#file-pagination");if(!pager){pager=document.createElement("footer");pager.id="file-pagination";pager.className="list-pagination";$("#file-list").closest(".panel")?.append(pager);}renderPagination(pager,{items,total:result.pagination.total,pages:result.pagination.pages,page:result.pagination.page,pageSize:result.pagination.page_size},value=>{filePage=value;files();},value=>{filePageSize=value;filePage=1;files();});icons();}
-  function fileIcon(kind){return {image:"image",spreadsheet:"sheet",protocol:"clipboard-list",report:"file-chart-column",literature:"book-open",raw_data:"database"}[kind]||"file";}
-  function fileKind(kind){return {image:"图像",spreadsheet:"表格",protocol:"方案",report:"报告",literature:"文献",raw_data:"原始数据",other:"其他"}[kind]||kind;}
+  let fileScope = {};
+  let fileScopeRecords = [];
+
+  function renderFileScopes() {
+    const tree = state.projects.map(project => {
+      const chosen = fileScope.projectId === project.id;
+      const children = chosen ? `<div class="file-tree-children">
+        <button type="button" data-file-scope="project_files" data-file-project="${project.id}" class="${!fileScope.recordId ? "active" : ""}"><i data-lucide="folder"></i><span>项目资料</span></button>
+        ${fileScopeRecords.map(record => `<button type="button" data-file-scope="record" data-file-project="${project.id}" data-file-record="${record.id}" class="${fileScope.recordId === record.id ? "active" : ""}" title="${escapeHtml(record.title)}"><i data-lucide="flask-conical"></i><span>${escapeHtml(record.title)}</span></button>`).join("")}
+      </div>` : "";
+      return `<button type="button" data-file-scope="project_files" data-file-project="${project.id}" aria-expanded="${chosen}" title="${escapeHtml(project.title)}"><i data-lucide="${chosen ? "chevron-down" : "chevron-right"}"></i><span>${escapeHtml(project.title)}</span></button>${children}`;
+    }).join("");
+    $("#file-scope-tree").innerHTML = `<button type="button" data-file-scope="" class="${!fileScope.type ? "active" : ""}"><i data-lucide="folders"></i><span>全部项目</span></button>${tree}
+      <button type="button" data-file-scope="unassigned" class="${fileScope.type === "unassigned" ? "active" : ""}"><i data-lucide="folder-open"></i><span>未关联资料</span></button>`;
+  }
+
+  async function selectFileScope(scope, search = "") {
+    const projectChanged = fileScope.projectId !== scope.projectId;
+    fileScope = scope;
+    filePage = 1;
+    $("#file-search").value = search;
+    if (projectChanged) fileScopeRecords = [];
+    if (projectChanged && scope.projectId) {
+      const records = await invoke("record.list", {project_id: scope.projectId});
+      if (fileScope !== scope) return;
+      fileScopeRecords = records;
+    }
+    await files();
+  }
+
+  async function files() {
+    const scope = fileScope;
+    const project = state.projects.find(item => item.id === scope.projectId);
+    const record = fileScopeRecords.find(item => item.id === scope.recordId);
+    const search = $("#file-search").value.trim();
+    $("#file-scope-title").textContent = record ? (project?.title || "") + " / " + record.title + " / 实验文件"
+      : project ? project.title + " / 项目资料" : scope.type === "unassigned" ? "未关联资料"
+        : search ? "全库搜索结果" : "项目与实验";
+    renderFileScopes();
+    const pager = $("#file-pagination");
+    if (!scope.type && !search) {
+      $("#file-count").textContent = "";
+      $("#file-list").innerHTML = emptyRow(7, "在左侧选择项目和实验，或搜索文件名和正文。");
+      pager.innerHTML = "";
+      icons();
+      return;
+    }
+    const result = await invoke("library.list", {
+      pagination: true, page: filePage, page_size: filePageSize, group_directories: true,
+      scope: scope.type, project_id: scope.recordId ? undefined : scope.projectId, record_id: scope.recordId,
+      search, storage_mode: $("#file-mode").value,
+    });
+    if (scope !== fileScope || search !== $("#file-search").value.trim()) return;
+    const items = result.items;
+    filePage = result.pagination.page;
+    $("#file-count").textContent = result.pagination.total + " 个附件";
+    $("#file-list").innerHTML = items.length ? items.map(item => `<tr data-library-row="${item.id}">
+      <td title="${escapeHtml(item.display_name)}"><span class="record-cell"><i data-lucide="${fileIcon(item.kind)}"></i>${escapeHtml(item.display_name)}</span></td>
+      <td>${fileKind(item.kind)}</td><td>${storageLabel(item.storage_mode)}</td>
+      <td title="${escapeHtml(item.path)}">${escapeHtml(item.path || "—")}</td>
+      <td>${item.kind === "directory" ? "—" : R.formatBytes(item.size_bytes)}</td><td>${statusBadge(item.link_status)}</td>
+      <td><div class="row-actions">
+        <button type="button" class="icon-button" data-open-library-directory="${item.id}" title="打开文件夹" aria-label="打开文件夹 ${escapeHtml(item.display_name)}"><i data-lucide="folder-open"></i></button>
+        ${item.legacy_directory ? "" : `<button class="icon-button" data-verify-file="${item.id}" title="校验与更新索引"><i data-lucide="shield-check"></i></button><button class="icon-button subtle" data-trash-file="${item.id}" title="移入回收站"><i data-lucide="ellipsis"></i></button>`}
+      </div></td></tr>`).join("") : emptyRow(7, "这里暂无匹配的附件。");
+    renderPagination(pager, {items,total:result.pagination.total,pages:result.pagination.pages,page:filePage,pageSize:result.pagination.page_size},
+      value => {filePage=value;files();}, value => {filePageSize=value;filePage=1;files();});
+    icons();
+  }
+
+  async function loadFileLibrary(params) {
+    if (params?.id) {
+      const loc = await invoke("library.location", {id: Number(params.id)});
+      $("#file-mode").value = "";
+      await selectFileScope({
+        type: loc.record_id ? "record" : loc.project_id ? "project_files" : "unassigned",
+        projectId: loc.project_id, recordId: loc.record_id,
+      }, loc.display_name);
+      const row = $("#file-list [data-library-row='" + Number(params.id) + "']") || $("#file-list [data-library-row]");
+      row?.classList.add("selected");
+      row?.scrollIntoView({block: "nearest"});
+    } else if (params?.project_id) {
+      await selectFileScope({type: "project_files", projectId: Number(params.project_id)});
+    } else if (fileScope.projectId && !state.projects.some(item => item.id === fileScope.projectId)) {
+      await selectFileScope({});
+    } else {
+      await files();
+    }
+  }
+
+  function fileIcon(kind){return {directory:"folder",image:"image",spreadsheet:"sheet",protocol:"clipboard-list",report:"file-chart-column",literature:"book-open",raw_data:"database"}[kind]||"file";}
+  function fileKind(kind){return {directory:"文件夹",image:"图像",spreadsheet:"表格",protocol:"方案",report:"报告",literature:"文献",raw_data:"原始数据",other:"其他"}[kind]||kind;}
   function storageLabel(mode){return {managed:"托管副本",external:"外部链接",zotero:"Zotero"}[mode]||mode;}
-  async function beginFileImport(recordId=null){const paths=await nativeDialog("dialog.open_file",{kind:"any",multiple:false});if(!paths.length)return;fileImportRecordId=recordId;const path=paths[0],name=path.split(/[\\/]/).pop(),form=$("#file-import-form");form.reset();form.elements.path.value=path;form.elements.display_name.value=name;$("#file-selected-name").textContent=name;R.openDialog("file-dialog");}
-  async function importFile(event){event.preventDefault();const form=event.currentTarget,payload=Object.fromEntries(new FormData(form));if(fileImportRecordId)payload.record_id=fileImportRecordId;try{const saved=await invoke("library.import",payload);form.closest("dialog").close();toast(saved.duplicate_count?`文件已导入，发现 ${saved.duplicate_count} 个相同内容文件`:"文件已导入");if(state.view==="record-files")await navigate("record-files",{id:fileImportRecordId},{push:false});else await files();}catch(error){$(".form-error",form).textContent=error.message;}}
+  async function beginFileImport(directory = false, record = null) {
+    const form = $("#file-import-form");
+    if ($('[type="submit"]', form).disabled) return;
+    const [path] = directory
+      ? await nativeDialog("dialog.select_directory", {})
+      : await nativeDialog("dialog.open_file", {kind: "any", multiple: false});
+    if (!path) return;
+    pendingImport = {directory, recordId: record?.id};
+    const name = path.split(/[\\/]/).filter(Boolean).at(-1) || path;
+    form.reset();
+    form.elements.path.value = path;
+    form.elements.display_name.disabled = directory;
+    form.elements.display_name.closest("label").style.display = directory ? "none" : "";
+    form.elements.display_name.value = directory ? "" : name;
+    for (const input of [form.elements.kind, form.elements.storage_mode]) {
+      input.disabled = directory;
+      input.closest("label").style.display = directory ? "none" : "";
+    }
+    if (record?.project_id) form.elements.project_id.value = record.project_id;
+    $("#file-import-title").textContent = directory ? "导入文件夹" : "导入文件";
+    $("#file-selected-name").textContent = directory ? name + "（链接原文件夹，按一条附件保存）" : name;
+    $(".form-error", form).textContent = "";
+    R.openDialog("file-dialog");
+  }
+
+  async function importFile(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = $('[type="submit"]', form);
+    if (!pendingImport || button.disabled) return;
+    const {directory, recordId} = pendingImport;
+    const payload = Object.fromEntries(new FormData(form));
+    if (recordId) payload.record_id = recordId;
+    button.disabled = true;
+    button.textContent = "正在导入…";
+    $(".form-error", form).textContent = "";
+    try {
+      const saved = await invoke(directory ? "library.import_directory" : "library.import", payload);
+      form.closest("dialog").close();
+      toast(directory ? "文件夹已关联并建立索引"
+        : saved.duplicate_count ? "文件已导入，发现 " + saved.duplicate_count + " 个相同内容文件" : "文件已导入");
+      if (state.view === "record-files" && state.currentRecord?.id === recordId) {
+        await R.modules.get("record-files").load({id: recordId});
+      } else if (state.view === "files") {
+        const projectId = Number(payload.project_id) || null;
+        if (recordId) await selectFileScope({type:"record", projectId, recordId});
+        else if (projectId) await selectFileScope({type:"project_files", projectId});
+        else await selectFileScope({type:"unassigned"});
+      }
+    } catch (error) {
+      $(".form-error", form).textContent = error.message;
+    } finally {
+      button.disabled = false;
+      button.textContent = "导入";
+    }
+  }
+
 
   function renderLiteratureRelations(item){
     const root=$("#literature-detail");if(!root||!item)return;
@@ -141,9 +286,6 @@
 
   const literatureDetailRoot=$("#literature-detail");
   if(literatureDetailRoot)new MutationObserver(()=>{if(state.currentLiterature&&!literatureDetailRoot.querySelector(".relation-list"))renderLiteratureRelations(state.currentLiterature);}).observe(literatureDetailRoot,{childList:true,subtree:true});
-  const fileListRoot=$("#file-list");
-  if(fileListRoot)new MutationObserver(()=>{let changed=false;fileListRoot.querySelectorAll("[data-verify-file]").forEach(verify=>{if(verify.parentElement.querySelector("[data-open-library]"))return;const open=document.createElement("button");open.type="button";open.className="icon-button";open.dataset.openLibrary=verify.dataset.verifyFile;open.title="打开文件";open.setAttribute("aria-label","打开文件");open.innerHTML='<i data-lucide="external-link"></i>';verify.before(open);changed=true;});if(changed)icons();}).observe(fileListRoot,{childList:true,subtree:true});
-
   let activeZoteroJob="";
   async function runZoteroSyncJob(){
     const button=$("#zotero-sync");
@@ -157,6 +299,23 @@
   document.addEventListener("click",async event=>{
     if(event.target.closest("#literature-collection-map")){const collectionId=Number($("#literature-collection-filter")?.value);if(!collectionId)return toast("请先选择一个 Zotero Collection");const projectId=await chooseValue("映射 Collection 到项目",state.projects.map(item=>[String(item.id),item.title]));if(projectId!==null){await invoke("zotero.collections.map",{collection_id:collectionId,project_id:Number(projectId),enabled:true});toast("Collection 已映射到项目");}return;}
     const doi=event.target.closest("[data-open-doi]");if(doi){await invoke("shell.open_external",{url:`https://doi.org/${encodeURIComponent(doi.dataset.openDoi)}`});return;}
+    const scopeButton = event.target.closest("[data-file-scope]");
+    if (scopeButton) {
+      try {
+        await selectFileScope({
+          type: scopeButton.dataset.fileScope,
+          projectId: Number(scopeButton.dataset.fileProject) || null,
+          recordId: Number(scopeButton.dataset.fileRecord) || null,
+        });
+      } catch (error) { toast(error.message); }
+      return;
+    }
+    const openDirectory = event.target.closest("[data-open-library-directory]");
+    if (openDirectory) {
+      try { await invoke("library.open_directory", {id: Number(openDirectory.dataset.openLibraryDirectory)}); }
+      catch (error) { toast(error.message); }
+      return;
+    }
     const openLibrary=event.target.closest("[data-open-library]");if(openLibrary){try{await invoke("library.open",{id:Number(openLibrary.dataset.openLibrary)});}catch(error){const zoteroFallback=openLibrary.closest(".relation-row")?.querySelector("[data-open-url]")?.dataset.openUrl;if(zoteroFallback){await invoke("shell.open_external",{url:zoteroFallback});toast("本地附件无法直接打开，已转到 Zotero");}else toast(error.message);}return;}
     const relatedProject=event.target.closest("[data-open-related-project]");if(relatedProject){R.go("projects",{id:Number(relatedProject.dataset.openRelatedProject)});return;}
     const relatedRecord=event.target.closest("[data-open-related-record]");if(relatedRecord){R.go("record-edit",{id:Number(relatedRecord.dataset.openRelatedRecord)});return;}
@@ -189,8 +348,12 @@
   $("#note-project-filter").addEventListener("change", () => { notePage = 1; notes(); });
   $("#note-search").addEventListener("keydown", event => {
     if (event.key === "Enter") $("#note-query").click();
-  });$("#note-form").addEventListener("submit",saveNote);$("#note-query").addEventListener("click",()=>{notePage=1;notes();});$("#import-file").addEventListener("click",()=>beginFileImport());$("#record-file-import")?.addEventListener("click",()=>beginFileImport(state.currentRecord?.id));$("#file-import-form").addEventListener("submit",importFile);$("#file-search").addEventListener("input",()=>{clearTimeout(state.fileTimer);state.fileTimer=setTimeout(files,180);});$("#file-mode").addEventListener("change",files);
+  });$("#note-form").addEventListener("submit",saveNote);$("#note-query").addEventListener("click",()=>{notePage=1;notes();});$("#import-file").addEventListener("click", () => beginFileImport(false, {id:fileScope.recordId, project_id:fileScope.projectId}));
+  $("#import-directory").addEventListener("click", () => beginFileImport(true, {id:fileScope.recordId, project_id:fileScope.projectId}));
+  $("#record-file-import").addEventListener("click", () => beginFileImport(false, state.currentRecord));
+  $("#record-directory-import").addEventListener("click", () => beginFileImport(true, state.currentRecord));
+  $("#file-import-form").addEventListener("submit",importFile);$("#file-search").addEventListener("input",()=>{clearTimeout(state.fileTimer);state.fileTimer=setTimeout(files,180);});$("#file-mode").addEventListener("change",files);
   R.register("literature",{load:async params=>{await literature();if(params?.id)await showLiterature(Number(params.id));}});R.register("notes", {load: params => loadNoteLibrary(params), save: () => $("#note-form").requestSubmit()});
   R.register("protocols", {load: params => loadNoteLibrary(params, true), save: () => $("#note-form").requestSubmit()});
-  R.register("files",{load:async params=>{await files();if(params?.id){const catalog=await invoke("library.list",{}),target=catalog.find(item=>item.id===Number(params.id));if(target){$("#file-search").value=target.display_name;$("#file-mode").value="";await files();const visible=await invoke("library.list",{search:target.display_name,storage_mode:""}),index=visible.findIndex(item=>item.id===target.id),row=$$("#file-list tr")[index];row?.classList.add("selected");row?.scrollIntoView({block:"center"});}}}});
+  R.register("files", {load: loadFileLibrary});
 })();

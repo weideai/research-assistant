@@ -816,6 +816,15 @@ body { font-size: 14px; font-variant-numeric: tabular-nums; }
 #import-protocol-text[hidden], #record-add-project[hidden] { display: none; }
 .protocol-layout { grid-template-columns: minmax(220px, .8fr) minmax(0, 1.2fr); }
 .protocol-layout > .note-editor { grid-column: auto; }
+
+.file-library-layout { display: grid; grid-template-columns: minmax(175px, 220px) minmax(0, 1fr); gap: 12px; align-items: start; }
+.file-library-content { min-width: 0; }
+.file-library-content > h2 { margin: 0 0 10px; font-size: 15px; overflow-wrap: anywhere; }
+.file-library-rail nav button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-tree-children { display: grid; gap: 2px; padding-left: 12px; }
+@media (max-width: 850px) {
+  .file-library-layout { grid-template-columns: minmax(0, 1fr); }
+}
 #record-draft-plan { border: 1px solid var(--line); border-radius: 6px; padding: 10px; }
 #record-draft-plan summary { cursor: pointer; font-weight: 700; }
 #record-draft-plan fieldset { display: grid; gap: 10px; margin: 10px 0 0; padding: 0; border: 0; min-width: 0; }
