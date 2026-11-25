@@ -1,3 +1,3 @@
-APP_VERSION = "2.5.2"
+APP_VERSION = "2.5.3"
 GITHUB_REPOSITORY = "weideai/research-assistant"
 UPDATE_CACHE_HOURS = 24

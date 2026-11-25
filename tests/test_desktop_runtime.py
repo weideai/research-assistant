@@ -122,7 +122,7 @@ def test_desktop_resource_workspaces_and_project_ai_controls_are_complete():
     assert 'if(params.id){taskScope="all"' in planning_script
     assert 'R.register("weekly-library",{load:async params=>' in planning_script
     assert 'R.register("literature",{load:async params=>' in resource_script
-    assert 'R.register("files",{load:async params=>' in resource_script
+    assert 'R.register("files", {load: loadFileLibrary})' in resource_script
     assert 'invoke("trash.purge"' in system_script
     assert 'calendar-clear-date' in planning_script
     assert 'class="resource-table weekly-table"' in planning_script
@@ -172,7 +172,7 @@ def test_experiment_records_use_dedicated_editor_page():
     assert 'id="record-edit-surface"' in html
     assert "const detail=$(\"#record-inline-detail\")" in research_script
     assert 'navigate("record-edit",{id:Number(record.dataset.openRecord)})' in research_script
-    assert 'const panelView=view;' in desktop_script
+    assert 'const panelView = view === "protocols" ? "notes" : view;' in desktop_script
     assert ".record-workspace" in css
 
 
@@ -199,7 +199,7 @@ def test_literature_relations_weekly_sources_and_zotero_jobs_are_navigable():
     assert "currentWeeklyDetail.entries" in planning
     assert "pagination:true,page:literaturePage" in resources
     assert "pagination:true,page:notePage" in resources
-    assert "pagination:true,page:filePage" in resources
+    assert "pagination: true, page: filePage" in resources
     research = (ROOT / "app/desktop_ui/desktop_research.js").read_text(encoding="utf-8")
     assert "pagination:true,page:recordsPage" in research
     assert "weeklyLibraryPaged" in planning

@@ -13,8 +13,8 @@ REQUIRED_ENTRIES = {
     r"payload\ResearchAssistant\_internal\app\desktop_ui\desktop_resources.js",
     r"payload\ResearchAssistant\_internal\app\desktop_ui\desktop_planning.js",
     r"payload\ResearchAssistant\_internal\app\desktop_ui\desktop_system.js",
-    r"payload\ResearchAssistant\_internal\app\static\css\tokens.css",
-    r"payload\ResearchAssistant\_internal\app\static\vendor\lucide.min.js",
+    r"payload\ResearchAssistant\_internal\app\desktop_ui\assets\tokens.css",
+    r"payload\ResearchAssistant\_internal\app\desktop_ui\assets\lucide.min.js",
     r"payload\ResearchAssistant\_internal\migrations\alembic.ini",
     r"payload\ResearchAssistant\_internal\scripts\build_weekly_presentation.mjs",
 }

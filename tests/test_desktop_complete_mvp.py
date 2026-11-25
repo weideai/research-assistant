@@ -177,7 +177,8 @@ def test_desktop_ai_prompts_match_current_targets_and_experiment_report_fields()
             target_type, schema, today=__import__("datetime").date(2026, 8, 11), timezone="Asia/Shanghai",
         )
         assert f"目标类型：{target_type}" in prompt
-        assert "直接写入" in prompt
+        assert "proposal.create_draft" in prompt
+        assert "在表单中确认" in prompt
         assert "experiment_plan" not in prompt
         assert "batch" not in prompt
         assert "实验计划" not in prompt

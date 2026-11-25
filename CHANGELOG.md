@@ -7,6 +7,12 @@ last_verified_commit: null
 
 # Change Log
 
+## 2.5.3 Windows
+
+- AI 助手支持可编辑的项目与实验草稿，以及在同一对话中补写实验计划。
+- 新增实验方案库，支持导入和按项目管理 Markdown 或 TXT 方案。
+- 文件库按项目和实验组织附件，文件夹以单条本地索引呈现。支持打开所在目录、搜索 PDF 文字层及常见文本附件。
+
 ## [Unreleased]
 
 ### Removed (TASK-003)
