@@ -9,7 +9,9 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from app import db
 from app.models import LabRecord, LabRecordRevision, LabRecordStep, LibraryItem, ResearchProject, Task, User, Workspace, utcnow
-from .desktop_modules import DesktopModuleServiceMixin, _page_result, _sorted
+from .desktop_modules import (
+    RECORD_PLAN_FIELD_LIMIT, RECORD_PLAN_FIELDS, DesktopModuleServiceMixin, _page_result, _sorted,
+)
 from .errors import ConflictError, NotFoundError, ServiceError, ValidationError
 
 
@@ -419,6 +421,10 @@ class DesktopApplicationService(DesktopModuleServiceMixin):
         project_id = self._positive_id(payload.get("project_id"), "project_id")
         title = _text(payload.get("title"), 200, "title", required=True)
         experiment_date = _date(payload.get("experiment_date"), "experiment_date")
+        plan = {
+            field: _text(payload[field], RECORD_PLAN_FIELD_LIMIT, field)
+            for field in RECORD_PLAN_FIELDS if field in payload
+        }
 
         def create(workspace):
             project = ResearchProject.query.filter_by(
@@ -438,6 +444,7 @@ class DesktopApplicationService(DesktopModuleServiceMixin):
             record = LabRecord(
                 workspace_id=workspace.id, project_id=project.id, record_code=code,
                 title=title, experiment_date=experiment_date, status="draft", source_kind="new",
+                **plan,
             )
             db.session.add(record)
             db.session.flush()

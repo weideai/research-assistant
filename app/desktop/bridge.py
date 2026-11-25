@@ -84,6 +84,7 @@ class DesktopBridge:
             "note.get": lambda payload, version: self._service.get_note(payload),
             "note.save": lambda payload, version: self._service.save_note(payload, version),
             "note.bulk": lambda payload, version: self._service.note_bulk(payload),
+            "note.protocol.read": lambda payload, version: self._read_protocol_text(payload),
             "task.list": lambda payload, version: self._service.list_tasks(payload),
             "task.save": lambda payload, version: self._service.save_task(payload, version),
             "task.bulk": lambda payload, version: self._service.task_bulk(payload),
@@ -221,6 +222,10 @@ class DesktopBridge:
     def _import_library_item(self, payload):
         trusted = self._native.assert_trusted_path(payload.get("path"), must_exist=True)
         return self._service.import_library_item({**payload, "path": trusted})
+
+    def _read_protocol_text(self, payload):
+        trusted = self._native.assert_trusted_path(payload.get("path"), must_exist=True)
+        return self._service.read_protocol_text(trusted)
 
     def _open_library_item(self, payload):
         resolved = self._service.library_item_path(payload)

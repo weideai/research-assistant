@@ -436,8 +436,14 @@ def _assistant_result(content):
         parsed = json.loads(candidate)
     except json.JSONDecodeError:
         match = re.search(r"\{.*\}", candidate, re.S)
+        punctuation = {"，": ",", "：": ":"}
+        repaired = re.sub(
+            r'"(?:\\.|[^"\\])*"|[，：]',
+            lambda token: punctuation.get(token[0], token[0]),
+            match[0],
+        ) if match else ""
         try:
-            parsed = json.loads(match.group()) if match else None
+            parsed = json.loads(repaired)
         except json.JSONDecodeError:
             parsed = None
     if not isinstance(parsed, dict):

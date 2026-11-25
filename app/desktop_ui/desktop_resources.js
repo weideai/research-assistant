@@ -3,6 +3,8 @@
   const R=window.RLab,{$,$$,state,invoke,icons,toast,escapeHtml,dateLabel,statusBadge,emptyRow,nativeDialog,navigate,paginate,renderPagination}=R;
   let literatureSource="",literatureItems=[],literaturePage=1,literaturePageSize=20;
   let noteKind="",noteItems=[],notePage=1,notePageSize=20,filePage=1,filePageSize=20,fileImportRecordId=null;
+  let protocolMode = false;
+  const protocolKind = "experiment_guide";
   const literatureSelection=new Set(),noteSelection=new Set();
   $("[data-literature-select-all]")?.replaceChildren("选择当前页");
   $("[data-note-select-all]")?.replaceChildren("选择当前页");
@@ -29,11 +31,81 @@
   async function saveLiterature(event){event.preventDefault();const form=event.currentTarget;try{const payload=Object.fromEntries(new FormData(form));payload.source="manual";await invoke("literature.save",payload);form.closest("dialog").close();form.reset();await literature();toast("文献已保存");}catch(error){$(".form-error",form).textContent=error.message;}}
 
   function noteLabel(kind){return {idea:"研究想法",experiment_guide:"实验指引",literature:"文献笔记",meeting:"会议记录",supervisor_feedback:"导师意见",general:"普通笔记"}[kind]||kind;}
-  async function notes(){projectOptions($("#note-project-filter"));const result=await invoke("note.list",{pagination:true,page:notePage,page_size:notePageSize,kind:noteKind,search:$("#note-search").value.trim(),project_id:$("#note-project-filter").value});noteItems=result.items;noteItems.serverPagination=result.pagination;const page=paginate(noteItems,notePage,notePageSize);notePage=page.page;$("#note-list").innerHTML=page.items.length?`<div class="resource-select-head"><label><input type="checkbox" data-note-check-page ${page.items.every(item=>noteSelection.has(item.id))?"checked":""}>选择当前页</label></div>${page.items.map(item=>`<article class="note-list-item ${state.currentNote?.id===item.id?"active":""}"><label class="row-selector"><input type="checkbox" data-note-select="${item.id}" ${noteSelection.has(item.id)?"checked":""}></label><button data-note-id="${item.id}"><span><b>${escapeHtml(item.title)}</b><small>${noteLabel(item.kind)} · ${dateLabel(item.updated_at,true)}</small></span><p>${escapeHtml(item.excerpt||"无正文")}</p></button></article>`).join("")}`:`<div class="empty-state"><i data-lucide="notebook-pen"></i><p>该分类还没有笔记</p></div>`;renderPagination($("#note-pagination"),page,value=>{notePage=value;notes();},value=>{notePageSize=value;notePage=1;notes();});syncBulkBar("#note-bulk-bar",noteSelection,page.total);if(state.currentNote&&noteItems.some(item=>item.id===state.currentNote.id))await showNote(state.currentNote.id);icons();}
+  function noteType() { return protocolMode ? "实验方案" : "笔记"; }
+
+  async function loadNoteLibrary(params, protocols = false) {
+    if (protocolMode !== protocols) {
+      protocolMode = protocols;
+      noteSelection.clear();
+      notePage = 1;
+      newNote(false);
+    }
+    const form = $("#note-form");
+    $("#note-heading").textContent = noteType();
+    $("#note-subtitle").textContent = protocols
+      ? "收集和编辑 Protocol，按项目查找与管理"
+      : "按项目管理研究想法、实验指引、文献与会议记录";
+    $("#note-create-label").textContent = `新建${noteType()}`;
+    $("#note-save-label").textContent = `保存${noteType()}`;
+    $("#note-kind-filters").hidden = protocols;
+    $("#note-editor-kind").hidden = protocols;
+    $("#import-protocol-text").hidden = !protocols;
+    form.closest(".notes-layout").classList.toggle("protocol-layout", protocols);
+    form.elements.title.placeholder = `${noteType()}标题`;
+    form.elements.body.placeholder = protocols
+      ? "粘贴或填写方案正文，可一并记录来源链接"
+      : "开始记录研究思路、阅读摘录或会议结论";
+    await notes();
+    if (params?.id) await showNote(Number(params.id));
+    else if (state.currentNote && noteItems.some(item => item.id === state.currentNote.id)) {
+      await showNote(state.currentNote.id);
+    }
+  }
+
+  async function importProtocolText() {
+    const [path] = await nativeDialog("dialog.open_file", {kind: "protocol_text"});
+    if (!path || !protocolMode || state.view !== "protocols") return;
+    try {
+      const draft = await invoke("note.protocol.read", {path});
+      if (state.view !== "protocols") return;
+      newNote();
+      const form = $("#note-form");
+      form.elements.title.value = draft.title;
+      form.elements.body.value = draft.body;
+      $("#note-save-state").textContent = "已载入文本，保存后加入方案库";
+    } catch (error) {
+      toast(error.message);
+    }
+  }
+  async function notes(){projectOptions($("#note-project-filter"));const result=await invoke("note.list",{pagination:true,page:notePage,page_size:notePageSize,kind:protocolMode?protocolKind:noteKind,search:$("#note-search").value.trim(),project_id:$("#note-project-filter").value});noteItems=result.items;noteItems.serverPagination=result.pagination;const page=paginate(noteItems,notePage,notePageSize);notePage=page.page;$("#note-list").innerHTML=page.items.length?`<div class="resource-select-head"><label><input type="checkbox" data-note-check-page ${page.items.every(item=>noteSelection.has(item.id))?"checked":""}>选择当前页</label></div>${page.items.map(item=>`<article class="note-list-item ${state.currentNote?.id===item.id?"active":""}"><label class="row-selector"><input type="checkbox" data-note-select="${item.id}" ${noteSelection.has(item.id)?"checked":""}></label><button data-note-id="${item.id}"><span><b>${escapeHtml(item.title)}</b><small>${noteLabel(item.kind)} · ${dateLabel(item.updated_at,true)}</small></span><p>${escapeHtml(item.excerpt||"无正文")}</p></button></article>`).join("")}`:`<div class="empty-state"><i data-lucide="notebook-pen"></i><p>${protocolMode?"没有找到实验方案":"该分类还没有笔记"}</p></div>`;renderPagination($("#note-pagination"),page,value=>{notePage=value;notes();},value=>{notePageSize=value;notePage=1;notes();});syncBulkBar("#note-bulk-bar",noteSelection,page.total);icons();}
   async function showNote(id){const item=await invoke("note.get",{id});state.currentNote=item;const form=$("#note-form");form.elements.id.value=item.id;form.elements.row_version.value=item.row_version;form.elements.title.value=item.title;form.elements.kind.value=item.kind;form.elements.project_id.value=item.project_id||"";form.elements.body.value=item.body||"";$("#note-save-state").textContent=`上次更新 ${dateLabel(item.updated_at,true)}`;$$('[data-note-id]').forEach(x=>x.closest(".note-list-item")?.classList.toggle("active",Number(x.dataset.noteId)===item.id));R.setAssistantContext();}
-  function newNote(){state.currentNote=null;const form=$("#note-form");form.reset();form.elements.id.value="";form.elements.row_version.value="";form.elements.kind.value=noteKind||"general";$("#note-save-state").textContent="新笔记尚未保存";form.elements.title.focus();R.setAssistantContext();}
-  async function saveNote(event){event.preventDefault();const form=event.currentTarget,payload=Object.fromEntries(new FormData(form));if(!payload.id)delete payload.id;const version=payload.row_version?Number(payload.row_version):undefined;delete payload.row_version;try{const saved=await invoke("note.save",payload,version);state.currentNote=saved;form.elements.id.value=saved.id;form.elements.row_version.value=saved.row_version;$("#note-save-state").textContent="已保存";await notes();R.setAssistantContext();toast("笔记已保存");}catch(error){toast(error.message);}}
-  async function noteBulk(action){const ids=[...noteSelection];if(!ids.length)return;const payload={ids,action};if(action==="trash"){if(!await R.confirmAction("移入回收站",`将 ${ids.length} 篇笔记移入回收站？`))return;}else{const value=await chooseValue("批量调整所属项目",[["","未分类"],...state.projects.map(item=>[String(item.id),item.title])]);if(value===null)return;payload.action="project";payload.value=value?Number(value):null;}await invoke("note.bulk",payload);noteSelection.clear();await notes();toast("批量操作已完成");}
+  function newNote(focus = true) {
+    state.currentNote = null;
+    const form = $("#note-form");
+    form.reset();
+    form.elements.id.value = "";
+    form.elements.row_version.value = "";
+    form.elements.kind.value = protocolMode ? protocolKind : noteKind || "general";
+    const project = $("#note-project-filter").value;
+    if (protocolMode && project !== "unclassified") form.elements.project_id.value = project;
+    $("#note-save-state").textContent = "新" + noteType() + "尚未保存";
+    $$(".note-list-item.active").forEach(item => item.classList.remove("active"));
+    if (focus) form.elements.title.focus();
+    R.setAssistantContext();
+  }
+  async function saveNote(event){event.preventDefault();const form=event.currentTarget,payload=Object.fromEntries(new FormData(form));if(!payload.id)delete payload.id;const version=payload.row_version?Number(payload.row_version):undefined;delete payload.row_version;try{const saved=await invoke("note.save",payload,version);state.currentNote=saved;form.elements.id.value=saved.id;form.elements.row_version.value=saved.row_version;$("#note-save-state").textContent="已保存";await notes();R.setAssistantContext();toast(noteType()+"已保存");}catch(error){toast(error.message);}}
+  async function noteBulk(action){const ids=[...noteSelection];if(!ids.length)return;const payload={ids,action};if(action==="trash"){if(!await R.confirmAction("移入回收站",`将 ${ids.length} 项${noteType()}移入回收站？`))return;}else{const value=await chooseValue("批量调整所属项目",[["","未分类"],...state.projects.map(item=>[String(item.id),item.title])]);if(value===null)return;payload.action="project";payload.value=value?Number(value):null;}try {
+      await invoke("note.bulk", payload);
+      if (ids.includes(state.currentNote?.id)) {
+        if (action === "trash") newNote(false);
+        else await showNote(state.currentNote.id);
+      }
+      noteSelection.clear();
+      await notes();
+      toast("批量操作已完成");
+    } catch (error) {
+      toast(error.message);
+    }}
 
   async function files(){const result=await invoke("library.list",{pagination:true,page:filePage,page_size:filePageSize,search:$("#file-search").value.trim(),storage_mode:$("#file-mode").value});const items=result.items;$("#file-count").textContent=`${result.pagination.total} 个文件`;$("#file-list").innerHTML=items.length?items.map(item=>`<tr><td><span class="record-cell"><i data-lucide="${fileIcon(item.kind)}"></i>${escapeHtml(item.display_name)}</span></td><td>${fileKind(item.kind)}</td><td>${storageLabel(item.storage_mode)}</td><td title="${escapeHtml(item.path)}">${escapeHtml(item.path||"—")}</td><td>${R.formatBytes(item.size_bytes)}</td><td>${statusBadge(item.link_status)}</td><td><div class="row-actions"><button class="icon-button" data-verify-file="${item.id}" title="校验完整性"><i data-lucide="shield-check"></i></button><button class="icon-button subtle" data-trash-file="${item.id}" title="移入回收站"><i data-lucide="ellipsis"></i></button></div></td></tr>`).join(""):emptyRow(7,"尚无文件。导入托管副本或链接外部路径。");let pager=$("#file-pagination");if(!pager){pager=document.createElement("footer");pager.id="file-pagination";pager.className="list-pagination";$("#file-list").closest(".panel")?.append(pager);}renderPagination(pager,{items,total:result.pagination.total,pages:result.pagination.pages,page:result.pagination.page,pageSize:result.pagination.page_size},value=>{filePage=value;files();},value=>{filePageSize=value;filePage=1;files();});icons();}
   function fileIcon(kind){return {image:"image",spreadsheet:"sheet",protocol:"clipboard-list",report:"file-chart-column",literature:"book-open",raw_data:"database"}[kind]||"file";}
@@ -112,6 +184,13 @@
   });
   document.addEventListener("change",async event=>{if(event.target.matches("[data-literature-check-page]")){paginate(literatureItems,literaturePage,literaturePageSize).items.forEach(item=>event.target.checked?literatureSelection.add(item.id):literatureSelection.delete(item.id));await literature();}if(event.target.matches("[data-note-check-page]")){paginate(noteItems,notePage,notePageSize).items.forEach(item=>event.target.checked?noteSelection.add(item.id):noteSelection.delete(item.id));await notes();}});
   $("#literature-form").addEventListener("submit",saveLiterature);$("#literature-query").addEventListener("click",()=>{literaturePage=1;literature();});$("#literature-search").addEventListener("keydown",event=>{if(event.key==="Enter"){event.preventDefault();literaturePage=1;literature();}});$("#zotero-sync").addEventListener("click",async()=>{const result=await invoke("zotero.sync",{});toast(result.error||`Zotero 同步完成：新增 ${result.added}，恢复 ${result.restored||0}，更新 ${result.updated}，源端缺失 ${result.missing||0}`);literaturePage=1;await literature();});
-  $("#new-note").addEventListener("click",newNote);$("#note-form").addEventListener("submit",saveNote);$("#note-query").addEventListener("click",()=>{notePage=1;notes();});$("#import-file").addEventListener("click",()=>beginFileImport());$("#record-file-import")?.addEventListener("click",()=>beginFileImport(state.currentRecord?.id));$("#file-import-form").addEventListener("submit",importFile);$("#file-search").addEventListener("input",()=>{clearTimeout(state.fileTimer);state.fileTimer=setTimeout(files,180);});$("#file-mode").addEventListener("change",files);
-  R.register("literature",{load:async params=>{await literature();if(params?.id)await showLiterature(Number(params.id));}});R.register("notes",{load:async params=>{await notes();if(params?.id)await showNote(Number(params.id));},save:()=>$("#note-form").requestSubmit()});R.register("files",{load:async params=>{await files();if(params?.id){const catalog=await invoke("library.list",{}),target=catalog.find(item=>item.id===Number(params.id));if(target){$("#file-search").value=target.display_name;$("#file-mode").value="";await files();const visible=await invoke("library.list",{search:target.display_name,storage_mode:""}),index=visible.findIndex(item=>item.id===target.id),row=$$("#file-list tr")[index];row?.classList.add("selected");row?.scrollIntoView({block:"center"});}}}});
+  $("#new-note").addEventListener("click", () => newNote());
+  $("#import-protocol-text").addEventListener("click", importProtocolText);
+  $("#note-project-filter").addEventListener("change", () => { notePage = 1; notes(); });
+  $("#note-search").addEventListener("keydown", event => {
+    if (event.key === "Enter") $("#note-query").click();
+  });$("#note-form").addEventListener("submit",saveNote);$("#note-query").addEventListener("click",()=>{notePage=1;notes();});$("#import-file").addEventListener("click",()=>beginFileImport());$("#record-file-import")?.addEventListener("click",()=>beginFileImport(state.currentRecord?.id));$("#file-import-form").addEventListener("submit",importFile);$("#file-search").addEventListener("input",()=>{clearTimeout(state.fileTimer);state.fileTimer=setTimeout(files,180);});$("#file-mode").addEventListener("change",files);
+  R.register("literature",{load:async params=>{await literature();if(params?.id)await showLiterature(Number(params.id));}});R.register("notes", {load: params => loadNoteLibrary(params), save: () => $("#note-form").requestSubmit()});
+  R.register("protocols", {load: params => loadNoteLibrary(params, true), save: () => $("#note-form").requestSubmit()});
+  R.register("files",{load:async params=>{await files();if(params?.id){const catalog=await invoke("library.list",{}),target=catalog.find(item=>item.id===Number(params.id));if(target){$("#file-search").value=target.display_name;$("#file-mode").value="";await files();const visible=await invoke("library.list",{search:target.display_name,storage_mode:""}),index=visible.findIndex(item=>item.id===target.id),row=$$("#file-list tr")[index];row?.classList.add("selected");row?.scrollIntoView({block:"center"});}}}});
 })();

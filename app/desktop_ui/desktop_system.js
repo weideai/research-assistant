@@ -217,6 +217,7 @@
     const label = draft.kind === "project" ? "项目" : "实验记录";
     return `<div class="assistant-create-draft">
       <b>${label}草稿</b><span>${escapeHtml(draft.title)}</span>
+      ${draft.plan ? '<span class="muted">含可编辑实验计划</span>' : ""}
       <button type="button" class="button compact primary" data-ai-create-draft="${index}">核对并新建${label}</button>
     </div>`;
   }
@@ -232,20 +233,35 @@
     if (draft.kind === "lab_record") {
       state.projects = await invoke("project.list");
       R.fillProjectOptions();
-      if (!state.projects.length) {
-        toast("先建立项目，再为它新建实验记录。");
-        $('[data-view-panel="home"] [data-open="project-dialog"]').click();
-        return;
-      }
       const form = $("#create-record-form");
       form.reset();
       form.elements.title.value = draft.title;
-      form.elements.project_id.value = draft.project_id || "";
+      const titleKey = value => (value || "").normalize("NFKC").trim().toLowerCase();
+      const matches = draft.project_title
+        ? state.projects.filter(item => titleKey(item.title) === titleKey(draft.project_title))
+        : state.projects.filter(item => item.id === draft.project_id);
+      form.elements.project_id.value = matches.length === 1 ? matches[0].id : "";
       form.elements.experiment_date.value = draft.experiment_date || "";
+      const details = $("#record-draft-plan");
+      const hasPlan = Boolean(draft.plan && Object.keys(draft.plan).length);
+      details.hidden = !hasPlan;
+      details.open = hasPlan;
+      $("fieldset", details).disabled = !hasPlan;
+      for (const field of $$("textarea", details)) field.value = draft.plan?.[field.name] || "";
+      $("#record-add-project").hidden = state.projects.length > 0;
       $(".form-error", form).textContent = "";
       R.openDialog("record-dialog");
     }
   }
+
+  $("#record-dialog").addEventListener("close", () => {
+    const details = $("#record-draft-plan");
+    details.hidden = true;
+    details.open = false;
+    $("fieldset", details).disabled = true;
+    $("#record-add-project").hidden = true;
+    $("#create-record-form").reset();
+  });
 
   function renderAiConversation() {
     const node = $("#ai-output");

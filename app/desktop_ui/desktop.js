@@ -76,7 +76,7 @@
       case "record.list": {const filtered=demo.records.filter(x=>(!p.project_id||x.project_id===Number(p.project_id))&&(!p.search||x.title.includes(p.search))&&(!p.status||x.status===p.status));if(p.pagination){const page=Math.max(1,Number(p.page)||1),pageSize=Math.max(1,Number(p.page_size)||20),pages=Math.max(1,Math.ceil(filtered.length/pageSize)),safePage=Math.min(page,pages);data={items:filtered.slice((safePage-1)*pageSize,safePage*pageSize),pagination:{page:safePage,page_size:pageSize,pages,total:filtered.length}};}else data=filtered;break;}
        case "record.get": data=demo.records.find(x=>x.id===Number(p.id)); break;
        case "record.export.batch": data={count:(p.ids||[]).length,size_bytes:0,items:(p.ids||[]).map(id=>({id:Number(id),path:`${p.directory||""}/R-LAB-record-${id}.${p.format||"docx"}`,size_bytes:0}))}; break;
-      case "record.create": {const project=demo.projects.find(x=>x.id===Number(p.project_id));data={id:Date.now(),project_id:project.id,project_title:project.title,record_code:`LAB-${new Date().toISOString().slice(0,10).replaceAll("-","")}-001`,title:p.title,status:"draft",experiment_date:p.experiment_date||null,executor_snapshot:"",location:"",row_version:1,updated_at:new Date().toISOString(),objective:"",background:"",hypothesis:"",design:"",materials_conditions:"",expected_result:"",actual_process_summary:"",actual_result:"",analysis:"",conclusion:"",next_steps:"",steps:[]};demo.records.unshift(data);break;}
+      case "record.create": {const project=demo.projects.find(x=>x.id===Number(p.project_id));data={id:Date.now(),project_id:project.id,project_title:project.title,record_code:`LAB-${new Date().toISOString().slice(0,10).replaceAll("-","")}-001`,title:p.title,status:"draft",experiment_date:p.experiment_date||null,executor_snapshot:"",location:"",row_version:1,updated_at:new Date().toISOString(),objective:p.objective||"",background:p.background||"",hypothesis:p.hypothesis||"",design:p.design||"",materials_conditions:p.materials_conditions||"",expected_result:p.expected_result||"",actual_process_summary:"",actual_result:"",analysis:"",conclusion:"",next_steps:p.next_steps||"",steps:[]};demo.records.unshift(data);break;}
       case "record.update": {const item=demo.records.find(x=>x.id===Number(p.id));Object.assign(item,p,{row_version:item.row_version+1,updated_at:new Date().toISOString()});data=item;break;}
       case "literature.list": {const filtered=demo.literature.filter(x=>(!p.source||x.source===p.source)&&(!p.read_status||x.read_status===p.read_status)&&(!p.search||JSON.stringify(x).toLowerCase().includes(p.search.toLowerCase())));data=demoPage(filtered,p);break;}
       case "literature.get": data=demo.literature.find(x=>x.id===Number(p.id)); break;
@@ -88,7 +88,16 @@
       case "library.list": data=demoPage(demo.files.filter(x=>!p.search||x.display_name.includes(p.search)),p); break;
       case "library.verify": data=demo.files.find(x=>x.id===Number(p.id)); break;
       case "library.import": data={id:Date.now(),display_name:p.display_name,kind:p.kind,storage_mode:p.storage_mode,path:p.path,size_bytes:1200,link_status:"available",updated_at:new Date().toISOString()},demo.files.unshift(data); break;
-      case "note.list": data=demoPage(demo.notes.filter(x=>(!p.kind||x.kind===p.kind)&&(!p.search||x.title.includes(p.search))),p); break;
+      case "note.list": {
+        const search = (p.search || "").toLowerCase();
+        const items = demo.notes.filter(item =>
+          (!p.kind || item.kind === p.kind) &&
+          (!p.project_id || (p.project_id === "unclassified" ? !item.project_id : Number(item.project_id) === Number(p.project_id))) &&
+          (!search || [item.title, item.body].some(value => (value || "").toLowerCase().includes(search)))
+        );
+        data = demoPage(items, p);
+        break;
+      }
       case "note.get": data=demo.notes.find(x=>x.id===Number(p.id)); break;
       case "note.save": {let item=p.id?demo.notes.find(x=>x.id===Number(p.id)):null;if(item)Object.assign(item,p,{row_version:item.row_version+1});else item={id:Date.now(),row_version:1,...p},demo.notes.unshift(item);data=item;break;}
       case "task.list": data=demoPage(demo.tasks.filter(x=>p.scope!=="completed"||x.status==="done"),p); break;
@@ -176,7 +185,7 @@
   function emptyRow(columns,message){return `<tr class="empty-row"><td colspan="${columns}">${escapeHtml(message)}</td></tr>`;}
   function register(view, loader){modules.set(view,loader);}
   function setAssistantContext(){const select=$("#ai-project"),scope=$("#ai-project-scope");if(!select||!scope)return;const projectId=Number(select.value),project=state.projects.find(item=>item.id===projectId);$("#ai-select-records").disabled=!project;scope.textContent=project?`${project.title} · 项目资料及手动选择的记录；同一对话包含历史消息`:"普通对话 · 不读取项目和实验记录";}
-  function fillProjectOptions(){const options=state.projects.map(item=>`<option value="${item.id}">${escapeHtml(item.title)}</option>`).join("");for(const select of [$("#create-record-form select[name=project_id]"),$("#note-project"),$("#task-project"),$("#file-project"),$("#weekly-upload-project"),$("#ppt-project")]){if(!select)continue;const current=select.value;const first=select.id==="ppt-project"?"全部项目":select.closest("#create-record-form")?"请先创建项目":"不关联项目";select.innerHTML=`<option value="">${first}</option>${options}`;select.value=current;}for(const filter of [$("#record-project-filter"),$("#export-project-filter"),$("#task-project-filter"),$("#weekly-project-filter")]){if(!filter)continue;const current=filter.value;filter.innerHTML=`<option value="">全部项目</option>${options}`;filter.value=current;}const aiProject=$("#ai-project");if(aiProject){const current=aiProject.value;aiProject.innerHTML=`<option value="">普通对话</option>${options}`;aiProject.value=current;setAssistantContext();}}
+  function fillProjectOptions(){const options=state.projects.map(item=>`<option value="${item.id}">${escapeHtml(item.title)}</option>`).join("");for(const select of [$("#create-record-form select[name=project_id]"),$("#note-project"),$("#task-project"),$("#file-project"),$("#weekly-upload-project"),$("#ppt-project")]){if(!select)continue;const current=select.value;const first=select.id==="ppt-project"?"全部项目":select.closest("#create-record-form")?(options?"请选择所属项目":"请先创建项目"):"不关联项目";select.innerHTML=`<option value="">${first}</option>${options}`;select.value=current;}for(const filter of [$("#record-project-filter"),$("#export-project-filter"),$("#task-project-filter"),$("#weekly-project-filter")]){if(!filter)continue;const current=filter.value;filter.innerHTML=`<option value="">全部项目</option>${options}`;filter.value=current;}const aiProject=$("#ai-project");if(aiProject){const current=aiProject.value;aiProject.innerHTML=`<option value="">普通对话</option>${options}`;aiProject.value=current;setAssistantContext();}}
 
   function paginate(items,page=1,pageSize=20){if(items.serverPagination){const value=items.serverPagination;return {items,total:value.total,pages:value.pages,page:value.page,pageSize:value.page_size};}const total=items.length,pages=Math.max(1,Math.ceil(total/pageSize)),safePage=Math.min(Math.max(1,page),pages),start=(safePage-1)*pageSize;return {items:items.slice(start,start+pageSize),total,pages,page:safePage,pageSize};}
   function paginationTokens(page,pages){
@@ -228,7 +237,7 @@
     const previous={view:state.view,params:{...state.params},panel:$(".view.active"),historyIndex:state.historyIndex};
     const switchingRecord=state.view==="record-edit"&&(view!=="record-edit"||Number(params?.id)!==Number(state.currentRecord?.id));
     if(state.dirty&&switchingRecord){if(!await modules.get("record-edit")?.save?.())return false;clearTimeout(state.saveTimer);}
-    const panelView=view;
+    const panelView = view === "protocols" ? "notes" : view;
     const panel=$(`[data-view-panel="${panelView}"]`);if(!panel){toast("页面不存在");return;}
     $$(".view").forEach(item=>item.classList.remove("active"));panel.classList.add("active");
     const parent=navParent[view]||view;$$(`.nav-item`).forEach(item=>item.classList.toggle("active",item.dataset.view===parent));

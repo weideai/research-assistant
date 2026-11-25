@@ -13,6 +13,7 @@ MAX_COMPATIBLE_PROTOCOL = 1
 CAPABILITIES = (
     "ai.changesets",
     "api.presets",
+    "protocol.text_import",
     "records.batch_export",
     "workspace.directory",
     "zotero.jobs",

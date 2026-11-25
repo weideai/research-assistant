@@ -34,6 +34,10 @@ from .errors import ConflictError, NotFoundError, ValidationError
 LITERATURE_SOURCES = {"manual", "zotero", "import"}
 READ_STATUSES = {"unread", "reading", "read"}
 NOTE_KINDS = {"idea", "experiment_guide", "literature", "meeting", "supervisor_feedback", "general"}
+RECORD_PLAN_FIELDS = (
+    "objective", "background", "hypothesis", "design", "materials_conditions", "expected_result", "next_steps",
+)
+RECORD_PLAN_FIELD_LIMIT = 6000
 TASK_STATUSES = {"todo", "doing", "blocked", "done", "cancelled"}
 TASK_PRIORITIES = {"low", "medium", "high"}
 FILE_KINDS = {"raw_data", "image", "spreadsheet", "protocol", "report", "literature", "other"}
@@ -128,21 +132,27 @@ AI_TARGET_INSTRUCTIONS = {
 
 
 def build_desktop_ai_system_prompt(target_type, field_schema, *, today, timezone):
-    """Build the strict, record-centric prompt shared by every desktop AI provider."""
+    """Build the prompt shared by every desktop AI provider."""
     if target_type not in AI_TARGET_INSTRUCTIONS:
         raise ValidationError("AI 目标类型无效。")
     allowed = sorted(AI_TARGET_FIELDS.get(target_type, ()))
     return "\n".join((
         "你是 R/LAB 桌面研究助手，可以回答问题、准备新建草稿或提出当前对象的字段建议。",
-        "只输出合法 JSON，不要输出 Markdown 或代码围栏。固定格式："
+        "只输出一个合法 JSON 对象，字符串之外使用半角标点。固定格式："
         '{"reply":"简短说明","proposal":{"字段":"新值"}}。',
-        "普通问答使用空 proposal。用户明确要新建项目或实验记录且给出了标题时，"
-        '只返回 proposal.create_draft，字段 kind 必须是 project 或 lab_record，title 是用户给出的标题。'
-        "项目草稿可附 objective，实验记录草稿可附用户明确给出的 experiment_date（YYYY-MM-DD）。"
+        "普通问答使用空 proposal。用户要新建项目或实验记录时，直接在 proposal.create_draft 提供可编辑草稿。"
+        "kind 使用 project 或 lab_record，title 可按用户给的主题、简称或材料拟定，也可给出暂定标题。"
+        "缺少可选项就留空，无需反复追问或提醒。",
+        "项目草稿可附 objective。实验记录草稿可附用户提到的 project_title、明确给出的 experiment_date（YYYY-MM-DD）"
+        f"以及 plan 对象。plan 可使用这些文本字段：{', '.join(RECORD_PLAN_FIELDS)}。"
+        "把用户提供的材料直接整理到 plan，拟定步骤和检查点可写入 design。"
+        "用户需要实验设计或功能测试时，可补充明确标为计划或模拟的内容。"
+        "用户要求补写已有创建草稿时，结合对话中的草稿返回合并后的完整 create_draft。"
+        "使用 project_title 传递用户明确指定的项目名，界面会匹配本地项目。无需判断项目是否存在或解释编号。"
         "新建草稿由用户核对后在表单中确认，不能声称已创建，不能把新建请求转成修改现有对象。",
         "proposal 只包含确实需要修改且有依据的字段；不要输出空占位，不要重复未变化字段。"
         "除非用户明确要求清空，否则不要用空字符串覆盖已有内容。",
-        "不得编造用户未提供的测量数据、日期、人员、编号或完成状态。"
+        "实际测量、执行日期、人员、编号及完成状态以已有事实为准。",
         "用户请求与当前数据冲突时，在 reply 中简要说明，并省略没有可靠依据的字段。",
         "所有字段值必须符合字段 Schema；枚举值必须原样使用，日期和时间必须使用 Schema 指定格式。"
         "project_id 与 lab_record_id 只能使用上下文中已经出现的有效编号。",
@@ -2644,6 +2654,32 @@ class DesktopModuleServiceMixin:
         return self._run(save)
 
     @staticmethod
+    def read_protocol_text(path):
+        source = Path(path)
+        if source.suffix.lower() not in {".md", ".markdown", ".txt"} or not source.is_file():
+            raise ValidationError("请选择 Markdown 或 TXT 文本文件。")
+        try:
+            with source.open("rb") as stream:
+                content = stream.read(200001)
+        except OSError as exc:
+            raise ValidationError("无法读取所选文件。") from exc
+        if len(content) > 200000:
+            raise ValidationError("文件太长，请拆分后再导入。")
+        try:
+            try:
+                body = content.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                body = content.decode("gb18030")
+        except UnicodeDecodeError as exc:
+            raise ValidationError("无法识别文件编码，请另存为 UTF-8 后再导入。") from exc
+        body = body.replace("\r\n", "\n").replace("\r", "\n").strip()
+        if not body or "\0" in body:
+            raise ValidationError("请选择包含正文的纯文本文件。")
+        if len(body) > 50000:
+            raise ValidationError("文件太长，请拆分后再导入。")
+        return {"title": source.stem[:240], "body": body}
+
+    @staticmethod
     def _task_dto(item):
         status = {"待办": "todo", "进行中": "doing", "已完成": "done"}.get(item.status, item.status)
         priority = {"低": "low", "中": "medium", "高": "high"}.get(item.priority, item.priority)
@@ -3815,6 +3851,18 @@ class DesktopModuleServiceMixin:
                 draft["objective"] = objective.strip()[:12000]
         else:
             draft["project_id"] = project_id
+            project_title = value.get("project_title")
+            if isinstance(project_title, str) and project_title.strip():
+                draft["project_title"] = project_title.strip()[:180]
+            fields = value.get("plan")
+            if isinstance(fields, dict):
+                plan = {
+                    field: fields[field].strip()[:RECORD_PLAN_FIELD_LIMIT]
+                    for field in RECORD_PLAN_FIELDS
+                    if isinstance(fields.get(field), str) and fields[field].strip()
+                }
+                if plan:
+                    draft["plan"] = plan
             try:
                 experiment_date = _date(value.get("experiment_date"), "experiment_date")
             except ValidationError:
@@ -3850,12 +3898,21 @@ class DesktopModuleServiceMixin:
                     AIMessage.role.in_(["user", "assistant"]),
                 ).order_by(AIMessage.id.desc()).limit(20).all()
                 remaining = 24000
+                included_draft = False
                 for message in previous:
-                    content = (message.content or "")[-min(6000, remaining):]
-                    if not content or remaining <= 0:
+                    if remaining <= 0:
                         break
-                    history.append({"role": message.role, "content": content})
+                    content = (message.content or "")[-min(6000, remaining):]
+                    if not content:
+                        continue
                     remaining -= len(content)
+                    if message.role == "assistant" and not included_draft:
+                        saved = _load_json(message.proposal_json, {})
+                        draft = saved.get("create_draft")
+                        if isinstance(draft, dict):
+                            content = _json({"reply": content, "proposal": {"create_draft": draft}})
+                            included_draft = True
+                    history.append({"role": message.role, "content": content})
                 history.reverse()
             preset = self._active_api_preset(workspace.legacy_user_id)
             if not preset or not preset.is_enabled or not preset.encrypted_api_key:

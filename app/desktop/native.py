@@ -74,6 +74,7 @@ class NativeCapabilities:
                 "全部文件 (*.*)",
             ),
             "data": ("数据文件 (*.csv;*.tsv;*.xlsx;*.json)", "全部文件 (*.*)"),
+            "protocol_text": ("文本方案 (*.md;*.markdown;*.txt)",),
             "images": ("图像 (*.png;*.jpg;*.jpeg;*.tif;*.tiff)", "全部文件 (*.*)"),
             "any": ("全部文件 (*.*)",),
         }

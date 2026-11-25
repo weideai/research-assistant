@@ -811,3 +811,16 @@ body { font-size: 14px; font-variant-numeric: tabular-nums; }
   border: 1px solid var(--line);
   border-radius: 6px;
 }
+
+#note-kind-filters[hidden], #note-editor-kind[hidden],
+#import-protocol-text[hidden], #record-add-project[hidden] { display: none; }
+.protocol-layout { grid-template-columns: minmax(220px, .8fr) minmax(0, 1.2fr); }
+.protocol-layout > .note-editor { grid-column: auto; }
+#record-draft-plan { border: 1px solid var(--line); border-radius: 6px; padding: 10px; }
+#record-draft-plan summary { cursor: pointer; font-weight: 700; }
+#record-draft-plan fieldset { display: grid; gap: 10px; margin: 10px 0 0; padding: 0; border: 0; min-width: 0; }
+#record-draft-plan textarea { width: 100%; resize: vertical; }
+
+@media (max-width: 740px) {
+  .protocol-layout { grid-template-columns: minmax(0, 1fr); }
+}
